@@ -1,0 +1,22 @@
+# Colour looks for the pixel fox. See art/pet/SPEC.md, "Looks and hats".
+# "@look name", then "KEY #RRGGBB" lines. Keys not listed keep palette.txt.
+# The base palette is the look "fox". Only fox keys are recoloured here
+# (fur o O y; cream w W only where the look needs it); props keep their colours.
+
+@look arctic
+o #EBF1F7  fur: icy near-white, as far above the grey props (g) as white allows
+O #95A9C4  fur shade: cool blue-grey
+y #FFFFFF  fur highlight: pure white, the only step left above this fur
+w #F7DDB8  cream: warm biscuit so muzzle, chest and tail tip read against the icy fur
+W #CCAE86  cream shade: one clear step below the new cream, as in the fox
+
+@look silver
+o #9DA8B7  fur: cool silver grey, balanced between the prop greys G and g
+O #56627A  fur shade: slate
+y #B5BFCC  fur highlight: soft light grey, a sheen, not a blaze
+
+@look sand
+o #E6BF7E  fur: pale golden sand
+O #B8864E  fur shade: warm tan
+y #F5DFAE  fur highlight
+

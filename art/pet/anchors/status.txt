@@ -1,0 +1,12 @@
+timer_1 7 3
+timer_2 7 3
+timer_alert 7 3
+timer_done 7 2
+download_1 none
+download_2 none
+download_done 7 3
+charge_1 7 3
+charge_2 7 3
+low_battery_1 7 3
+low_battery_2 7 3
+full_charge 7 3

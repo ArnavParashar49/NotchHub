@@ -1,0 +1,9 @@
+notify 7 3
+headphones_on 7 2
+headphones_off 7 3
+mic_on 7 3
+camera_on 7 3
+record_point 7 3
+celebrate_1 7 3
+celebrate_2 7 2
+celebrate_3 7 2

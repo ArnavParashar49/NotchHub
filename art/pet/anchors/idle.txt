@@ -1,0 +1,10 @@
+sit_tail_1 7 3
+sit_tail_2 7 3
+yawn_1 7 3
+yawn_2 7 3
+stretch_1 7 5
+stretch_2 7 7
+sleep_1 7 7
+sleep_2 7 8
+sleep_zzz 7 7
+wake 7 3

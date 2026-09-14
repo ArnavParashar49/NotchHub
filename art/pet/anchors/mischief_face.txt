@@ -1,0 +1,7 @@
+blep_1 7 3
+blep_2 7 3
+snicker_1 7 3
+snicker_2 7 4
+caught 7 3
+pant_1 7 3
+pant_2 7 3

@@ -1,0 +1,596 @@
+import AppKit
+import NotchHubCore
+import SwiftUI
+
+/// The view that receives island interactions and decides what is clickable.
+///
+/// This is where the precise hit testing lives: any point outside the island's
+/// own frame returns `nil` from `hitTest`, so the click falls through to the
+/// window below. The wide transparent envelope around the island therefore
+/// never blocks the menu bar or anything else on screen.
+final class IslandContainerView: NSView {
+
+    /// The island's frame, in this view's superview (window-base) coordinates.
+    var islandFrame: CGRect = .zero {
+        didSet {
+            guard islandFrame != oldValue else { return }
+            updateTrackingArea()
+        }
+    }
+
+    /// Whether the cursor is currently over the island region. Held so hover
+    /// callbacks fire only on real transitions.
+    var isMouseInside = false
+
+    /// Whether the island is currently tucked behind the notch. While idle the
+    /// surface is coincident with the notch cutout, so it is invisible but
+    /// still catches hover (and, on a real notched display, a click) at the
+    /// notch itself.
+    var isIdle = true
+
+    /// Whether this display really has a notch. When it does not, the idle
+    /// region is a synthetic rectangle overlapping the menu bar, so clicks
+    /// there must keep falling through.
+    var hasNotch = true
+
+    /// Whether the current surface holds real controls (the settings panel).
+    /// When it does, clicks are handed to the SwiftUI hosting view so its
+    /// toggles work; otherwise the container consumes them as island clicks.
+    var needsInteraction = false
+
+    /// The notch itself (window coordinates): where the cursor opens the island
+    /// while it is idle.
+    var idleNotchFrame: CGRect = .zero
+
+    /// While idle, the pixel pet's own rectangle (window coordinates). It takes
+    /// hovers and clicks WITHOUT opening the island; the rest of its black dock
+    /// lets the mouse through to whatever is beneath.
+    var idlePetFrame: CGRect?
+
+    var onHoverEnter: (() -> Void)?
+    /// Every cursor move near the island, in window coordinates (the pet uses
+    /// it to notice hovers on itself). Must stay cheap.
+    var onMouseMove: ((NSPoint) -> Void)?
+    var onHoverExit: (() -> Void)?
+    var onClick: (() -> Void)?
+    var onCancel: (() -> Void)?
+    var rightClickMenu: (() -> NSMenu)?
+
+    /// Hit-tests a point (window coordinates) against the on-screen transport
+    /// buttons, returning the command under the cursor or `nil` for a miss.
+    /// The island never takes key focus to make these clickable, so the window
+    /// routes clicks here first.
+    var onTransportHit: ((NSPoint) -> MediaCommand?)?
+    /// Hit-tests a point against other on-screen controls (a call's mute /
+    /// camera / leave), performing the control and returning `true` on a hit.
+    var onControlHit: ((NSPoint) -> Bool)?
+    /// Fired when a transport button is actually pressed.
+    var onMediaCommand: ((MediaCommand) -> Void)?
+
+    /// A file was dragged over the island / dropped onto it / dragged away.
+    var onFileDraggedIn: (() -> Void)?
+    var onFileDraggedOut: (() -> Void)?
+    var onFileDropped: (([URL]) -> Void)?
+
+    private var trackingArea: NSTrackingArea?
+
+    /// Where the cursor opens the island: the notch while idle (not the pet's
+    /// dock), otherwise the island's whole frame — with a little slop so the
+    /// compact pill is easy to catch.
+    private var hoverRegion: CGRect {
+        (isIdle ? idleNotchFrame : islandFrame).insetBy(dx: -8, dy: -8)
+    }
+
+    func isOverIdlePet(_ point: NSPoint) -> Bool {
+        isIdle && (idlePetFrame?.insetBy(dx: -3, dy: -3).contains(point) ?? false)
+    }
+
+    /// Whether the mouse at `point` belongs to the island (hover or click).
+    func catchesMouse(at point: NSPoint) -> Bool {
+        hoverRegion.contains(point) || isOverIdlePet(point)
+    }
+
+    /// Whether the cursor at `point` opens the island. Pointing at the resting
+    /// pet does not — the pet notices it instead.
+    func opensIsland(at point: NSPoint) -> Bool {
+        hoverRegion.contains(point) && !isOverIdlePet(point)
+    }
+
+    /// Only the island catches the mouse; everything else passes through.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let inside = catchesMouse(at: point)
+        if !inside {
+            if !needsInteraction {
+                window?.ignoresMouseEvents = true
+            }
+            return nil
+        }
+        // Tucked behind a real notch the island may still be clicked; on a
+        // display without one the same region is ordinary menu bar, so let the
+        // click through instead of swallowing it.
+        if isIdle && !hasNotch { return nil }
+        // An interactive surface (settings) must reach its controls, so defer to
+        // the normal hit test and let the SwiftUI hosting view handle the click.
+        if needsInteraction { return super.hitTest(point) }
+        return self
+    }
+
+    // MARK: - Hover
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        updateTrackingArea()
+    }
+
+    private func updateTrackingArea() {
+        // One stable tracking area covering the whole window. Island hit
+        // precision is decided against `islandFrame` on each event instead of
+        // by rebuilding the area, because rebuilding it while the cursor is
+        // already inside re-fires `mouseEntered` and double-advances the state.
+        guard trackingArea == nil else { return }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    /// Recomputes hover against the island's live frame and reports only real
+    /// outside→inside / inside→outside transitions.
+    private func refreshHover(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        onMouseMove?(point)
+        let inside = opensIsland(at: point)
+        if !needsInteraction {
+            window?.ignoresMouseEvents = !catchesMouse(at: point)
+        }
+        guard inside != isMouseInside else { return }
+        isMouseInside = inside
+        if inside {
+            onHoverEnter?()
+        } else {
+            onHoverExit?()
+        }
+    }
+
+    /// Called by NotchWindow's global mouse monitor when the mouse moves anywhere
+    /// on screen (even over background apps).
+    func handleGlobalMouseMove(point: NSPoint, inside: Bool) {
+        onMouseMove?(point)
+        guard inside != isMouseInside else { return }
+        isMouseInside = inside
+        if inside {
+            onHoverEnter?()
+        } else {
+            onHoverExit?()
+        }
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        refreshHover(with: event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        refreshHover(with: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        if !needsInteraction {
+            window?.ignoresMouseEvents = true
+        }
+        guard isMouseInside else { return }
+        isMouseInside = false
+        onHoverExit?()
+    }
+
+    // MARK: - Click / right-click
+
+    override func mouseDown(with event: NSEvent) {
+        // A click on a transport button is a button press, not an island tap.
+        // Route it before the generic click so the user can hit play/pause
+        // without the island also cycling its own presentation state.
+        let point = convert(event.locationInWindow, from: nil)
+        if onControlHit?(point) == true {
+            NotchLog.debug("window: control hit at \(point)")
+            return
+        }
+        if let command = onTransportHit?(point) {
+            NotchLog.debug("window: transport hit \(command) at \(point)")
+            onMediaCommand?(command)
+            return
+        }
+        NotchLog.debug("window: island click at \(point)")
+        onClick?()
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        guard let menu = rightClickMenu?() else {
+            onClick?()
+            return
+        }
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
+    /// Esc dismisses an interactive surface (the settings panel), the way it
+    /// closes any other macOS panel. Reaches here because the container takes
+    /// first responder while a panel with controls is showing.
+    override func cancelOperation(_ sender: Any?) {
+        onCancel?()
+    }
+
+    // MARK: - Drag & drop (file sharing)
+
+    /// The container is the island's drop target, so the whole notch region
+    /// accepts a dragged file — not just the pixels of the surface.
+    func registerAsDropTarget() {
+        registerForDraggedTypes([.fileURL])
+        dropLog("registered file drop target")
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let urls = fileURLs(from: sender)
+        dropLog("draggingEntered urls=\(urls.count)")
+        guard !urls.isEmpty else { return [] }
+        onFileDraggedIn?()
+        return .copy
+    }
+
+    /// Verbose-only trace for the drop path, so a failed drag can be told apart
+    /// from a drag that never reached the island.
+    private func dropLog(_ message: String) {
+        guard CommandLine.arguments.contains("--verbose") else { return }
+        NotchLog.debug("drop: \(message)")
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        dropLog("draggingExited")
+        onFileDraggedOut?()
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = fileURLs(from: sender)
+        dropLog("performDragOperation urls=\(urls.count)")
+        guard !urls.isEmpty else { return false }
+        onFileDropped?(urls)
+        return true
+    }
+
+    /// The file URLs carried by a drag, if any.
+    private func fileURLs(from sender: NSDraggingInfo) -> [URL] {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        let items = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: options)
+        return (items as? [URL]) ?? []
+    }
+}
+
+/// The borderless, transparent window that hosts the island.
+///
+/// It sits above the menu bar, has no chrome of its own, and is sized to the
+/// island's current shape. Its content view owns hit testing, so the island is
+/// precisely clickable while the surrounding transparent area is not.
+final class NotchWindow: NSPanel {
+
+    private var geometry: NotchGeometry
+    private let container = IslandContainerView()
+
+    private var localMonitor: Any?
+    private var globalMonitor: Any?
+
+    init(geometry: NotchGeometry) {
+        self.geometry = geometry
+        let frame = geometry.compactFrame
+        super.init(
+            contentRect: frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+
+        // A non-activating panel never takes key/main status on its own, so it
+        // can hover and show the island without stealing focus from the user's
+        // app. It is the correct window type for an always-on-top overlay that
+        // must let clicks pass through to everything beneath it.
+        isFloatingPanel = true
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = false
+        level = .statusBar
+        isMovableByWindowBackground = false
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        ignoresMouseEvents = true
+        // The island is drawn entirely by SwiftUI; AppKit must not paint a titlebar.
+        titleVisibility = .hidden
+        titlebarAppearsTransparent = true
+        isReleasedWhenClosed = false
+
+        contentView = container
+
+        // The island doubles as a drop target for file sharing.
+        container.registerAsDropTarget()
+
+        // Monitor mouse movement to wake up the window when the cursor enters
+        // the island region. We need both a local monitor (for when NotchHub
+        // is active) and a global monitor (for when the user is in Chrome/other
+        // apps).
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
+            self?.handleMouseMove(event.locationInWindow)
+            return event
+        }
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
+            // Global events are in screen coordinates.
+            self?.handleMouseMove(event.locationInWindow, isScreen: true)
+        }
+    }
+
+    deinit {
+        if let monitor = localMonitor { NSEvent.removeMonitor(monitor) }
+        if let monitor = globalMonitor { NSEvent.removeMonitor(monitor) }
+    }
+
+    private var lastMousePoint: NSPoint = .zero
+
+    private func handleMouseMove(_ location: NSPoint, isScreen: Bool = false) {
+        guard !needsInteraction else {
+            ignoresMouseEvents = false
+            return
+        }
+        
+        let point: NSPoint
+        if isScreen {
+            // Convert screen (bottom-left) to window-local (bottom-left).
+            point = NSPoint(x: location.x - frame.minX, y: location.y - frame.minY)
+        } else {
+            point = location
+        }
+
+        // Only process if the mouse actually moved.
+        guard point != lastMousePoint else { return }
+        lastMousePoint = point
+
+        let catches = container.catchesMouse(at: point)
+        let inside = container.opensIsland(at: point)
+        if catches != !ignoresMouseEvents {
+            ignoresMouseEvents = !catches
+            // Only log when the state changes to keep the log clean.
+            log("mouse=\(point.x),\(point.y) inside=\(inside) ignoresMouseEvents=\(ignoresMouseEvents)")
+        }
+
+        // Forward to the container so onHoverEnter / onHoverExit fire even when
+        // the mouse moved while another application was frontmost.
+        container.handleGlobalMouseMove(point: point, inside: inside)
+        // A render that move triggered (the pet caught, a panel opened) may have
+        // reset capture: settle it for where the cursor is.
+        if !needsInteraction {
+            ignoresMouseEvents = !container.catchesMouse(at: point)
+        }
+    }
+
+    private func log(_ message: String) {
+        // We use the same verbose flag as the app.
+        if CommandLine.arguments.contains("--verbose") {
+            NotchLog.debug("\(message)")
+        }
+    }
+
+    override var canBecomeKey: Bool { needsInteraction }
+    override var canBecomeMain: Bool { needsInteraction }
+
+    /// Whether the window may take key/main status to receive control clicks.
+    ///
+    /// The hover/click island must never steal focus from the user's app, so it
+    /// stays non-key by default. But the settings panel holds real controls
+    /// (SwiftUI toggles) that need a key window to accept clicks, so it flips
+    /// this on while an interactive panel is showing.
+    var needsInteraction = false {
+        didSet {
+            guard needsInteraction != oldValue else { return }
+            container.needsInteraction = needsInteraction
+            if needsInteraction {
+                ignoresMouseEvents = false
+                // An accessory (LSUIElement) app's window only becomes key once
+                // the app itself is active, so activate before ordering front.
+                // Lowering the level off the menu-bar strip is required for the
+                // window to receive control clicks.
+                level = .floating
+                NSApp.activate(ignoringOtherApps: true)
+                makeKeyAndOrderFront(nil)
+                // Esc must reach the container's `cancelOperation`.
+                makeFirstResponder(container)
+            } else {
+                ignoresMouseEvents = !container.isMouseInside
+                level = .statusBar
+                if isKeyWindow {
+                    // The island must never hold focus once its controls are
+                    // gone, or the user's typing would keep landing here.
+                    resignKey()
+                }
+            }
+        }
+    }
+
+    // MARK: - Interaction (forwarded to the container view)
+
+    var onHoverEnter: (() -> Void)? {
+        get { container.onHoverEnter }
+        set { container.onHoverEnter = newValue }
+    }
+    var onHoverExit: (() -> Void)? {
+        get { container.onHoverExit }
+        set { container.onHoverExit = newValue }
+    }
+    var onMouseMove: ((NSPoint) -> Void)? {
+        get { container.onMouseMove }
+        set { container.onMouseMove = newValue }
+    }
+    /// See `IslandContainerView.idlePetFrame`.
+    var idlePetFrame: CGRect? {
+        get { container.idlePetFrame }
+        set {
+            guard newValue != container.idlePetFrame else { return }
+            container.idlePetFrame = newValue
+            syncMouseCapture()
+        }
+    }
+    var onClick: (() -> Void)? {
+        get { container.onClick }
+        set { container.onClick = newValue }
+    }
+    var onTransportHit: ((NSPoint) -> MediaCommand?)? {
+        get { container.onTransportHit }
+        set { container.onTransportHit = newValue }
+    }
+    var onControlHit: ((NSPoint) -> Bool)? {
+        get { container.onControlHit }
+        set { container.onControlHit = newValue }
+    }
+    var onMediaCommand: ((MediaCommand) -> Void)? {
+        get { container.onMediaCommand }
+        set { container.onMediaCommand = newValue }
+    }
+    var onCancel: (() -> Void)? {
+        get { container.onCancel }
+        set { container.onCancel = newValue }
+    }
+
+    /// A file was dragged over the island / dragged away / dropped onto it.
+    var onFileDraggedIn: (() -> Void)? {
+        get { container.onFileDraggedIn }
+        set { container.onFileDraggedIn = newValue }
+    }
+    var onFileDraggedOut: (() -> Void)? {
+        get { container.onFileDraggedOut }
+        set { container.onFileDraggedOut = newValue }
+    }
+    var onFileDropped: (([URL]) -> Void)? {
+        get { container.onFileDropped }
+        set { container.onFileDropped = newValue }
+    }
+    var rightClickMenu: (() -> NSMenu)? {
+        get { container.rightClickMenu }
+        set { container.rightClickMenu = newValue }
+    }
+
+    /// Installs the SwiftUI island as a subview filling the container.
+    func installContent(_ view: NSView) {
+        view.frame = container.bounds
+        view.autoresizingMask = [.width, .height]
+        container.addSubview(view)
+    }
+
+    /// The notch's height — the strip of every island shape that the notch
+    /// itself hides from view.
+    var notchHeight: CGFloat { geometry.notchFrame.height }
+
+    /// The notch's width — the gap the wings leave in the middle of the bar.
+    var notchWidth: CGFloat { geometry.notchFrame.width }
+
+    /// Re-reads the display geometry (call on screen-parameter changes).
+    func refreshGeometry() {
+        geometry = NotchGeometry.detectMain()
+    }
+
+    /// Sizes the window once, to the largest surface the island can become,
+    /// then only reports where the island sits inside it.
+    ///
+    /// The window is deliberately never resized per state: AppKit changes a
+    /// window's frame instantly, so resizing on hover would visibly snap the
+    /// island while its SwiftUI content tried to animate. A fixed envelope
+    /// leaves the whole transition to SwiftUI, which is what makes it smooth.
+    /// It costs nothing because `hitTest` already passes clicks through
+    /// anywhere outside the island's own frame.
+    ///
+    /// While idle the island is invisible, but the window still accepts hover
+    /// over the notch region so the island can be summoned by the cursor.
+    func apply(state: IslandState, content: IslandContentSize = .default) {
+        let envelope = geometry.envelopeFrame.insetBy(dx: -Self.shadowMargin, dy: -Self.shadowMargin)
+        if frame != envelope {
+            setFrame(envelope, display: false)
+        }
+        container.islandFrame = localFrame(for: state, content: content)
+        container.idleNotchFrame = localFrame(for: .idle, content: .default)
+        container.isIdle = (state == .idle)
+        container.hasNotch = geometry.hasNotch
+        container.needsInteraction = needsInteraction
+        // The window tracks hover; mouse events pass through to windows beneath
+        // unless the cursor is over the island (or the resting pet) or an
+        // interactive panel is open.
+        syncMouseCapture()
+    }
+
+    /// Re-derives mouse capture from where the cursor is now — after a change of
+    /// shape or pet the cursor did not move for.
+    func syncMouseCapture() {
+        guard !needsInteraction else {
+            ignoresMouseEvents = false
+            return
+        }
+        let screen = NSEvent.mouseLocation
+        let point = NSPoint(x: screen.x - frame.minX, y: screen.y - frame.minY)
+        ignoresMouseEvents = !(container.isMouseInside || container.isOverIdlePet(point))
+    }
+
+    /// A panel opened by clicking the resting pet: the cursor is already on it.
+    /// Adopt that hover without telling anyone (the machine stays idle), so
+    /// leaving the panel — however fast — closes it.
+    func adoptHover() {
+        let screen = NSEvent.mouseLocation
+        let point = NSPoint(x: screen.x - frame.minX, y: screen.y - frame.minY)
+        lastMousePoint = point
+        guard container.opensIsland(at: point) else { return }
+        container.isMouseInside = true
+        if !needsInteraction {
+            ignoresMouseEvents = false
+        }
+    }
+
+    /// The window must be free to sit above the menu bar: the island hangs from
+    /// the very top of the display, and the top of every panel is the notch
+    /// strip. AppKit's default constraint clamps a window to the screen's
+    /// *visible* frame, which silently truncated the island's top (and pushed
+    /// its SwiftUI frame to a negative origin, breaking hit testing).
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
+    }
+
+    /// Uniform margin around the island so its shadow is never clipped.
+    static let shadowMargin: CGFloat = 24
+
+    /// The island's frame in window-local AppKit coordinates (bottom-left
+    /// origin). The container's hit testing lives in this space.
+    func localFrame(for state: IslandState, content: IslandContentSize = .default) -> CGRect {
+        let target = geometry.frame(for: state, content: content)
+        let origin = frame.origin
+        return CGRect(
+            x: target.minX - origin.x,
+            y: target.minY - origin.y,
+            width: target.width,
+            height: target.height
+        )
+    }
+
+    /// The island's frame in the SwiftUI view's coordinate space.
+    ///
+    /// SwiftUI lays out from the TOP-LEFT; AppKit from the BOTTOM-LEFT. While
+    /// the window was a snug box around the island the two agreed by
+    /// coincidence, but now that it is a fixed envelope the difference is
+    /// hundreds of points — without this flip the island renders far down the
+    /// screen instead of hanging from the notch.
+    func swiftUIFrame(for state: IslandState, content: IslandContentSize = .default) -> CGRect {
+        let appKit = localFrame(for: state, content: content)
+        return CGRect(
+            x: appKit.minX,
+            y: frame.height - appKit.maxY,
+            width: appKit.width,
+            height: appKit.height
+        )
+    }
+
+    /// Whether the cursor is over the island right now.
+    var isMouseOverIsland: Bool { container.isMouseInside }
+
+    var cornerRadius: CGFloat { geometry.cornerRadius }
+    var hasNotch: Bool { geometry.hasNotch }
+}

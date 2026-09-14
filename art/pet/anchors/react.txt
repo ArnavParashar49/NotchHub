@@ -1,0 +1,8 @@
+alert 7 2
+curious 7 3
+wave_1 7 3
+wave_2 7 3
+jump_crouch 7 4
+jump_air 7 2
+happy 7 3
+heart 7 3

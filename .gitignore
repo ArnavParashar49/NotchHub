@@ -1,0 +1,14 @@
+# SwiftPM
+.build/
+.swiftpm/
+DerivedData/
+Package.resolved
+
+# Build output (scripts/build_app.sh)
+dist/
+
+# macOS
+.DS_Store
+
+# Claude Code (per-user settings)
+.claude/settings.local.json

@@ -1,0 +1,5 @@
+sit 7 3
+sit_blink 7 3
+sit_look_left 7 3
+sit_look_right 7 3
+sit_breathe 7 4

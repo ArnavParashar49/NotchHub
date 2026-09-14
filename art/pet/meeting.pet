@@ -1,0 +1,140 @@
+# MEETING — in a call. Derived from base.pet `sit`; every frame wears the headset.
+#
+# Headphones: identical to music.pet (music_4) and events.pet headphones_on —
+#   k outline row 2 cols 4-9, g band row 3 cols 5-8; cups rows 4-6 = outer column
+#   (g top, d below) + inner G column over the head edge (cols 1-2 / 11-12), k outside (cols 0 / 13).
+# Boom mic: G arm from under the left cup (7,1) to the chin (8,2)(8,3), d tip at (8,4);
+#   k outline outside the silhouette at (7,0)(8,1)(9,2). Coordinates are (row,col).
+# Mouth open (meet_talk_2): `pp` at row 8 cols 6-7 (same as music_excited).
+# Listen: ear tips 1 row lower (row 0 empty) = ears slightly back; calm 1-px eyes on row 6.
+# Status icons top-right share one r slash (0,12)(1,13)(2,14)(3,15):
+#   meet_muted       light g mic capsule (0,14)(1,14) on a G stem (3,14)(4,14) — tall and thin
+#   meet_camera_off  G 3x2 camera body rows 1-2 cols 13-15 — wide and darker
+# Laptop (meet_type_*): same laptop, arms, paws and bb glow as coding.pet code_type_1 / code_type_3.
+#   Eyes stay forward (not looking down) so the left eye does not stack on the mic tip.
+
+@frame meet_talk_1
+..k........k....
+.kok......kok...
+.kwokkkkkkowk...
+.kwooggggoowk...
+kgGoooyyoooGgk..
+kdGoeooooeoGdk..
+kdGoeooooeoGdk..
+kGwwwwkkwwwwk...
+.kGGdwwwwwwk....
+..kkkwwwwkk..kk.
+...kowwwwok.kwwk
+..koowwwwookkowk
+..kooowwoooooook
+..kooowwooooOOk.
+..kwwkOOkwwkOk..
+...kk....kk.k...
+
+@frame meet_talk_2
+..k........k....
+.kok......kok...
+.kwokkkkkkowk...
+.kwooggggoowk...
+kgGoooyyoooGgk..
+kdGoeooooeoGdk..
+kdGoeooooeoGdk..
+kGwwwwkkwwwwk...
+.kGGdwppwwwk....
+..kkkwwwwkk..kk.
+...kowwwwok.kwwk
+..koowwwwookkowk
+..kooowwoooooook
+..kooowwooooOOk.
+..kwwkOOkwwkOk..
+...kk....kk.k...
+
+@frame meet_listen
+................
+..k........k....
+.kokkkkkkkkok...
+.kwooggggoowk...
+kgGoooyyoooGgk..
+kdGooooooooGdk..
+kdGoeooooeoGdk..
+kGwwwwkkwwwwk...
+.kGGdwwwwwwk....
+..kkkwwwwkk..kk.
+...kowwwwok.kwwk
+..koowwwwookkowk
+..kooowwoooooook
+..kooowwooooOOk.
+..kwwkOOkwwkOk..
+...kk....kk.k...
+
+@frame meet_muted
+..k........kr.g.
+.kok......kokrg.
+.kwokkkkkkowk.r.
+.kwooggggoowk.Gr
+kgGoooyyoooGgkG.
+kdGoeooooeoGdk..
+kdGoeooooeoGdk..
+kGwwwwkkwwwwk...
+.kGGdwwwwwwk....
+..kkkwwwwkk..kk.
+...kowwwwok.kwwk
+..koowwwwookkowk
+..kooowwoooooook
+..kooowwooooOOk.
+..kwwkOOkwwkOk..
+...kk....kk.k...
+
+@frame meet_camera_off
+..k........kr...
+.kok......kokrGG
+.kwokkkkkkowkGrG
+.kwooggggoowk..r
+kgGoooyyoooGgk..
+kdGoeooooeoGdk..
+kdGoeooooeoGdk..
+kGwwwwkkwwwwk...
+.kGGdwwwwwwk....
+..kkkwwwwkk..kk.
+...kowwwwok.kwwk
+..koowwwwookkowk
+..kooowwoooooook
+..kooowwooooOOk.
+..kwwkOOkwwkOk..
+...kk....kk.k...
+
+@frame meet_type_1
+..k........k....
+.kok......kok...
+.kwokkkkkkowk...
+.kwooggggoowk...
+kgGoooyyoooGgk..
+kdGoeooooeoGdk..
+kdGoeooooeoGdk..
+kGwwwwkkwwwwk...
+.kGGdwwwwwwk....
+..kkkwwwwkk..kk.
+...koowwook.kwwk
+..kowwbboookkowk
+..kkkkkkwwkkoook
+..kggggggggkOOk.
+..kGGGGGGGGkOk..
+.kddddddddddk...
+
+@frame meet_type_2
+..k........k....
+.kok......kok...
+.kwokkkkkkowk...
+.kwooggggoowk...
+kgGoooyyoooGgk..
+kdGoeooooeoGdk..
+kdGoeooooeoGdk..
+kGwwwwkkwwwwk...
+.kGGdwwwwwwk....
+..kkkwwwwkk..kk.
+...koowwook.kwwk
+..kooobbwwokkowk
+..kkwwkkkkkkoook
+..kggggggggkOOk.
+..kGGGGGGGGkOk..
+.kddddddddddk...

@@ -1,0 +1,7 @@
+meet_talk_1 7 2
+meet_talk_2 7 2
+meet_listen 7 2
+meet_muted 7 2
+meet_camera_off 7 2
+meet_type_1 7 2
+meet_type_2 7 2

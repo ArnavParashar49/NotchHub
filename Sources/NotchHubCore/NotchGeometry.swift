@@ -1,0 +1,443 @@
+import AppKit
+import CoreGraphics
+
+/// Pure geometry for anchoring the island to the MacBook camera notch.
+///
+/// All math is expressed over plain `CGRect` values so it can be unit-tested
+/// without a live display. `NotchGeometry.detect(on:)` is the only part that
+/// touches `NSScreen`.
+public struct NotchGeometry: Equatable {
+    /// The full display frame this geometry was derived from. Panel surfaces
+    /// (tray, dictation, meeting, skin) are sized against it.
+    public let screenFrame: CGRect
+    /// The physical notch cutout, in screen coordinates.
+    public let notchFrame: CGRect
+    /// A pill just wider than the notch — the resting "compact" island.
+    public let compactFrame: CGRect
+    /// The fully expanded island.
+    public let expandedFrame: CGRect
+    /// The dashboard, revealed on click.
+    public let interactiveFrame: CGRect
+    /// Corner radius matching the notch's own curvature.
+    public let cornerRadius: CGFloat
+    /// Whether this display actually has a notch.
+    public let hasNotch: Bool
+
+    public init(
+        notchFrame: CGRect,
+        compactFrame: CGRect,
+        expandedFrame: CGRect,
+        interactiveFrame: CGRect,
+        cornerRadius: CGFloat,
+        hasNotch: Bool,
+        screenFrame: CGRect = .zero
+    ) {
+        self.notchFrame = notchFrame
+        self.compactFrame = compactFrame
+        self.expandedFrame = expandedFrame
+        self.interactiveFrame = interactiveFrame
+        self.cornerRadius = cornerRadius
+        self.hasNotch = hasNotch
+        self.screenFrame = screenFrame
+    }
+
+    // MARK: - Tuning
+
+    /// How far the compact bar stretches to the LEFT of the notch edge.
+    ///
+    /// The compact bar is exactly notch-height and grows LEFT and RIGHT — it
+    /// never expands downward, so a transient activity (a volume change, a
+    /// battery readout) shows alongside the notch instead of as a pill hanging
+    /// under it. The two sides are deliberately asymmetric: the left holds only
+    /// the activity's glyph, so it stays snug — just the icon and a hair of
+    /// inset — while the right holds the title and value and needs the room.
+    public static let compactLeadOverhang: CGFloat = 40
+    /// How far the compact bar stretches to the RIGHT of the notch edge —
+    /// enough for a full track title beside its artist without truncating.
+    public static let compactTrailOverhang: CGFloat = 116
+    /// How far each wing stretches sideways from the notch edge.
+    ///
+    /// The wings are the sideways hover peek: a notch-height bar that grows
+    /// LEFT and RIGHT of the cutout by the SAME amount, so the island expands
+    /// symmetrically with the notch as its centre — never lopsided. Each side
+    /// is wide enough for an app icon or a short row of status glyphs.
+    public static let wingWidth: CGFloat = 84
+    /// A generous ceiling on how far the content-driven surfaces (the wings and
+    /// the compact bar) may stretch from the notch edge.
+    ///
+    /// The island itself measures its real content and stays snug; this number
+    /// only sizes the WINDOW envelope, so the window is wide enough to hold the
+    /// island at its widest without ever needing to resize mid-animation.
+    public static let maxContentOverhang: CGFloat = 300
+    /// Expanded island width as a fraction of the screen width.
+    public static let expandedWidthFraction: CGFloat = 0.34
+    /// Hard ceiling on expanded width so it never sprawls on ultrawide displays.
+    public static let expandedMaxWidth: CGFloat = 620
+    /// Expanded island height.
+    ///
+    /// Proportioned to comfortably fit the notch (32pt) at the top plus the
+    /// 52pt album artwork, track title/artist, transport cluster, and 4pt progress
+    /// track below it with balanced vertical padding (10pt top, 10pt bottom).
+    public static let expandedHeight: CGFloat = 88
+    /// Height of the click dashboard (the `.interactive` state), notch strip
+    /// included: a greeting and large clock, the next event, and a status bar.
+    public static let interactiveHeight: CGFloat = 196
+    /// Height of an app panel (browser, coding agent), notch strip included.
+    public static let appPanelHeight: CGFloat = 216
+    /// The tallest an app panel may grow (an agent with plan-limit rows).
+    public static let appPanelMaxHeight: CGFloat = 300
+    /// Fallback notch height when the display reports no safe-area inset.
+    public static let fallbackNotchHeight: CGFloat = 32
+    /// Fallback notch width when the display reports no safe-area inset.
+    public static let fallbackNotchWidth: CGFloat = 200
+    /// Dashboard width as a fraction of the screen width.
+    public static let interactiveWidthFraction: CGFloat = 0.30
+    /// Hard ceiling on the dashboard's width.
+    public static let interactiveMaxWidth: CGFloat = 440
+
+    // MARK: - Derivation
+
+    /// Builds the geometry from a screen frame plus the notch's safe-area insets.
+    ///
+    /// - Parameters:
+    ///   - screenFrame: The full display frame (`NSScreen.frame`).
+    ///   - safeAreaInsets: The display's safe-area insets.
+    ///   - auxiliaryLeft: The `auxiliaryTopLeftArea` rect, when the OS provides it.
+    ///   - auxiliaryRight: The `auxiliaryTopRightArea` rect, when the OS provides it.
+    public static func make(
+        screenFrame: CGRect,
+        safeAreaInsets: NSEdgeInsets,
+        auxiliaryLeft: CGRect? = nil,
+        auxiliaryRight: CGRect? = nil
+    ) -> NotchGeometry {
+        let notchHeight = safeAreaInsets.top > 0 ? safeAreaInsets.top : fallbackNotchHeight
+
+        // Preferred path: the OS hands us the two menu-bar regions flanking the
+        // notch, so the notch is simply the gap between them.
+        var notchWidth: CGFloat
+        if let left = auxiliaryLeft, let right = auxiliaryRight {
+            notchWidth = right.minX - left.maxX
+        } else if safeAreaInsets.left > 0 || safeAreaInsets.right > 0 {
+            notchWidth = screenFrame.width - safeAreaInsets.left - safeAreaInsets.right
+        } else {
+            // A notched display reports only a top inset; the notch width is not
+            // derivable without the auxiliary areas, so fall back to a known-good
+            // value rather than claiming the whole screen width.
+            notchWidth = fallbackNotchWidth
+        }
+
+        if notchWidth <= 0 || notchWidth > screenFrame.width {
+            notchWidth = fallbackNotchWidth
+        }
+
+        let hasNotch = safeAreaInsets.top > 0 || (auxiliaryLeft != nil && auxiliaryRight != nil)
+
+        let notch = CGRect(
+            x: screenFrame.midX - notchWidth / 2,
+            y: screenFrame.maxY - notchHeight,
+            width: notchWidth,
+            height: notchHeight
+        )
+
+        // The compact bar is asymmetric: a snug left wing for the glyph and a
+        // wider right wing for the title. Its origin is set so the notch region
+        // inside it still centres on the real notch — otherwise the cutout would
+        // drift and content would land under the physical notch.
+        let compactWidth = notchWidth + compactLeadOverhang + compactTrailOverhang
+        let compact = CGRect(
+            x: screenFrame.midX - compactLeadOverhang - notchWidth / 2,
+            y: screenFrame.maxY - notchHeight,
+            width: compactWidth,
+            height: notchHeight
+        )
+
+        let expandedWidth = min(screenFrame.width * expandedWidthFraction, expandedMaxWidth)
+        let expanded = CGRect(
+            x: screenFrame.midX - expandedWidth / 2,
+            y: screenFrame.maxY - expandedHeight,
+            width: expandedWidth,
+            height: expandedHeight
+        )
+
+        let interactiveWidth = min(screenFrame.width * interactiveWidthFraction, interactiveMaxWidth)
+        let interactive = CGRect(
+            x: screenFrame.midX - interactiveWidth / 2,
+            y: screenFrame.maxY - interactiveHeight,
+            width: interactiveWidth,
+            height: interactiveHeight
+        )
+
+        // Sharp corners, deliberately. The island is meant to read as a
+        // rectangular continuation of the notch cutout — same hard edges, same
+        // black — not as a rounded pill floating below it. Any radius here
+        // shows up as a visible curve against the notch's straight sides.
+        let radius: CGFloat = 0
+
+        return NotchGeometry(
+            notchFrame: notch,
+            compactFrame: compact,
+            expandedFrame: expanded,
+            interactiveFrame: interactive,
+            cornerRadius: radius,
+            hasNotch: hasNotch,
+            screenFrame: screenFrame
+        )
+    }
+
+    /// Detects the notch on a live screen.
+    public static func detect(on screen: NSScreen) -> NotchGeometry {
+        let auxiliaryLeft = screen.auxiliaryTopLeftArea
+        let auxiliaryRight = screen.auxiliaryTopRightArea
+        return make(
+            screenFrame: screen.frame,
+            safeAreaInsets: screen.safeAreaInsets,
+            auxiliaryLeft: auxiliaryLeft,
+            auxiliaryRight: auxiliaryRight
+        )
+    }
+
+    /// Detects the notch on the main display, falling back to a synthetic
+    /// geometry when no screen is available (headless / self-test runs).
+    public static func detectMain() -> NotchGeometry {
+        if let screen = NSScreen.main {
+            return detect(on: screen)
+        }
+        return make(
+            screenFrame: CGRect(x: 0, y: 0, width: 1728, height: 1117),
+            safeAreaInsets: NSEdgeInsets(top: 38, left: 0, bottom: 0, right: 0)
+        )
+    }
+
+    /// The frame the island should occupy for a given presentation state.
+    public func frame(for state: IslandState) -> CGRect {
+        frame(for: state, content: .default)
+    }
+
+    /// The frame the island should occupy, sized to the actual content.
+    ///
+    /// The wings and the compact bar are CONTENT-DRIVEN: their width grows to
+    /// fit however many icons and how much text are showing, and collapses back
+    /// when there is less. The expanded and panel states keep their fixed
+    /// display-sized frames.
+    public func frame(for state: IslandState, content: IslandContentSize) -> CGRect {
+        switch state {
+        case .idle:
+            // The pet's dock beside the notch (see `PetDock`); without one — or
+            // while the pet hides in the notch — idle is exactly the notch.
+            guard let dock = content.petDock, dock.reach > 0 else { return notchFrame }
+            return compactBar(lead: dock.lead, trail: dock.trail)
+        case .wings: return wingsBar(sideWidth: content.wingSide)
+        case .compact: return compactBar(lead: content.compactLead, trail: content.compactTrail)
+        case .expanded: return expandedFrame
+        case .interactive: return interactiveFrame
+        case .appPanel: return appPanelFrame(height: content.panelHeight)
+        case .tray: return trayFrame
+        case .dictation: return dictationFrame
+        case .meeting: return meetingFrame
+        case .skin: return petPanelFrame(anchor: content.panelAnchor)
+        case .settings: return settingsFrame
+        case .fileDrop: return fileDropFrame
+        }
+    }
+
+    /// The sideways hover peek: a bar exactly as tall as the notch that
+    /// stretches left and right of it.
+    ///
+    /// This is the shape the island takes when the cursor arrives at a resting
+    /// notch — it grows *sideways*, hugging the screen's top edge, so it never
+    /// covers the content below the notch. The left wing carries the frontmost
+    /// app's identity; the right wing carries live status.
+    public var wingsFrame: CGRect {
+        wingsBar(sideWidth: Self.wingWidth)
+    }
+
+    /// The wings, sized to a specific per-side width. Both sides share the
+    /// width so the bar stays centred on the notch — the island grows evenly.
+    ///
+    /// The width is clamped to `maxContentOverhang`: beyond that the island
+    /// would outgrow the window envelope, and a clip at the screen edge is
+    /// worse than a little truncation in the content.
+    public func wingsBar(sideWidth: CGFloat) -> CGRect {
+        let side = min(max(0, sideWidth), Self.maxContentOverhang)
+        let width = notchFrame.width + side * 2
+        return CGRect(
+            x: screenFrame.midX - width / 2,
+            y: screenFrame.maxY - notchFrame.height,
+            width: width,
+            height: notchFrame.height
+        )
+    }
+
+    /// The compact bar sized to a specific lead/trail width.
+    ///
+    /// The compact bar is asymmetric — a snug left wing for the glyph and a
+    /// wider right wing for the title — so its origin is set from the LEAD
+    /// width, keeping the notch region inside it centred on the real notch.
+    /// Without that, the cutout drifts and content lands under the physical
+    /// notch.
+    public func compactBar(lead: CGFloat, trail: CGFloat) -> CGRect {
+        let l = min(max(0, lead), Self.maxContentOverhang)
+        let t = min(max(0, trail), Self.maxContentOverhang)
+        let width = notchFrame.width + l + t
+        return CGRect(
+            x: screenFrame.midX - l - notchFrame.width / 2,
+            y: screenFrame.maxY - notchFrame.height,
+            width: width,
+            height: notchFrame.height
+        )
+    }
+
+    // MARK: - Panel frames
+    //
+    // These hang from the notch, centred, and are sized against the display.
+    // They never exceed the screen, so a small display still gets a sane panel.
+
+    /// The screen's usable width, falling back to the derived notch geometry
+    /// when a caller built this struct without a screen frame (tests).
+    private var screenWidth: CGFloat {
+        screenFrame.width > 0 ? screenFrame.width : compactFrame.width + 1200
+    }
+
+    /// The screen's height, with the same fallback.
+    private var screenHeight: CGFloat {
+        screenFrame.height > 0 ? screenFrame.height : notchFrame.maxY
+    }
+
+    /// A panel of `width` × `height`, centred and hung from the top of the
+    /// screen so it grows out of the notch.
+    private func panel(width: CGFloat, height: CGFloat) -> CGRect {
+        let w = min(width, screenWidth)
+        return CGRect(
+            x: screenWidth / 2 - w / 2,
+            y: screenHeight - height,
+            width: w,
+            height: height
+        )
+    }
+
+    /// The clipboard Tray: a wide, tall browser. NotchBay's signature surface.
+    public var trayFrame: CGRect {
+        panel(width: min(screenWidth * 0.44, 700), height: 420)
+    }
+
+    /// The dictation overlay: a compact strip with a waveform.
+    public var dictationFrame: CGRect {
+        panel(width: min(screenWidth * 0.26, 420), height: 110)
+    }
+
+    /// A live call's control panel.
+    public var meetingFrame: CGRect {
+        panel(width: min(screenWidth * 0.36, 560), height: 132)
+    }
+
+    /// The frontmost app's own panel: as wide as the dashboard, a little taller.
+    public var appPanelFrame: CGRect { appPanelFrame(height: nil) }
+
+    /// An app panel of a content-driven height, clamped to the standard and
+    /// maximum heights.
+    public func appPanelFrame(height: CGFloat?) -> CGRect {
+        let h = min(max(height ?? Self.appPanelHeight, Self.appPanelHeight), Self.appPanelMaxHeight)
+        return panel(width: min(screenWidth * Self.interactiveWidthFraction, Self.interactiveMaxWidth), height: h)
+    }
+
+    /// The frontmost-app skin: a compact identity strip.
+    public var skinFrame: CGRect {
+        panel(width: max(360, PetPanelLayout.panelWidth), height: 96)
+    }
+
+    /// The pet's panel, hung under the pet: its outer edge where the island's
+    /// edge beside the pet was when the pet was clicked (so the cursor starts
+    /// inside it), reaching across at least the whole notch so it stays one
+    /// shape with it.
+    public func petPanelFrame(anchor: PetPanelAnchor?) -> CGRect {
+        guard let anchor else { return skinFrame }
+        switch anchor.side {
+        case .right:
+            let maxX = max(anchor.edge, notchFrame.maxX)
+            var minX = min(maxX - skinFrame.width, notchFrame.minX)
+            // Content laid out from the right would put the big pet under the
+            // notch: reach far enough left for it to sit beside the notch instead.
+            let petMinX = maxX - PetPanelLayout.horizontalInset - PetPanelLayout.contentWidth
+            if petMinX + PetPanelLayout.petSize > notchFrame.minX {
+                minX = min(minX, notchFrame.minX - PetPanelLayout.petSize - PetPanelLayout.horizontalInset)
+            }
+            return CGRect(x: minX, y: skinFrame.minY, width: maxX - minX, height: skinFrame.height)
+        case .left:
+            // The big pet sits at the panel's left: keep it clear of the notch.
+            let minX = min(anchor.edge, notchFrame.minX - PetPanelLayout.horizontalInset - PetPanelLayout.petSize)
+            let maxX = max(minX + skinFrame.width, notchFrame.maxX)
+            return CGRect(x: minX, y: skinFrame.minY, width: maxX - minX, height: skinFrame.height)
+        }
+    }
+
+    /// The settings panel: a header, three groups of feature tiles, the
+    /// weather card and a footer — tall enough to show them all without
+    /// scrolling on a laptop display (it still scrolls on a short screen).
+    public var settingsFrame: CGRect {
+        panel(width: min(screenWidth * 0.32, 460), height: min(740, screenHeight - 40))
+    }
+
+    /// The file-sharing drop surface: wide enough to be an easy drop target,
+    /// tall enough for the badge, file name and the destination row beneath the
+    /// notch inset (32pt notch + 44 badge + 16 + 20 text + 16 + 52 buttons).
+    public var fileDropFrame: CGRect {
+        panel(width: min(screenWidth * 0.30, 460), height: 210)
+    }
+
+    /// The union of every surface the island can become.
+    ///
+    /// The window is sized to this once and then never resized. AppKit resizes
+    /// a window instantly, with no animation, so a frame that changed on every
+    /// hover would make the island jump even while its content animated —
+    /// exactly the abrupt feel a fixed envelope removes. Clicks pass through
+    /// everywhere outside the island itself, so the extra area costs nothing.
+    public var envelopeFrame: CGRect {
+        let frames = [
+            notchFrame,
+            // The content-driven surfaces are sized to the generous ceiling, so
+            // the window is wide enough for the island at its widest without
+            // ever resizing mid-animation. The island itself stays snug.
+            wingsBar(sideWidth: Self.maxContentOverhang),
+            compactBar(lead: Self.maxContentOverhang, trail: Self.maxContentOverhang),
+            expandedFrame,
+            interactiveFrame,
+            appPanelFrame(height: Self.appPanelMaxHeight),
+            trayFrame,
+            dictationFrame,
+            meetingFrame,
+            skinFrame,
+            settingsFrame,
+            fileDropFrame,
+        ]
+        guard let first = frames.first else { return notchFrame }
+        return frames.dropFirst().reduce(first) { $0.union($1) }
+    }
+}
+
+/// The resting shapes of the island.
+public enum IslandState: String, CaseIterable, Equatable {
+    /// Invisible — the island is exactly the notch.
+    case idle
+    /// The sideways hover peek: a notch-height bar stretching left and right.
+    case wings
+    /// A small pill hugging the notch.
+    case compact
+    /// The full information surface.
+    case expanded
+    /// The dashboard a click opens.
+    case interactive
+    /// The frontmost app's own panel (a browser, a coding agent).
+    case appPanel
+    /// The clipboard Tray browser.
+    case tray
+    /// The dictation overlay.
+    case dictation
+    /// A live call's control panel.
+    case meeting
+    /// The frontmost-app skin.
+    case skin
+    /// The settings panel.
+    case settings
+    /// The file-sharing drop surface.
+    case fileDrop
+}

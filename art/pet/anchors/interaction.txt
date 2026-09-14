@@ -1,0 +1,7 @@
+hi_wave 7 3
+pet_1 7 3
+pet_2 7 3
+eat_1 7 5
+eat_2 7 6
+play_1 7 3
+play_2 7 3

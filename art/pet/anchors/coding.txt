@@ -1,0 +1,10 @@
+code_type_1 7 3
+code_type_2 7 3
+code_type_3 7 3
+code_think_1 7 3
+code_think_2 7 3
+code_search_1 7 3
+code_search_2 7 3
+code_run 7 3
+code_alert 7 2
+code_done 7 3

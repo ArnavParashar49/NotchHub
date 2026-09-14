@@ -1,0 +1,20 @@
+# Pixel pet palette — one key per line: KEY #RRGGBB role
+# '.' is always transparent. Keep the palette small: every frame shares it.
+k #2A1810  outline / darkest brown (reads as the silhouette edge on black)
+o #E97A2E  fur orange
+O #B9541D  fur orange shade
+y #F7A657  fur orange highlight
+w #FFF3E2  cream (muzzle, chest, paws, tail tip)
+W #D9C4A5  cream shade
+e #17100D  eyes
+z #FFFFFF  white (eye glint, zzz, sparkles)
+p #F09AA5  pink (nose, tongue, blush)
+g #C8CDD4  light gray (headphones, laptop, metal)
+G #7A818C  mid gray
+d #3B4048  dark gray
+b #5AB0FF  blue (screen glow, sweat drop)
+r #FF4F4F  red (heart, alert, record, mute slash)
+Y #FFD340  yellow (lightning bolt, stars, confetti)
+t #43D68B  green (terminal text, confetti)
+n #A8733F  brown (package, bowl)
+N #74502E  brown shade
