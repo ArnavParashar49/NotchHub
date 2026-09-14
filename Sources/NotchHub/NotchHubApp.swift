@@ -5,7 +5,8 @@ import SwiftUI
 
 /// The NotchHub application object.
 ///
-/// Owns the notch window, the activity queue, and the menu-bar status item.
+/// Owns the notch window and the activity queue. There is no menu-bar item:
+/// settings (with Quit) open from the hotkey, a panel's "···" or a right-click.
 /// The island is a single window whose SwiftUI content morphs between shapes;
 /// this object is the coordinator between the queue and the view.
 ///
@@ -26,7 +27,6 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
 
     var window: NotchWindow!
     var hostingView: NSHostingView<IslandRootView>!
-    var statusItem: StatusItemController!
     let queue = ActivityQueue()
 
     /// The island's observable state. The hosted view is created once around
@@ -187,16 +187,6 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         window.orderFrontRegardless()
 
         registerHotKeys()
-
-        statusItem = StatusItemController(
-            onShow: { [weak self] in self?.showIsland() },
-            onDemo: { [weak self] kind in self?.runDemo(kind) },
-            onToggleIdle: { [weak self] in self?.returnToIdle() },
-            onTray: { [weak self] in self?.toggleTray() },
-            onDictate: { [weak self] in self?.toggleDictation() },
-            onSettings: { [weak self] in self?.toggleSettings() },
-            onTimer: { [weak self] in self?.toggleTimer() }
-        )
 
         startTicker()
         startLaunchMode()
@@ -517,8 +507,10 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             size.panelHeight = appPanelHeight()
             return size
         case .wings:
-            let side = IslandMetrics.wings(status, petSlot: petBarReserve)
-            return IslandContentSize(compactLead: 0, compactTrail: 0, wingSide: side)
+            let sides = IslandMetrics.wings(status, petSlot: petBarReserve)
+            var size = IslandContentSize(compactLead: 0, compactTrail: 0, wingSide: sides.trail)
+            size.wingLead = sides.lead
+            return size
         case .compact:
             guard let current = machine.activity else { return .default }
             return IslandMetrics.compact(current, petSlot: petBarReserve)

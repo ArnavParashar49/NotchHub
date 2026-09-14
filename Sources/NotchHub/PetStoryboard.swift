@@ -377,6 +377,104 @@ enum PetStoryboard {
         return 0
     }
 
+    /// `--app-snapshots DIR`: a browser's hover strip and click panel, drawn by
+    /// the real island with their hit targets outlined in green.
+    static func appSnapshots(directory: String) -> Int32 {
+        let geometry = NotchGeometry.detectMain()
+        let notch = geometry.notchFrame
+        let regionMinX = notch.minX - 300
+        let regionWidth = notch.width + 600
+        let regionTop = notch.maxY
+        let scale: CGFloat = 3
+        let appName = "Google Chrome"
+        let icon = NSWorkspace.shared.icon(forFile: "/Applications/Google Chrome.app").tiffRepresentation
+        let tabs = [
+            BrowserTab(index: 3, title: "Pull requests · ArnavParashar49/NotchHub", host: "github.com"),
+            BrowserTab(index: 4, title: "Swift Testing | Apple Developer Documentation", host: "developer.apple.com"),
+            BrowserTab(index: 5, title: "YouTube", host: "youtube.com"),
+        ]
+        let browser = BrowserContext(title: tabs[1].title, host: tabs[1].host, tabs: tabs, activeIndex: 4)
+        let status = WingStatus(left: WingItem(symbol: "app.fill", iconData: icon),
+                                strip: AppStrip(label: AppStripLabel.shortAppName(appName), trailing: .browserControls))
+        let pet = PetRenderModel(presentation: PetPresentation(mood: .idle, animation: .sit, startedAt: Date()), look: .fox, hat: nil)
+
+        var wingsContent = IslandContentSize.default
+        let sides = IslandMetrics.wings(status, petSlot: PetLayout.barSlot)
+        wingsContent.wingSide = sides.trail
+        wingsContent.wingLead = sides.lead
+        let wingsFrame = geometry.frame(for: .wings, content: wingsContent)
+        // A plain app: its icon on the left, status glyphs on the right.
+        let plainStatus = WingStatus(left: WingItem(symbol: "app.fill", iconData: icon),
+                                     right: [WingItem(symbol: "wifi"), WingItem(symbol: "sun.max.fill")])
+        var plainContent = IslandContentSize.default
+        let plainSides = IslandMetrics.wings(plainStatus, petSlot: PetLayout.barSlot)
+        plainContent.wingSide = plainSides.trail
+        plainContent.wingLead = plainSides.lead
+        let plainFrame = geometry.frame(for: .wings, content: plainContent)
+        let panelFrame = geometry.frame(for: .appPanel, content: .default)
+        let rows: [(state: IslandState, frame: CGRect, content: IslandContentSize, height: CGFloat, status: WingStatus)] = [
+            (.wings, plainFrame, plainContent, 60, plainStatus),
+            (.wings, wingsFrame, wingsContent, 60, status),
+            (.appPanel, panelFrame, .default, panelFrame.height + 20, status),
+        ]
+        let rowHeights = rows.map { Int($0.height * scale) + 6 }
+        let width = Int(regionWidth * scale)
+        let total = rowHeights.reduce(0, +)
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: width, height: total, bitsPerComponent: 8,
+                                      bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return 1 }
+        context.setFillColor(CGColor(srgbRed: 0.1, green: 0.1, blue: 0.11, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: total))
+
+        var rowTop = total
+        for row in rows {
+            let local = CGRect(x: row.frame.minX - regionMinX, y: regionTop - row.frame.maxY, width: row.frame.width, height: row.frame.height)
+            let panel: AnyView? = row.state == .appPanel
+                ? AnyView(BrowserPanelView(notchInset: notch.height, appName: appName, iconData: icon, browser: browser))
+                : nil
+            let view = IslandView(
+                current: nil, stackCount: 0, state: row.state, localFrame: local, cornerRadius: 10,
+                notchInset: notch.height, isIdle: false, wingStatus: row.status, notchWidth: notch.width, contentSize: row.content,
+                panelContent: panel, surfaceVisible: true, pet: pet, hasNotch: true
+            )
+            .frame(width: regionWidth, height: row.height)
+            .background(Color(.sRGB, red: 0.42, green: 0.42, blue: 0.45))
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = scale
+            guard let image = renderer.cgImage else { return 1 }
+            let rowBottom = CGFloat(rowTop) - CGFloat(image.height)
+            context.draw(image, in: CGRect(x: 0, y: rowBottom, width: CGFloat(image.width), height: CGFloat(image.height)))
+
+            let targets: [CGRect]
+            if row.state == .wings {
+                targets = WingControlLayout.browserButtons(in: row.frame, notchWidth: notch.width, inset: DesignTokens.wingInset,
+                                                           trailingReserve: PetLayout.barSlot, lead: row.content.wingLead)
+                    .filter { _ in row.status.strip != nil }.map(\.rect)
+            } else {
+                targets = AppPanelLayout.actions(in: row.frame, notchInset: notch.height, browserTabs: browser.nearbyTabs(limit: AppPanelLayout.maxTabRows)).map(\.rect)
+            }
+            context.setStrokeColor(CGColor(srgbRed: 0.2, green: 1, blue: 0.4, alpha: 0.9))
+            context.setLineWidth(1)
+            for rect in targets {
+                let topInRow = (regionTop - rect.maxY) * scale
+                let cg = CGRect(x: (rect.minX - regionMinX) * scale, y: rowBottom + CGFloat(image.height) - topInRow - rect.height * scale,
+                                width: rect.width * scale, height: rect.height * scale)
+                context.stroke(cg.insetBy(dx: 0.5, dy: 0.5))
+            }
+            print(String(format: "%@: %.0f x %.0f", String(describing: row.state), row.frame.width, row.frame.height))
+            rowTop -= Int(row.height * scale) + 6
+        }
+        let url = URL(fileURLWithPath: directory, isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        let file = url.appendingPathComponent("app-snapshots.png")
+        guard let image = context.makeImage(),
+              let destination = CGImageDestinationCreateWithURL(file as CFURL, UTType.png.identifier as CFString, 1, nil) else { return 1 }
+        CGImageDestinationAddImage(destination, image, nil)
+        CGImageDestinationFinalize(destination)
+        print(file.path)
+        return 0
+    }
+
     /// The hardware notch's outline, as the design tokens model it.
     static let hardwareNotch = NotchShape(bottomRadius: DesignTokens.radiusPhysicalNotchBottom, topRadius: DesignTokens.radiusNotchTopFlare)
 }

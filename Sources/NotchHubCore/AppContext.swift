@@ -277,6 +277,20 @@ public struct ClaudeSessionParser {
 /// Short, glanceable labels for the hover strip.
 public enum AppStripLabel {
 
+    /// An app's everyday name, short enough for a notch-height bar:
+    /// "Google Chrome" → "Chrome", "Microsoft Edge" → "Edge",
+    /// "Brave Browser" → "Brave".
+    public static func shortAppName(_ name: String) -> String {
+        var text = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        for vendor in ["Google ", "Microsoft ", "Mozilla "] where text.hasPrefix(vendor) && text.count > vendor.count {
+            text.removeFirst(vendor.count)
+        }
+        if text.hasSuffix(" Browser"), text.count > " Browser".count {
+            text.removeLast(" Browser".count)
+        }
+        return text.isEmpty ? name : text
+    }
+
     /// A window title made glanceable: the app's own name removed
     /// ("Report.pdf — Preview" → "Report.pdf"), a web address reduced to its
     /// site, a file path to its file name. `nil` when nothing useful is left

@@ -15,15 +15,15 @@ enum IslandMetrics {
     /// Gap between the app icon and its strip label.
     static let stripLabelSpacing: CGFloat = 6
     /// The widest a strip label may grow before it truncates.
-    static let stripLabelMaxWidth: CGFloat = 120
+    static let stripLabelMaxWidth: CGFloat = 96
     /// The agent readout's flame glyph size and its gap to the count.
     static let agentGlyphWidth: CGFloat = 10
     static let agentSpacing: CGFloat = 4
 
-    /// Measures the hover wings: both sides share one width (the larger of the
-    /// two), so the bar stays centred on the notch.
+    /// Measures the hover wings: each side fits its own content, so a nearly
+    /// empty left wing stays short beside a busy right one.
     /// `petSlot` is extra room at the right wing's end for the pixel pet.
-    static func wings(_ status: WingStatus, petSlot: CGFloat = 0) -> CGFloat {
+    static func wings(_ status: WingStatus, petSlot: CGFloat = 0) -> (lead: CGFloat, trail: CGFloat) {
         var left: CGFloat = 0
         if status.left != nil || status.strip != nil {
             left = DesignTokens.wingInset * 2
@@ -49,13 +49,14 @@ enum IslandMetrics {
             }
             var total = DesignTokens.wingInset * 2
             if !widths.isEmpty {
-                // The leading inset spacer and each glyph are separated by space8.
-                total += widths.reduce(0, +) + DesignTokens.space8 * CGFloat(widths.count)
+                // space8 separates the leading inset spacer, each glyph and the
+                // trailing spacer: one gap more than there are glyphs.
+                total += widths.reduce(0, +) + DesignTokens.space8 * CGFloat(widths.count + 1)
             }
             right = total
         }
 
-        return max(DesignTokens.wingMinWidth, max(left, right + petSlot))
+        return (max(DesignTokens.wingMinWidth, left), max(DesignTokens.wingMinWidth, right + petSlot))
     }
 
     /// Measures the compact bar: a snug lead wing for the glyph, and a trail

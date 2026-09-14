@@ -85,7 +85,8 @@ struct IslandView: View {
                     status: wingStatus,
                     notchWidth: notchWidth,
                     notchHeight: notchInset,
-                    trailingReserve: petBarReserve
+                    trailingReserve: petBarReserve,
+                    leadWidth: contentSize.wingLead
                 )
                 .id("wings")
                 .transition(.islandContent)

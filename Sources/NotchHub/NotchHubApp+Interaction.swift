@@ -126,8 +126,21 @@ extension NotchHubApp {
         if menu.items.isEmpty {
             menu.addItem(withTitle: "Return to Idle", action: #selector(returnToIdleAction), keyEquivalent: "")
         }
+        // With no menu-bar item, these keep Settings and Quit one click away
+        // even if another app holds the ⌥⌘, hotkey.
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Settings…", action: #selector(openSettingsAction), keyEquivalent: "")
+        menu.addItem(withTitle: "Quit NotchHub", action: #selector(quitAction), keyEquivalent: "")
         menu.items.forEach { $0.target = self }
         return menu
+    }
+
+    @objc func openSettingsAction() {
+        toggleSettings()
+    }
+
+    @objc func quitAction() {
+        NSApp.terminate(nil)
     }
 
     @objc func openPlayerAction() {

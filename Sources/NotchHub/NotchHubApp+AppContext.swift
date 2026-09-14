@@ -22,7 +22,7 @@ extension NotchHubApp {
         case .browser:
             // The strip names the browser. The page and its address belong in
             // the browser's panel, never in the notch-height bar.
-            return AppStrip(label: skin.name, trailing: .browserControls)
+            return AppStrip(label: AppStripLabel.shortAppName(skin.name), trailing: .browserControls)
         case let .agent(session):
             return AppStrip(
                 label: session.model ?? session.tool,
@@ -44,7 +44,8 @@ extension NotchHubApp {
             in: frame,
             notchWidth: window.notchWidth,
             inset: DesignTokens.wingInset,
-            trailingReserve: petBarReserve
+            trailingReserve: petBarReserve,
+            lead: islandModel.contentSize.wingLead
         ) else { return false }
         performBrowserAction(action)
         return true
@@ -135,7 +136,7 @@ extension NotchHubApp {
         let frame = window.localFrame(for: .appPanel, content: islandModel.contentSize)
         var tabs: [BrowserTab]?
         if case let .browser(browser)? = currentAppContext?.context {
-            tabs = browser.nearbyTabs(limit: AppPanelLayout.maxTabCards)
+            tabs = browser.nearbyTabs(limit: AppPanelLayout.maxTabRows)
         }
         guard let action = AppPanelLayout.action(at: point, in: frame, notchInset: window.notchHeight, browserTabs: tabs) else {
             return false

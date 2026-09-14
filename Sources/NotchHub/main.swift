@@ -238,6 +238,12 @@ if let index = arguments.firstIndex(of: "--pet-panel-snapshots") {
     exit(MainActor.assumeIsolated { PetStoryboard.panelSnapshots(directory: directory) })
 }
 
+// --app-snapshots DIR: a browser's hover strip and panel with hit targets (headless).
+if let index = arguments.firstIndex(of: "--app-snapshots") {
+    let directory = index + 1 < arguments.count ? arguments[index + 1] : "."
+    exit(MainActor.assumeIsolated { PetStoryboard.appSnapshots(directory: directory) })
+}
+
 // --pet-snapshots DIR: the real IslandView's pet layer in each dock shape (headless).
 if let index = arguments.firstIndex(of: "--pet-snapshots") {
     let directory = index + 1 < arguments.count ? arguments[index + 1] : "."

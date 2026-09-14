@@ -52,8 +52,10 @@ struct AppIconView: View {
 
 // MARK: - Browser
 
-/// A browser's panel: the app and site, the tabs around the current one, and
-/// navigation. Every clickable area matches `AppPanelLayout`.
+/// A browser's panel: the page you are on with a back / forward / reload
+/// capsule, then the tabs around the current one as rows, under a "Tabs"
+/// label with New Tab beside it. Every clickable area matches
+/// `AppPanelLayout`.
 struct BrowserPanelView: View {
     let notchInset: CGFloat
     let appName: String
@@ -61,105 +63,153 @@ struct BrowserPanelView: View {
     let browser: BrowserContext
 
     var body: some View {
-        GeometryReader { geo in
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                    .frame(height: AppPanelLayout.headerHeight)
-                    .padding(.top, AppPanelLayout.topInset)
-                tabCards(panelWidth: geo.size.width)
-                    .frame(height: AppPanelLayout.tabCardHeight)
-                    .padding(.top, AppPanelLayout.sectionGap)
-                Spacer(minLength: 0)
-                controls
-                    .frame(height: AppPanelLayout.controlRowHeight)
-                    .padding(.bottom, AppPanelLayout.bottomInset)
+        VStack(alignment: .leading, spacing: 0) {
+            header
+                .frame(height: AppPanelLayout.browserHeaderHeight)
+                .padding(.top, AppPanelLayout.browserTopInset)
+            tabsHeader
+                .frame(height: AppPanelLayout.tabsHeaderHeight)
+                .padding(.top, AppPanelLayout.tabsHeaderGap)
+            VStack(spacing: AppPanelLayout.tabRowSpacing) {
+                ForEach(browser.nearbyTabs(limit: AppPanelLayout.maxTabRows), id: \.index) { tab in
+                    tabRow(tab, isActive: tab.index == browser.activeIndex)
+                }
             }
-            .padding(.horizontal, AppPanelLayout.horizontalInset)
-            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+            .padding(.top, AppPanelLayout.tabRowsGap)
+            Spacer(minLength: 0)
         }
+        .padding(.horizontal, AppPanelLayout.horizontalInset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .overlay(alignment: .top) {
             AppPanelStrip(notchInset: notchInset).offset(y: -notchInset)
         }
     }
 
+    // MARK: Header
+
     private var header: some View {
         HStack(spacing: 10) {
-            AppIconView(iconData: iconData, size: 26)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(appName)
+            AppIconView(iconData: iconData, size: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(browser.title.isEmpty ? appName : browser.title)
                     .font(DesignTokens.titleFont)
                     .foregroundStyle(DesignTokens.textPrimary)
-                Text(browser.host ?? browser.title)
+                Text(browser.host ?? appName)
                     .font(DesignTokens.subtitleFont)
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(DesignTokens.textSecondary)
             }
             .lineLimit(1)
-            Spacer(minLength: 8)
-            Text(browser.tabCount == 1 ? "1 tab" : "\(browser.tabCount) tabs")
-                .font(DesignTokens.subtitleFont)
-                .foregroundStyle(DesignTokens.textTertiary)
+            .truncationMode(.tail)
+            Spacer(minLength: 12)
+            navigation
         }
     }
 
-    private func tabCards(panelWidth: CGFloat) -> some View {
-        let width = AppPanelLayout.tabCardWidth(panelWidth: panelWidth)
-        return HStack(spacing: AppPanelLayout.tabCardSpacing) {
-            ForEach(browser.nearbyTabs(limit: AppPanelLayout.maxTabCards), id: \.index) { tab in
-                tabCard(tab, isActive: tab.index == browser.activeIndex)
-                    .frame(width: width, height: AppPanelLayout.tabCardHeight)
+    /// Back, forward and reload as segments of one capsule.
+    private var navigation: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(AppPanelLayout.navControls.enumerated()), id: \.offset) { index, action in
+                if index > 0 {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.10))
+                        .frame(width: 0.5, height: 12)
+                        .frame(width: 0)
+                }
+                Image(systemName: WingView.symbol(for: action))
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .frame(width: AppPanelLayout.navButtonSize.width, height: AppPanelLayout.navButtonSize.height)
             }
+        }
+        .background(Capsule().fill(DesignTokens.controlClusterFill))
+        .overlay(Capsule().strokeBorder(DesignTokens.controlClusterStroke, lineWidth: 0.5))
+    }
+
+    // MARK: Tabs
+
+    private var tabsHeader: some View {
+        HStack(spacing: 6) {
+            Text("TABS")
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .tracking(0.8)
+                .foregroundStyle(DesignTokens.textTertiary)
+            Text("\(browser.tabCount)")
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(DesignTokens.textSecondary)
+                .padding(.horizontal, 6)
+                .frame(height: 16)
+                .background(Capsule().fill(Color.white.opacity(0.08)))
             Spacer(minLength: 0)
-        }
-    }
-
-    private func tabCard(_ tab: BrowserTab, isActive: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(tab.host ?? "")
-                .font(.system(size: 9, weight: .semibold, design: .rounded))
-                .foregroundStyle(isActive ? DesignTokens.accent : DesignTokens.textTertiary)
-                .lineLimit(1)
-            Text(tab.title.isEmpty ? "Untitled" : tab.title)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundStyle(DesignTokens.textPrimary)
-                .lineLimit(2)
-        }
-        .padding(8)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.white.opacity(isActive ? 0.14 : 0.06))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(isActive ? DesignTokens.accent.opacity(0.6) : .clear, lineWidth: 1)
-        )
-    }
-
-    private var controls: some View {
-        HStack(spacing: AppPanelLayout.iconButtonSpacing) {
             HStack(spacing: 4) {
                 Image(systemName: "plus")
+                    .font(.system(size: 9, weight: .heavy))
                 Text("New Tab")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
             }
-            .font(.system(size: 11, weight: .semibold, design: .rounded))
-            .foregroundStyle(DesignTokens.textPrimary)
-            .frame(width: AppPanelLayout.newTabWidth, height: AppPanelLayout.controlRowHeight)
-            .background(Capsule().fill(Color.white.opacity(0.08)))
-
-            Spacer(minLength: 0)
-
-            iconButton("chevron.left")
-            iconButton("chevron.right")
-            iconButton("arrow.clockwise")
+            .foregroundStyle(DesignTokens.accent)
+            .frame(width: AppPanelLayout.newTabSize.width, height: AppPanelLayout.newTabSize.height)
+            .background(Capsule().fill(DesignTokens.accent.opacity(0.14)))
         }
     }
 
-    private func iconButton(_ symbol: String) -> some View {
-        Image(systemName: symbol)
-            .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(DesignTokens.textPrimary)
-            .frame(width: AppPanelLayout.iconButtonSize, height: AppPanelLayout.controlRowHeight)
-            .background(Circle().fill(Color.white.opacity(0.08)))
+    private func tabRow(_ tab: BrowserTab, isActive: Bool) -> some View {
+        HStack(spacing: 10) {
+            TabMonogram(tab: tab)
+            Text(tab.title.isEmpty ? "Untitled" : tab.title)
+                .font(.system(size: 12, weight: isActive ? .semibold : .medium, design: .rounded))
+                .foregroundStyle(isActive ? DesignTokens.textPrimary : DesignTokens.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 8)
+            if let host = tab.host {
+                Text(host)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(DesignTokens.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 110, alignment: .trailing)
+            }
+            if isActive {
+                Circle()
+                    .fill(DesignTokens.accent)
+                    .frame(width: 5, height: 5)
+            }
+        }
+        .padding(.leading, 6)
+        .padding(.trailing, 10)
+        .frame(height: AppPanelLayout.tabRowHeight)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Color.white.opacity(isActive ? 0.10 : 0.035))
+        )
+    }
+}
+
+/// A tab's stand-in favicon: the site's initial on a colour picked from its
+/// host, so the same site always gets the same tile.
+private struct TabMonogram: View {
+    let tab: BrowserTab
+
+    var body: some View {
+        let seed = tab.host ?? tab.title
+        Text(seed.first.map { String($0).uppercased() } ?? "·")
+            .font(.system(size: 10, weight: .bold, design: .rounded))
+            .foregroundStyle(Color.white)
+            .frame(width: 18, height: 18)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color(hue: Self.hue(for: seed), saturation: 0.42, brightness: 0.58))
+            )
+    }
+
+    /// A stable hue (Swift's `hashValue` changes every launch).
+    static func hue(for text: String) -> Double {
+        var hash: UInt32 = 5381
+        for scalar in text.unicodeScalars {
+            hash = (hash &* 33) &+ scalar.value
+        }
+        return Double(hash % 360) / 360
     }
 }
 

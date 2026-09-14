@@ -8,8 +8,8 @@ import SwiftUI
 /// is either live status (charging, music, Wi-Fi, weather), a browser's back /
 /// forward / new-tab buttons, or a coding agent's token count.
 ///
-/// The two wings are the SAME width and the bar is centred on the notch, so the
-/// island expands symmetrically. The middle sits behind the physical notch.
+/// Each wing is as wide as its own content, like the compact bar; the middle
+/// sits behind the physical notch.
 struct WingView: View {
     /// What the two wings show.
     let status: WingStatus
@@ -19,11 +19,16 @@ struct WingView: View {
     let notchHeight: CGFloat
     /// Room kept free at the right end of the right wing (the pixel pet).
     var trailingReserve: CGFloat = 0
+    /// The left wing's width; `nil` splits the bar evenly.
+    var leadWidth: CGFloat? = nil
 
     var body: some View {
         HStack(spacing: 0) {
-            leftWing
-                .frame(maxWidth: .infinity)
+            if let leadWidth {
+                leftWing.frame(width: leadWidth)
+            } else {
+                leftWing.frame(maxWidth: .infinity)
+            }
 
             // The notch cutout itself — nothing is visible here.
             Color.clear.frame(width: notchWidth)
@@ -82,20 +87,21 @@ struct WingView: View {
         }
     }
 
-    /// Back, forward, new tab — at the trailing edge, where
-    /// `WingControlLayout` hit-tests them.
+    /// Back, forward, new tab — one capsule at the trailing edge, where
+    /// `WingControlLayout` hit-tests each segment.
     private var browserControls: some View {
         HStack(spacing: 0) {
             Spacer(minLength: 0)
             HStack(spacing: WingControlLayout.spacing) {
                 ForEach(Array(WingControlLayout.controls.enumerated()), id: \.offset) { _, action in
                     Image(systemName: Self.symbol(for: action))
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 9.5, weight: .bold))
                         .foregroundStyle(DesignTokens.textPrimary)
                         .frame(width: WingControlLayout.buttonSize, height: WingControlLayout.buttonSize)
-                        .background(Color.white.opacity(0.10), in: Circle())
                 }
             }
+            .background(Capsule().fill(DesignTokens.controlClusterFill))
+            .overlay(Capsule().strokeBorder(DesignTokens.controlClusterStroke, lineWidth: 0.5))
         }
         .padding(.trailing, DesignTokens.wingInset + trailingReserve)
     }

@@ -36,9 +36,10 @@ public extension KeyChord.Key {
 
 /// The browser controls on the right wing of the hover strip. `WingView` draws
 /// them from these numbers and the window hit-tests against them.
+/// The buttons are segments of one capsule, so the cluster stays short.
 public enum WingControlLayout {
     public static let buttonSize: CGFloat = 22
-    public static let spacing: CGFloat = 6
+    public static let spacing: CGFloat = 0
     public static let controls: [BrowserAction] = [.back, .forward, .newTab]
 
     public static var controlsWidth: CGFloat {
@@ -47,19 +48,21 @@ public enum WingControlLayout {
 
     /// Button rects for a wings frame in AppKit coordinates: flush with the
     /// right wing's trailing edge (`inset` in), and never under the notch.
+    /// `lead` is the left wing's width (`nil` when the wings are equal).
     /// `trailingReserve` is room kept free beyond the buttons (the pixel pet);
     /// it moves the buttons in from the edge but never into the notch.
-    public static func browserButtons(in frame: CGRect, notchWidth: CGFloat, inset: CGFloat, trailingReserve: CGFloat = 0) -> [(action: BrowserAction, rect: CGRect)] {
-        let x0 = max(frame.maxX - inset - trailingReserve - controlsWidth, frame.midX + notchWidth / 2 + inset)
+    public static func browserButtons(in frame: CGRect, notchWidth: CGFloat, inset: CGFloat, trailingReserve: CGFloat = 0, lead: CGFloat? = nil) -> [(action: BrowserAction, rect: CGRect)] {
+        let notchMaxX = frame.minX + (lead ?? (frame.width - notchWidth) / 2) + notchWidth
+        let x0 = max(frame.maxX - inset - trailingReserve - controlsWidth, notchMaxX + inset)
         let y = frame.midY - buttonSize / 2
         return controls.enumerated().map { i, action in
             (action, CGRect(x: x0 + CGFloat(i) * (buttonSize + spacing), y: y, width: buttonSize, height: buttonSize))
         }
     }
 
-    public static func browserAction(at point: CGPoint, in frame: CGRect, notchWidth: CGFloat, inset: CGFloat, trailingReserve: CGFloat = 0) -> BrowserAction? {
-        browserButtons(in: frame, notchWidth: notchWidth, inset: inset, trailingReserve: trailingReserve)
-            .first { $0.rect.insetBy(dx: -2, dy: -3).contains(point) }?
+    public static func browserAction(at point: CGPoint, in frame: CGRect, notchWidth: CGFloat, inset: CGFloat, trailingReserve: CGFloat = 0, lead: CGFloat? = nil) -> BrowserAction? {
+        browserButtons(in: frame, notchWidth: notchWidth, inset: inset, trailingReserve: trailingReserve, lead: lead)
+            .first { $0.rect.insetBy(dx: 0, dy: -3).contains(point) }?
             .action
     }
 }
@@ -88,23 +91,22 @@ public enum AppPanelLayout {
     public static let clockSize = CGSize(width: 56, height: 22)
     public static let moreSize = CGSize(width: 32, height: 22)
 
-    // Browser
-    public static let maxTabCards = 3
-    public static let tabCardHeight: CGFloat = 52
-    public static let tabCardSpacing: CGFloat = 8
-    public static let controlRowHeight: CGFloat = 26
-    public static let newTabWidth: CGFloat = 86
-    public static let iconButtonSize: CGFloat = 26
-    public static let iconButtonSpacing: CGFloat = 8
-
-    /// Width of one tab-card slot. Slots are fixed so cards never shift.
-    public static func tabCardWidth(panelWidth: CGFloat) -> CGFloat {
-        let slots = CGFloat(maxTabCards)
-        return (panelWidth - horizontalInset * 2 - tabCardSpacing * (slots - 1)) / slots
-    }
+    // Browser: the page and a navigation capsule, then the tabs around the
+    // current one as rows under a "Tabs" label with New Tab beside it.
+    public static let browserTopInset: CGFloat = 8
+    public static let browserHeaderHeight: CGFloat = 36
+    public static let navControls: [BrowserAction] = [.back, .forward, .reload]
+    public static let navButtonSize = CGSize(width: 30, height: 26)
+    public static let tabsHeaderGap: CGFloat = 10
+    public static let tabsHeaderHeight: CGFloat = 22
+    public static let newTabSize = CGSize(width: 80, height: 22)
+    public static let tabRowsGap: CGFloat = 6
+    public static let maxTabRows = 3
+    public static let tabRowHeight: CGFloat = 28
+    public static let tabRowSpacing: CGFloat = 2
 
     /// Every clickable area for a panel frame in AppKit coordinates.
-    /// `browserTabs` is the tab row for a browser panel, `nil` for others.
+    /// `browserTabs` is the tab list for a browser panel, `nil` for others.
     public static func actions(in frame: CGRect, notchInset: CGFloat, browserTabs: [BrowserTab]?) -> [(action: AppPanelAction, rect: CGRect)] {
         let stripMidY = frame.maxY - notchInset / 2
         var result: [(action: AppPanelAction, rect: CGRect)] = [
@@ -113,27 +115,29 @@ public enum AppPanelLayout {
         ]
         guard let browserTabs else { return result }
 
-        let cardTop = frame.maxY - notchInset - topInset - headerHeight - sectionGap
-        let cardWidth = tabCardWidth(panelWidth: frame.width)
-        for (slot, tab) in browserTabs.prefix(maxTabCards).enumerated() {
-            let x = frame.minX + horizontalInset + CGFloat(slot) * (cardWidth + tabCardSpacing)
-            result.append((.browser(.selectTab(tab.index)), CGRect(x: x, y: cardTop - tabCardHeight, width: cardWidth, height: tabCardHeight)))
+        let contentTop = frame.maxY - notchInset
+        let headerMidY = contentTop - browserTopInset - browserHeaderHeight / 2
+        var x = frame.maxX - horizontalInset - navButtonSize.width * CGFloat(navControls.count)
+        for action in navControls {
+            result.append((.browser(action), CGRect(x: x, y: headerMidY - navButtonSize.height / 2, width: navButtonSize.width, height: navButtonSize.height)))
+            x += navButtonSize.width
         }
 
-        let rowY = frame.minY + bottomInset
-        result.append((.browser(.newTab), CGRect(x: frame.minX + horizontalInset, y: rowY, width: newTabWidth, height: controlRowHeight)))
-        let reload = CGRect(x: frame.maxX - horizontalInset - iconButtonSize, y: rowY, width: iconButtonSize, height: controlRowHeight)
-        let forward = reload.offsetBy(dx: -(iconButtonSize + iconButtonSpacing), dy: 0)
-        let back = forward.offsetBy(dx: -(iconButtonSize + iconButtonSpacing), dy: 0)
-        result.append((.browser(.back), back))
-        result.append((.browser(.forward), forward))
-        result.append((.browser(.reload), reload))
+        let tabsHeaderTop = contentTop - browserTopInset - browserHeaderHeight - tabsHeaderGap
+        let newTabY = tabsHeaderTop - tabsHeaderHeight / 2 - newTabSize.height / 2
+        result.append((.browser(.newTab), CGRect(x: frame.maxX - horizontalInset - newTabSize.width, y: newTabY, width: newTabSize.width, height: newTabSize.height)))
+
+        let rowsTop = tabsHeaderTop - tabsHeaderHeight - tabRowsGap
+        for (slot, tab) in browserTabs.prefix(maxTabRows).enumerated() {
+            let top = rowsTop - CGFloat(slot) * (tabRowHeight + tabRowSpacing)
+            result.append((.browser(.selectTab(tab.index)), CGRect(x: frame.minX + horizontalInset, y: top - tabRowHeight, width: frame.width - horizontalInset * 2, height: tabRowHeight)))
+        }
         return result
     }
 
     public static func action(at point: CGPoint, in frame: CGRect, notchInset: CGFloat, browserTabs: [BrowserTab]?) -> AppPanelAction? {
         actions(in: frame, notchInset: notchInset, browserTabs: browserTabs)
-            .first { $0.rect.insetBy(dx: -2, dy: -2).contains(point) }?
+            .first { $0.rect.insetBy(dx: -2, dy: -tabRowSpacing).contains(point) }?
             .action
     }
 }

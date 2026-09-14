@@ -256,10 +256,26 @@ struct SettingsView: View {
     }
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: 6) {
             Text("NotchHub \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")")
-            Spacer()
-            Text("⌥⌘,  opens this panel")
+            Text("·")
+            Text("⌥⌘, opens this panel")
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Button { NSApp.terminate(nil) } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "power")
+                        .font(.system(size: 10, weight: .bold))
+                    Text("Quit NotchHub")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                }
+                .foregroundStyle(DesignTokens.live)
+                .padding(.horizontal, 12)
+                .frame(height: 24)
+                .background(Capsule().fill(DesignTokens.live.opacity(0.14)))
+                .contentShape(Capsule())
+            }
+            .buttonStyle(PressStyle())
         }
         .font(.system(size: 10, weight: .medium, design: .rounded))
         .foregroundStyle(DesignTokens.textTertiary)

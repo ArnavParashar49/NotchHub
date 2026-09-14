@@ -43,7 +43,6 @@ wrapper). Three layers, strictly separated:
 - **NotchHub** — the app (reads activity state only):
   - `NotchWindow` — borderless transparent window anchored at the notch
   - `IslandView` — the morphing island (SwiftUI)
-  - `StatusItemController` — menu-bar presence
   - `NotchHubApp` (+ `LaunchModes`, `Panels`, `Meeting`, `Interaction`) — the
     single coordinator where the layers meet
 
@@ -86,8 +85,9 @@ script passes the framework paths it needs.
 ./dist/NotchHub.app/Contents/MacOS/NotchHub
 ```
 
-The app is an accessory (`LSUIElement`) — no dock icon. Control it from the
-menu-bar status item: show the island, preview activities, or return to idle.
+The app is an accessory (`LSUIElement`) — no dock icon and no menu-bar item.
+Everything lives in the notch: ⌥⌘, opens Settings (which has **Quit NotchHub**),
+⌥⌘V the Tray, ⌥⌘M dictation and ⌥⌘T the timer.
 
 ## Status
 

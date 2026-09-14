@@ -55,12 +55,12 @@ public struct NotchGeometry: Equatable {
     /// How far the compact bar stretches to the RIGHT of the notch edge —
     /// enough for a full track title beside its artist without truncating.
     public static let compactTrailOverhang: CGFloat = 116
-    /// How far each wing stretches sideways from the notch edge.
+    /// The resting width of a wing beside the notch, before its content has
+    /// been measured.
     ///
     /// The wings are the sideways hover peek: a notch-height bar that grows
-    /// LEFT and RIGHT of the cutout by the SAME amount, so the island expands
-    /// symmetrically with the notch as its centre — never lopsided. Each side
-    /// is wide enough for an app icon or a short row of status glyphs.
+    /// LEFT and RIGHT of the cutout. Measured wings size each side to its own
+    /// content (`IslandContentSize.wingLead`); this default is used for both.
     public static let wingWidth: CGFloat = 84
     /// A generous ceiling on how far the content-driven surfaces (the wings and
     /// the compact bar) may stretch from the notch edge.
@@ -226,7 +226,7 @@ public struct NotchGeometry: Equatable {
             // while the pet hides in the notch — idle is exactly the notch.
             guard let dock = content.petDock, dock.reach > 0 else { return notchFrame }
             return compactBar(lead: dock.lead, trail: dock.trail)
-        case .wings: return wingsBar(sideWidth: content.wingSide)
+        case .wings: return compactBar(lead: content.wingLead ?? content.wingSide, trail: content.wingSide)
         case .compact: return compactBar(lead: content.compactLead, trail: content.compactTrail)
         case .expanded: return expandedFrame
         case .interactive: return interactiveFrame
@@ -251,8 +251,9 @@ public struct NotchGeometry: Equatable {
         wingsBar(sideWidth: Self.wingWidth)
     }
 
-    /// The wings, sized to a specific per-side width. Both sides share the
-    /// width so the bar stays centred on the notch — the island grows evenly.
+    /// Equal wings of a specific per-side width, centred on the notch. The
+    /// island itself uses `compactBar(lead:trail:)` so each side fits its
+    /// content.
     ///
     /// The width is clamped to `maxContentOverhang`: beyond that the island
     /// would outgrow the window envelope, and a clip at the screen edge is

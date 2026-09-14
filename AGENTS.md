@@ -80,14 +80,14 @@ swift build            # debug build (SwiftPM; Command Line Tools only — no xc
     compact.
   - `.compact` (an activity is present): the activity's glyph on the LEFT and
     its title + value on the RIGHT, both laid out around the cutout.
-  - **The WINGS are SYMMETRIC; the COMPACT bar is ASYMMETRIC.**
-    — The wings must expand EVENLY about the notch: the same width each side and
-    the frame is `screenMidX - width/2`, so the notch is the exact centre. A
-    lopsided hover is the bug to avoid.
-    — The compact bar is deliberately uneven: the left holds only a glyph and the
-    right holds the title, so the frame origin is `screenMidX - lead - notchWidth/2`,
-    NOT `screenMidX - width/2`. Get this wrong and content lands under the physical
-    notch. `NotchGeometryTests` asserts both — keep it.
+  - **The WINGS and the COMPACT bar are both ASYMMETRIC.** Each side is as wide
+    as its own content — a lone app icon on the left does not get the width of a
+    full right wing (`IslandMetrics.wings` returns `(lead, trail)`,
+    `IslandContentSize.wingLead`). The frame origin is
+    `screenMidX - lead - notchWidth/2`, NOT `screenMidX - width/2`. Get this wrong
+    and content lands under the physical notch. Anything that needs the notch's
+    position inside the bar (e.g. `WingControlLayout.browserButtons(lead:)`) must
+    use the lead width, never `frame.midX`.
   - **The island is AUTO-SIZED, never a fixed width.** Both the wings and the
     compact bar measure their real content and grow to fit it, then collapse when
     there is less — a hardcoded width silently clips once enough icons are live

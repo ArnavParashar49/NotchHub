@@ -128,37 +128,6 @@ extension NotchHubApp {
         }
     }
 
-    // MARK: - Menu actions
-
-    /// Reveals the island (the status menu's "Show Island"). With an activity
-    /// it re-presents it; with nothing to report it opens the wings peek for a
-    /// few seconds rather than inventing a track.
-    func showIsland() {
-        if let current = currentActivity {
-            present(current)
-            return
-        }
-        machine.send(.hoverEntered)
-        renderIsland()
-        after(3) { app in
-            guard app.machine.presentation == .wings, !app.window.isMouseOverIsland else { return }
-            app.machine.send(.hoverExited)
-            app.renderIsland()
-            app.after(app.machine.hoverCollapseDelay + 0.02) { $0.tick() }
-        }
-    }
-
-    /// Previews an activity of the given kind. Previews are temporary: a kind
-    /// that is normally persistent (a song, a timer) is given a short lifetime
-    /// so a preview never leaves a fake surface on the island.
-    func runDemo(_ kind: ActivityKind) {
-        var activity = makeDemoActivity(kind)
-        if activity.autoDismiss == 0 {
-            activity = activity.withAutoDismiss(8)
-        }
-        present(activity)
-    }
-
     /// `--activity <name>`: presents ONE named activity and holds it (600 s) so
     /// a single surface can be verified on screen in isolation.
     func presentNamedActivity(_ name: String) {

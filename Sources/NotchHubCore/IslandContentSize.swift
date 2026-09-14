@@ -17,9 +17,13 @@ public struct IslandContentSize: Equatable, Sendable {
     /// How far the compact bar reaches to the RIGHT of the notch edge — enough
     /// for the title and value, however long they are.
     public var compactTrail: CGFloat
-    /// How wide each hover wing is. Both sides share this number, so the bar
-    /// stays centred on the notch and the island grows evenly.
+    /// How wide the RIGHT hover wing is — and the left one too, unless
+    /// `wingLead` says otherwise.
     public var wingSide: CGFloat
+    /// How wide the LEFT hover wing is. Each wing fits its own content, so a
+    /// lone app icon on the left doesn't get the width of a full right wing.
+    /// `nil` makes the wings equal.
+    public var wingLead: CGFloat? = nil
     /// The height a content-driven panel needs (an app panel with extra rows).
     /// `nil` uses the panel's standard height.
     public var panelHeight: CGFloat? = nil

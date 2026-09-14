@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import Testing
@@ -113,12 +114,34 @@ struct AppContextTests {
         }
     }
 
+    @Test("hover wings size each side to its content; browser buttons stay clear of the notch")
+    func asymmetricWings() {
+        let g = NotchGeometry.make(
+            screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+            safeAreaInsets: NSEdgeInsets(top: 32, left: 0, bottom: 0, right: 0),
+            auxiliaryLeft: CGRect(x: 0, y: 950, width: 663.5, height: 32),
+            auxiliaryRight: CGRect(x: 848.5, y: 950, width: 663.5, height: 32)
+        )
+        var content = IslandContentSize(compactLead: 0, compactTrail: 0, wingSide: 120)
+        content.wingLead = 56
+        let frame = g.frame(for: .wings, content: content)
+        #expect(abs(frame.minX - (g.notchFrame.minX - 56)) < 0.001)
+        #expect(abs(frame.maxX - (g.notchFrame.maxX + 120)) < 0.001)
+        let buttons = WingControlLayout.browserButtons(in: frame, notchWidth: 185, inset: 16, lead: 56)
+        #expect(buttons.allSatisfy { $0.rect.minX >= g.notchFrame.maxX + 16 && frame.contains($0.rect) })
+    }
+
     @Test("app panel controls fit, never overlap, and select the right tabs")
     func appPanelControls() {
         let frame = CGRect(x: 100, y: 0, width: 440, height: 216)
-        let tabs = [BrowserTab(index: 4, title: "a", host: nil), BrowserTab(index: 5, title: "b", host: nil)]
+        let tabs = (4...6).map { BrowserTab(index: $0, title: "t\($0)", host: nil) }
         let placed = AppPanelLayout.actions(in: frame, notchInset: 32, browserTabs: tabs)
-        #expect(placed.contains { $0.action == .browser(.selectTab(5)) })
+        #expect(placed.contains { $0.action == .browser(.selectTab(6)) })
+        #expect(placed.filter { if case .browser(.selectTab) = $0.action { true } else { false } }.count == AppPanelLayout.maxTabRows)
+        // Clicks resolve to the thing drawn under them.
+        for item in placed {
+            #expect(AppPanelLayout.action(at: CGPoint(x: item.rect.midX, y: item.rect.midY), in: frame, notchInset: 32, browserTabs: tabs) == item.action)
+        }
         #expect(placed.first { $0.action == .dashboard }!.rect.minY >= frame.maxY - 32)
         for (i, a) in placed.enumerated() {
             #expect(frame.contains(a.rect), "\(a.action) outside")
@@ -128,6 +151,15 @@ struct AppContextTests {
         }
         let agent = AppPanelLayout.actions(in: frame, notchInset: 32, browserTabs: nil)
         #expect(agent.map(\.action) == [.dashboard, .settings])
+    }
+
+    @Test("browser names are shortened for the hover strip")
+    func shortAppNames() {
+        #expect(AppStripLabel.shortAppName("Google Chrome") == "Chrome")
+        #expect(AppStripLabel.shortAppName("Microsoft Edge") == "Edge")
+        #expect(AppStripLabel.shortAppName("Brave Browser") == "Brave")
+        #expect(AppStripLabel.shortAppName("Safari") == "Safari")
+        #expect(AppStripLabel.shortAppName("Google") == "Google")
     }
 
     @Test("a call's compact bar has mute and leave at its trailing end")
