@@ -20,6 +20,9 @@ import WebKit
 final class NeoWebHost: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     let webView: WKWebView
+    /// WebKit's `_windowOcclusionDetectionEnabled`, reached by key-value coding
+    /// as `drawsBackground` is; `NeoUITests` checks the setter is still there.
+    static let occlusionDetectionKey = "windowOcclusionDetectionEnabled"
     /// A message from the page, already parsed.
     var onMessage: ((NeoHostMessage) -> Void)?
     /// The page could not load (a broken install, a missing file): reported
@@ -47,6 +50,14 @@ final class NeoWebHost: NSObject, WKNavigationDelegate, WKUIDelegate {
         // Black before the page paints, so the panel never flashes white.
         webView.underPageBackgroundColor = .black
         webView.setValue(false, forKey: "drawsBackground")
+        // The island is a transparent, status-level panel that the window server
+        // reports as OCCLUDED even while it is plainly on screen. WebKit would then
+        // hold the page "hidden": `document.visibilityState` stays hidden, CSS
+        // animations freeze at their first frame (every row at opacity 0), smooth
+        // scrolls never arrive, and the browser card asks for no frames. The view
+        // is told to judge visibility by its view hierarchy alone — the panel
+        // removes it when it closes, so a closed panel is still hidden to the page.
+        webView.setValue(false, forKey: NeoWebHost.occlusionDetectionKey)
         webView.load(URLRequest(url: NeoSchemeHandler.indexURL))
     }
 

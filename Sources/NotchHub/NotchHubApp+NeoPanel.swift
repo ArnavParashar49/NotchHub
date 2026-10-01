@@ -40,6 +40,7 @@ extension NotchHubApp {
             renderIsland()
             log("neo: panel open")
         } else if !shouldOpen, panel == .neo {
+            log("neo: closing — open=\(neoPanel.isOpen) waiting=\(neoPanel.isWaitingForCore) feature=\(featureSettings.isEnabled(.neo)) ui=\(hasNeoUI)")
             closePanel()
             // Straight back to the island's resting shape, as if the panel had
             // been an activity that ended — not a bare compact bar waiting for
@@ -152,6 +153,61 @@ extension NotchHubApp {
         neoPanel.close(at: now)
         applyNeoPanel()
         scheduleNeoWake(neoNextWake(at: now))
+    }
+
+    // MARK: - Debug snapshots
+
+    /// The folder `NOTCHHUB_NEO_SNAPSHOTS` names, when it does.
+    static let neoSnapshotVariable = "NOTCHHUB_NEO_SNAPSHOTS"
+
+    /// With `NOTCHHUB_NEO_SNAPSHOTS=<dir>` in the environment, SIGUSR1 writes
+    /// the page as it is in the open panel to `<dir>/neo-panel-<time>.png`
+    /// (the web view's own snapshot, at the page's size, in points × scale).
+    /// Nothing is read or written otherwise, and the signal is left alone.
+    func installNeoSnapshotSignal() {
+        guard let dir = ProcessInfo.processInfo.environment[Self.neoSnapshotVariable], !dir.isEmpty else { return }
+        signal(SIGUSR1, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
+        source.setEventHandler { [weak self] in self?.snapshotNeoPanel(into: URL(fileURLWithPath: dir, isDirectory: true)) }
+        source.resume()
+        neoSnapshotSignal = source
+        log("neo: SIGUSR1 snapshots the panel's page into \(dir)")
+    }
+
+    func snapshotNeoPanel(into folder: URL) {
+        guard panel == .neo, let host = neoWeb else {
+            log("neo: snapshot asked, but the panel is not open")
+            return
+        }
+        let size = neoPageSize
+        if let w = host.webView.window {
+            log("neo: window visible=\(w.isVisible) occluded=\(!w.occlusionState.contains(.visible)) key=\(w.isKeyWindow) sharing=\(w.sharingType.rawValue) alpha=\(w.alphaValue) level=\(w.level.rawValue) hiddenView=\(host.webView.isHiddenOrHasHiddenAncestor) frame=\(host.webView.frame) winFrame=\(w.frame)")
+        } else {
+            log("neo: the web view has no window")
+        }
+        // What the page holds beside the picture: its layout, the log's rows and scroll, and
+        // whether WebKit counts it visible (it must: see NeoWebHost's occlusion note).
+        host.webView.evaluateJavaScript("""
+            (() => { const l = document.querySelector('.log'); const c = document.querySelector('.card');
+              return JSON.stringify({ card: c && c.className, vis: document.visibilityState, rows: l ? l.children.length : -1,
+                scroll: l ? [l.scrollTop, l.scrollHeight, l.clientHeight] : null, text: (l ? l.innerText : document.body.innerText).slice(0, 120) }); })()
+            """) { [weak self] value, _ in self?.log("neo: page \(value.map { String(describing: $0) } ?? "?")") }
+        host.webView.takeSnapshot(with: nil) { [weak self] image, error in
+            guard let image, let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+                  let png = bitmap.representation(using: .png, properties: [:]) else {
+                self?.log("neo: snapshot failed: \(error?.localizedDescription ?? "no image")")
+                return
+            }
+            let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+            let file = folder.appendingPathComponent("neo-panel-\(stamp).png")
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try png.write(to: file)
+                self?.log("neo: snapshot \(Int(size.width))×\(Int(size.height)) → \(file.path)")
+            } catch {
+                self?.log("neo: snapshot not written: \(error.localizedDescription)")
+            }
+        }
     }
 
     /// The earlier of NEO's presence's and the panel's next change.

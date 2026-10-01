@@ -44,7 +44,7 @@ enum NeoSnapshots {
                 wings: WingStatus(left: WingItem(symbol: "safari", label: "Safari"), right: [WingItem(symbol: "wifi", label: "Wi-Fi"), WingItem(symbol: "battery.100.bolt", label: "82%", tint: .accent)], musicPlaying: false, strip: nil)),
             Row(name: "compact (volume), speaking", state: .compact, neo: .speaking, activity: .volume(0.62)),
             Row(name: "expanded (music), thinking", state: .expanded, neo: .thinking, activity: .music(title: "Midnight City", artist: "M83")),
-            Row(name: "NEO panel (the chat, 420×520 under the notch), speaking — no pet", state: .neoPanel, neo: .speaking),
+            Row(name: "NEO panel (the chat, \(Int(NeoPanelLayout.standard.width))×\(Int(NeoPanelLayout.standard.height)) under the notch), speaking — no pet", state: .neoPanel, neo: .speaking),
         ]
 
         let panelHeight = geometry.frame(for: .neoPanel, content: .default).height

@@ -37,7 +37,12 @@ extension NotchHubApp {
         switch fact {
         case let .card(kind, open): neoPanel.card(kind, open: open, at: now)
         case .woke: neoPanel.show(at: now) // summoned by hand: the explicit show
-        case .connected(false): neoPanel.disconnected(at: now)
+        case .connected(false):
+            neoPanel.disconnected(at: now)
+            log("neo: core away — panel open=\(neoPanel.isOpen) waiting=\(neoPanel.isWaitingForCore)")
+        case .connected(true):
+            log("neo: core back — panel open=\(neoPanel.isOpen) waiting=\(neoPanel.isWaitingForCore)")
+            neoPanel.reconnected(at: now)
         default: break
         }
         // The panel takes NEO's state from the presence's hold: one truth.

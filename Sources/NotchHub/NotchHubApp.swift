@@ -110,6 +110,10 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     /// every shape for this run, so a debug `screencapture` of the notch
     /// strip can show the pet as NEO and the panel. Never saved; see `+Ghost`.
     var capturableForDebug = false
+    /// `NOTCHHUB_NEO_SNAPSHOTS=<dir>`: SIGUSR1 writes NEO's page as it is in
+    /// the open panel to that folder (a debug aid: screen capture never sees
+    /// the island, and a web view cannot be rendered offscreen). See `+NeoPanel`.
+    var neoSnapshotSignal: DispatchSourceSignal?
 
     // Persistent wing status. The wings show what is *currently true* about the
     // machine, so these are held here and updated by events rather than read

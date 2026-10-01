@@ -47,6 +47,7 @@ extension NotchHubApp {
             capturableForDebug = true
             log("ghost: window left capturable for this run only (--neo-capturable)")
         }
+        installNeoSnapshotSignal()
 
         if let index = arguments.firstIndex(of: "--art"), index + 1 < arguments.count {
             let path = arguments[index + 1]

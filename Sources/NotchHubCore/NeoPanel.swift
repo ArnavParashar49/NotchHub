@@ -28,9 +28,17 @@ public enum NeoCardKind: String, CaseIterable, Equatable, Sendable {
 /// - Esc / the page's collapse / a click on the lane close it at once; closed
 ///   while NEO was busy, it stays closed until NEO is quiet again, so the
 ///   rest of that turn (a card, a confirmation) does not pop it back open.
+/// - The core going away does not yank an open panel: the page shows its
+///   own quiet "reconnecting…" line and the panel waits `reconnectGrace`
+///   for the core to come back (a restart takes a few seconds). Only if it
+///   does not does the panel fold; a panel that was closed stays closed.
 public struct NeoPanelModel: Equatable, Sendable {
     /// How long after NEO goes quiet the panel folds back into the lane.
     public static let idleCollapseDelay: TimeInterval = 5
+    /// How long an open panel waits for a restarting core before folding: a
+    /// restart of NEO's core (python, its models, its voice session) takes
+    /// up to ten-odd seconds on a MacBook.
+    public static let reconnectGrace: TimeInterval = 15
     /// The states in which NEO is answering: an open panel is held through
     /// them, and a hand-opened hold is spent by them. They do NOT open it.
     public static let answeringStates: Set<NeoState> = [.thinking, .working, .searching, .speaking, .confirming]
@@ -49,6 +57,8 @@ public struct NeoPanelModel: Equatable, Sendable {
     private var state: NeoState = .idle
     /// When the panel became collapsible; `nil` while something holds it.
     private var quietSince: Date?
+    /// When the core went away with the panel open; `nil` once it is back.
+    private var disconnectedAt: Date?
     private var lastReported = false
 
     public init() {}
@@ -121,21 +131,38 @@ public struct NeoPanelModel: Equatable, Sendable {
         settle(at: now)
     }
 
-    /// The core went away: nothing to show.
+    /// The core went away. The cards and holds go with it; an open panel
+    /// stays for `reconnectGrace` so a restart is not a panel folding and
+    /// popping back — the page says "reconnecting…" in the meantime.
     public mutating func disconnected(at now: Date) {
-        isOpen = false
         cards = []
         heldByUser = false
         dismissedUntilQuiet = false
         isPinned = false
         state = .idle
+        if isOpen, disconnectedAt == nil { disconnectedAt = now }
         settle(at: now)
     }
+
+    /// The core is back: the panel is an ordinary open panel again (and
+    /// folds after the quiet delay unless something holds it).
+    public mutating func reconnected(at now: Date) {
+        disconnectedAt = nil
+        settle(at: now)
+    }
+
+    /// Whether the panel is open only because the core may still come back.
+    public var isWaitingForCore: Bool { isOpen && disconnectedAt != nil }
 
     /// Applies a due collapse. Returns whether `isOpen` changed since the app
     /// last heard from the model.
     @discardableResult
     public mutating func tick(at now: Date) -> Bool {
+        if isOpen, let gone = disconnectedAt, now >= gone.addingTimeInterval(Self.reconnectGrace) {
+            isOpen = false
+            disconnectedAt = nil
+            quietSince = nil
+        }
         if isOpen, let since = quietSince, now >= since.addingTimeInterval(Self.idleCollapseDelay) {
             isOpen = false
             quietSince = nil
@@ -146,14 +173,24 @@ public struct NeoPanelModel: Equatable, Sendable {
 
     /// When the panel will fold on its own, if it will.
     public func nextWake(at now: Date) -> Date? {
-        guard isOpen, let since = quietSince else { return nil }
-        let due = since.addingTimeInterval(Self.idleCollapseDelay)
+        guard isOpen else { return nil }
+        let due: Date?
+        if let gone = disconnectedAt {
+            due = gone.addingTimeInterval(Self.reconnectGrace)
+        } else if let since = quietSince {
+            due = since.addingTimeInterval(Self.idleCollapseDelay)
+        } else {
+            due = nil
+        }
+        guard let due else { return nil }
         return due > now ? due : now
     }
 
-    /// Starts or stops the quiet clock from what holds the panel now.
+    /// Starts or stops the quiet clock from what holds the panel now. While
+    /// the core is away the grace clock runs instead of the quiet one.
     private mutating func settle(at now: Date) {
-        if !isOpen || isHeld {
+        if !isOpen { disconnectedAt = nil }
+        if !isOpen || isHeld || disconnectedAt != nil {
             quietSince = nil
         } else if quietSince == nil {
             quietSince = now
@@ -162,21 +199,31 @@ public struct NeoPanelModel: Equatable, Sendable {
     }
 }
 
-/// How big NEO's panel is: the chat's own size, grown when the page asks for
-/// more (a browser card), within what the screen allows.
+/// How big NEO's panel is: compact by default — the chat opened by a click
+/// or a confirmation — and bigger only when the page asks for more because
+/// its content needs it (a browser card up to most of the screen, the
+/// camera or song card a little taller), never beyond the screen's share.
+///
+/// The numbers were settled against captures of the page in the notch on a
+/// 1512×982 pt MacBook screen: at 340×300 the slim header, four or five
+/// lines of chat and the input bar fit under the notch without the panel
+/// covering the window below; a browser card at 60%×70% leaves the menu
+/// bar's ends and the Dock free.
 public enum NeoPanelLayout {
-    /// The chat's size in CSS points — what NEO's page lays itself out for.
-    public static let standard = CGSize(width: 420, height: 520)
+    /// The chat's size in CSS points — what NEO's page lays itself out for
+    /// when nothing bigger is on it. The panel is this plus the notch strip.
+    public static let standard = CGSize(width: 340, height: 300)
     /// The widest and tallest the page may ask for, as fractions of the screen.
     public static let maxWidthFraction: CGFloat = 0.6
     public static let maxWidth: CGFloat = 1000
-    public static let maxHeightFraction: CGFloat = 0.86
+    public static let maxHeightFraction: CGFloat = 0.7
+    public static let maxHeight: CGFloat = 800
 
     /// The most the page may have on a screen of `screen`.
     public static func maxPageSize(screen: CGSize) -> CGSize {
         CGSize(
             width: max(standard.width, min(screen.width * maxWidthFraction, maxWidth)),
-            height: max(standard.height, screen.height * maxHeightFraction)
+            height: max(standard.height, min(screen.height * maxHeightFraction, maxHeight))
         )
     }
 

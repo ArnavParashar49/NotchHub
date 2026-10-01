@@ -137,14 +137,74 @@ struct NeoPanelTests {
         #expect(panel.isOpen)
     }
 
-    @Test("the page asking to be seen opens it; the core going away closes everything")
+    @Test("the page asking to be seen opens it; the core going away drops the cards and holds, and the panel waits for it")
     func showAndDisconnect() {
         var panel = NeoPanelModel()
         panel.show(at: t0)
         #expect(panel.isOpen && panel.isHeld)
         panel.card(.camera, open: true, at: at(1))
+        panel.pin(true, at: at(1))
         panel.disconnected(at: at(2))
-        #expect(!panel.isOpen && panel.cards.isEmpty && !panel.isHeld)
+        #expect(panel.isOpen && panel.cards.isEmpty && !panel.isHeld && !panel.isPinned && panel.isWaitingForCore)
+        // Not the quiet delay: the grace, so a restart has time to come back.
+        #expect(panel.nextWake(at: at(2)) == at(2 + NeoPanelModel.reconnectGrace))
+        #expect(!panel.tick(at: at(2 + NeoPanelModel.idleCollapseDelay)) && panel.isOpen)
+        #expect(panel.tick(at: at(2 + NeoPanelModel.reconnectGrace)) && !panel.isOpen && !panel.isWaitingForCore)
+    }
+
+    @Test("a core back within the grace leaves an ordinary open panel, which then folds after the quiet delay")
+    func reconnectWithinGrace() {
+        var panel = NeoPanelModel()
+        panel.show(at: t0)
+        panel.disconnected(at: at(1))
+        panel.reconnected(at: at(4))
+        #expect(panel.isOpen && !panel.isWaitingForCore)
+        #expect(panel.nextWake(at: at(4)) == at(4 + NeoPanelModel.idleCollapseDelay))
+        #expect(!panel.tick(at: at(4 + NeoPanelModel.idleCollapseDelay - 1)) && panel.isOpen)
+        #expect(panel.tick(at: at(4 + NeoPanelModel.idleCollapseDelay)) && !panel.isOpen)
+        // NEO answering on the way back holds it, as ever.
+        panel.show(at: at(20))
+        panel.disconnected(at: at(21))
+        panel.reconnected(at: at(22))
+        panel.receive(state: .speaking, at: at(22))
+        #expect(panel.isHeld && panel.nextWake(at: at(22)) == nil)
+    }
+
+    @Test("the live sequence: a card opens it, NEO answers, the core restarts — the panel is still there when it is back")
+    func liveRestart() {
+        var panel = NeoPanelModel()
+        panel.card(.browser, open: true, at: t0)
+        panel.receive(state: .working, at: t0)
+        panel.card(.browser, open: false, at: at(3))
+        panel.receive(state: .idle, at: at(3))
+        panel.receive(state: .thinking, at: at(4))
+        panel.receive(state: .speaking, at: at(6))
+        panel.receive(state: .idle, at: at(8))
+        #expect(panel.isOpen)
+        panel.tick(at: at(9))
+        panel.disconnected(at: at(9.5))
+        panel.receive(state: .idle, at: at(9.5))
+        #expect(panel.isOpen && panel.isWaitingForCore)
+        panel.tick(at: at(10))
+        panel.reconnected(at: at(12.5))
+        panel.receive(state: .idle, at: at(12.5))
+        #expect(panel.isOpen && !panel.isWaitingForCore)
+        #expect(!panel.tick(at: at(12.6)) && panel.isOpen)
+        #expect(panel.nextWake(at: at(12.6)) == at(12.5 + NeoPanelModel.idleCollapseDelay))
+    }
+
+    @Test("a closed panel stays closed through a restart")
+    func disconnectedWhileClosed() {
+        var panel = NeoPanelModel()
+        panel.disconnected(at: t0)
+        #expect(!panel.isOpen && !panel.isWaitingForCore && panel.nextWake(at: t0) == nil)
+        panel.reconnected(at: at(3))
+        #expect(!panel.isOpen)
+        // Closed by hand while waiting: that is the end of the wait.
+        panel.show(at: at(4))
+        panel.disconnected(at: at(5))
+        panel.close(at: at(6))
+        #expect(!panel.isOpen && !panel.isWaitingForCore && panel.nextWake(at: at(6)) == nil)
     }
 }
 
@@ -153,14 +213,26 @@ struct NeoPanelLayoutTests {
 
     let screen = CGSize(width: 1728, height: 1117)
 
-    @Test("the chat is 420×520; a request grows the page within the screen's limits")
+    @Test("the chat is compact, 340×300; a request grows the page within the screen's limits")
     func sizes() {
-        #expect(NeoPanelLayout.pageSize(requested: nil, screen: screen) == CGSize(width: 420, height: 520))
-        #expect(NeoPanelLayout.pageSize(requested: CGSize(width: 100, height: 100), screen: screen) == CGSize(width: 420, height: 520))
-        #expect(NeoPanelLayout.pageSize(requested: CGSize(width: 847, height: 788), screen: screen) == CGSize(width: 847, height: 788))
+        #expect(NeoPanelLayout.standard == CGSize(width: 340, height: 300))
+        #expect(NeoPanelLayout.pageSize(requested: nil, screen: screen) == CGSize(width: 340, height: 300))
+        #expect(NeoPanelLayout.pageSize(requested: CGSize(width: 100, height: 100), screen: screen) == CGSize(width: 340, height: 300))
+        // The camera or song card asks a little taller; the browser card asks most of the screen.
+        #expect(NeoPanelLayout.pageSize(requested: CGSize(width: 340, height: 440), screen: screen) == CGSize(width: 340, height: 440))
+        #expect(NeoPanelLayout.pageSize(requested: CGSize(width: 760, height: 591), screen: screen) == CGSize(width: 760, height: 591))
         let max = NeoPanelLayout.maxPageSize(screen: screen)
-        #expect(max.width == 1000 && abs(max.height - 1117 * 0.86) < 0.001)
+        #expect(max.width == 1000 && abs(max.height - 1117 * 0.7) < 0.001)
         #expect(NeoPanelLayout.pageSize(requested: CGSize(width: 5000, height: 5000), screen: screen) == max)
+    }
+
+    @Test("on the 1512×982 MacBook screen the browser card has 60%×70%; a huge screen is capped")
+    func screens() {
+        let macbook = NeoPanelLayout.maxPageSize(screen: CGSize(width: 1512, height: 982))
+        #expect(abs(macbook.width - 907.2) < 0.001 && abs(macbook.height - 687.4) < 0.001)
+        #expect(NeoPanelLayout.maxPageSize(screen: CGSize(width: 2880, height: 1620)) == CGSize(width: 1000, height: 800))
+        // A tiny screen still gives the chat its compact size, never less.
+        #expect(NeoPanelLayout.maxPageSize(screen: CGSize(width: 400, height: 300)) == NeoPanelLayout.standard)
     }
 
     @Test("the panel hangs from the notch, centred, the page below the notch strip")
@@ -168,11 +240,11 @@ struct NeoPanelLayoutTests {
         let geometry = NotchGeometry.make(screenFrame: CGRect(origin: .zero, size: screen), safeAreaInsets: NSEdgeInsets(top: 32, left: 0, bottom: 0, right: 0))
         var content = IslandContentSize.default
         let standard = geometry.frame(for: .neoPanel, content: content)
-        #expect(standard.width == 420 && standard.height == 552)
+        #expect(standard.width == 340 && standard.height == 332)
         #expect(standard.midX == geometry.notchFrame.midX && standard.maxY == geometry.notchFrame.maxY)
-        content.neoPanel = CGSize(width: 847, height: 788)
+        content.neoPanel = CGSize(width: 760, height: 591)
         let wide = geometry.frame(for: .neoPanel, content: content)
-        #expect(wide.width == 847 && wide.height == 820)
+        #expect(wide.width == 760 && wide.height == 623)
         // The window envelope holds the panel at its largest.
         content.neoPanel = NeoPanelLayout.maxPageSize(screen: screen)
         #expect(geometry.envelopeFrame.contains(geometry.frame(for: .neoPanel, content: content)))

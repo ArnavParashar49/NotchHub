@@ -151,6 +151,11 @@ and reconnects every 1.5 s while NEO is off. The toggle is **NEO** in
 Settings. `--neo-demo` runs a scripted turn through the fox without a core
 (the panel stays closed through the answer and opens at the OK);
 `--neo-snapshots DIR` renders each pose offscreen in each island shape.
+`NOTCHHUB_NEO_DIST=<folder>` serves that build of NEO's page (a `ui/dist`)
+instead of the installed one, for a debug run or the built-page tests.
+`NOTCHHUB_NEO_SNAPSHOTS=<dir>` makes `kill -USR1 <pid>` write NEO's page as it
+is in the open panel to that folder (the web view's own snapshot, which needs
+no screen-recording permission).
 `--neo-capturable` is a debug flag that leaves the window visible to screen
 capture in every shape (Ghost Mode and the always-private panel included), so
 `screencapture` of the notch strip shows what the user sees; in memory only.
@@ -165,9 +170,17 @@ page, unchanged, in a `WKWebView` served from NotchHub's `neo://app/` scheme
 injected before its scripts run (`neo://app` is the one origin NEO's core
 admits besides its own; the page opens its own socket with the token). The
 transcript, the confirm buttons, the in-chat browser card, the camera card
-and the song card all work as in NEO's window; the page fills the panel
-(420×520 under the notch strip, growing for a browser card up to 60% of the
-screen) on the island's black with no card of its own.
+and the song card all work as in NEO's window; the page fills the panel on
+the island's black with no card of its own, in the notch's own dress: a
+slim header (a small orb, NEO, its state), quiet bubbles and tool pills,
+the cards as compact rows, the input bar at the bottom.
+
+The panel is **compact** — 340×300 under the notch strip
+(`NeoPanelLayout.standard`), what a click or a "Needs your OK" opens — and
+grows only when the page asks because its content needs it: the camera or
+song card a little taller, the browser card up to 60% of the screen's width
+and 70% of its height (at most 1000×800), never more. The island decides
+the frame; the page lays itself out for whatever it is given.
 
 - NEO thinking, working, searching or speaking **never opens it**: a voice
   answer is the fox's alone, posing in the notch. It opens only when NEO
@@ -182,6 +195,10 @@ screen) on the island's black with no card of its own.
   pinned, or it was opened by hand and NEO has not answered since; it never
   folds mid-reply. Esc or the page's collapse button close it at once; closed while NEO was busy it stays closed for the rest
   of that turn.
+- The core going away (a restart) does not yank an open panel: the page
+  shows a quiet "Reconnecting to NEO…" line and the panel waits 15 s
+  (`NeoPanelModel.reconnectGrace`) for the core to come back before it
+  folds. A closed panel stays closed.
 - Clicks on the panel reach the page without the island being key; the first
   click into it (or the click on the island that opened it) makes the window
   key and tells the page (`neo://show`) so typing lands in NEO's input — NEO

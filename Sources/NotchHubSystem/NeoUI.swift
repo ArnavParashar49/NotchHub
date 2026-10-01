@@ -12,8 +12,19 @@ import WebKit
 /// the panel simply does not exist.
 public enum NeoUIBundle {
     /// Where NEO's install script puts the page.
-    public static let defaultFolder = URL(fileURLWithPath: NSHomeDirectory())
+    public static let installFolder = URL(fileURLWithPath: NSHomeDirectory())
         .appendingPathComponent("Library/Application Support/NEO/ui", isDirectory: true)
+    /// `NOTCHHUB_NEO_DIST=<folder>` serves that build of NEO's page instead
+    /// (a `ui/dist` under work, before it is installed): a debug aid, read
+    /// once at launch, never written.
+    public static let overrideVariable = "NOTCHHUB_NEO_DIST"
+    /// The folder NotchHub looks in: the override when set, else the install.
+    public static let defaultFolder: URL = overriddenFolder(ProcessInfo.processInfo.environment) ?? installFolder
+
+    static func overriddenFolder(_ environment: [String: String]) -> URL? {
+        guard let path = environment[overrideVariable], !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+    }
 
     /// The folder holding NEO's page, or `nil` when it is not installed — or
     /// when the page failed to load this run (`disableForThisRun`).
