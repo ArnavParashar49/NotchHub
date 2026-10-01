@@ -8,7 +8,8 @@ import NotchHubCore
 /// This listener is a second client beside NEO's own overlay: it reads that
 /// one file (nothing else under `~/.neo`), connects with the token, and turns
 /// the core's `hello` / `state` / `transcript` / `note` / `error` messages and
-/// its card openings (`browser_open` …) into `NeoFact`s. It sends two kinds
+/// its card openings (`browser_open` …) and its `woke` (NEO summoned by hand)
+/// into `NeoFact`s. It sends two kinds
 /// of command and nothing else, ever: `camera_view visible:false`, so the
 /// core never streams camera frames to a client that cannot show them; and,
 /// when NotchHub hosts NEO's UI (`hostsUI`), `ui_host notch` on every
@@ -245,6 +246,7 @@ public final class NeoListener: NSObject, SystemListener {
         case "camera_close": return [.card(.camera, open: false)]
         case "song_open": return [.card(.song, open: true)]
         case "song_close": return [.card(.song, open: false)]
+        case "woke": return [.woke] // summoned by hand (the hotkey, the tray)
         default:
             return []
         }

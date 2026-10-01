@@ -15,20 +15,27 @@ public enum NeoCardKind: String, CaseIterable, Equatable, Sendable {
 /// The rules, as the lane's: pure and clock-driven, every method takes `now`
 /// and `nextWake(at:)` says when the panel will change by itself.
 ///
-/// - It opens when NEO starts answering (thinking, working, searching,
-///   speaking, needs your OK), when a card opens, when the page asks
-///   (a login page, a question), and when the lane is clicked.
-/// - It closes `idleCollapseDelay` after NEO is quiet again (idle or merely
-///   listening) — unless the mouse is in it, a card is open, it is pinned,
-///   or it was opened by hand and NEO has not answered since.
+/// - NEO thinking, working, searching or speaking never opens it: a voice
+///   answer is the orb's alone, animating in the notch. It opens only when
+///   NEO needs the user — a confirmation ("Needs your OK"), a card (the
+///   browser, the camera, a song), the page asking to be seen (a login
+///   page, a question) — or when the user asks: a click on the lane, or
+///   NEO summoned by hand (the hotkey, the tray: `woke`).
+/// - Once open it closes `idleCollapseDelay` after NEO is quiet (idle or
+///   merely listening) — unless the mouse is in it, a card is open, it is
+///   pinned, or it was opened by hand and NEO has not answered since. While
+///   NEO is answering an open panel stays open: it never folds mid-reply.
 /// - Esc / the page's collapse / a click on the lane close it at once; closed
 ///   while NEO was busy, it stays closed until NEO is quiet again, so the
-///   next state change of the same turn does not pop it back open.
+///   rest of that turn (a card, a confirmation) does not pop it back open.
 public struct NeoPanelModel: Equatable, Sendable {
     /// How long after NEO goes quiet the panel folds back into the lane.
     public static let idleCollapseDelay: TimeInterval = 5
-    /// The states in which NEO is answering: the panel opens for them.
+    /// The states in which NEO is answering: an open panel is held through
+    /// them, and a hand-opened hold is spent by them. They do NOT open it.
     public static let answeringStates: Set<NeoState> = [.thinking, .working, .searching, .speaking, .confirming]
+    /// The one state that opens the panel on its own: NEO needs the user.
+    public static let openingStates: Set<NeoState> = [.confirming]
 
     public private(set) var isOpen = false
     public private(set) var cards: Set<NeoCardKind> = []
@@ -57,9 +64,11 @@ public struct NeoPanelModel: Equatable, Sendable {
     public mutating func receive(state next: NeoState, at now: Date) {
         state = next
         if Self.isAnswering(next) {
-            if !dismissedUntilQuiet {
+            // A new answer: the hand-opened hold is spent (the quiet clock
+            // runs once NEO is done). Only NEO needing the user opens it.
+            heldByUser = false
+            if Self.openingStates.contains(next), !dismissedUntilQuiet {
                 isOpen = true
-                heldByUser = false // a new answer: the hand-opened hold is spent
             }
         } else {
             dismissedUntilQuiet = false
@@ -78,8 +87,9 @@ public struct NeoPanelModel: Equatable, Sendable {
         settle(at: now)
     }
 
-    /// The page asked to be seen (a login page, a question, a wake), or the
-    /// lane was clicked while closed.
+    /// The page asked to be seen (a login page, a question), NEO was
+    /// summoned by hand (the hotkey, the tray), or the lane was clicked
+    /// while closed: the explicit show.
     public mutating func show(at now: Date) {
         isOpen = true
         heldByUser = true

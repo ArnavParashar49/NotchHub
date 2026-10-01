@@ -138,7 +138,8 @@ NotchHub is a second client of NEO's core (`ws://127.0.0.1:8765`, the token in
 `~/.neo/ws-token` — the only thing it reads under `~/.neo`). It sends
 `camera_view visible:false`, so the core never streams camera frames to it,
 and reconnects every 1.5 s while NEO is off. The toggle is **NEO** in
-Settings. `--neo-demo` runs a scripted turn through the lane without a core;
+Settings. `--neo-demo` runs a scripted turn through the lane without a core
+(the panel stays closed through the answer and opens at the OK);
 `--neo-snapshots DIR` renders the lane offscreen in every shape.
 `--neo-capturable` is a debug flag that leaves the window visible to screen
 capture in every shape (Ghost Mode and the always-private panel included), so
@@ -158,15 +159,19 @@ and the song card all work as in NEO's window; the page fills the panel
 (420×520 under the notch strip, growing for a browser card up to 60% of the
 screen) on the island's black with no card of its own.
 
-- It opens when NEO starts answering (thinking, working, searching, speaking,
-  needs your OK), when a card opens, when NEO's page asks (a login page, a
-  question) and when the lane is clicked. The lane keeps showing beside the
-  notch.
-- It folds back to the lane **5 s after NEO is quiet** (idle or merely
-  listening) — unless the mouse is in it, a card is open, it is pinned, or
-  it was opened by hand and NEO has not answered since. Esc, the page's
-  collapse button, or a click on the lane close it at once; closed while NEO
-  was busy it stays closed for the rest of that turn.
+- NEO thinking, working, searching or speaking **never opens it**: a voice
+  answer is the orb's alone, animating in the notch. It opens only when NEO
+  needs you — "Needs your OK", a card opening (the browser, the camera, a
+  song), NEO's page asking to be seen (a login page, a question) — or when
+  you ask: a click on the lane, or NEO summoned by hand (⌘⇧Space, its
+  menu-bar item: the core's `woke` event, which the wake word never sends).
+  The lane keeps showing beside the notch either way.
+- Once open it folds back to the lane **5 s after NEO is quiet** (idle or
+  merely listening) — unless the mouse is in it, a card is open, it is
+  pinned, or it was opened by hand and NEO has not answered since; it never
+  folds mid-reply. Esc, the page's collapse button, or a click on the lane
+  close it at once; closed while NEO was busy it stays closed for the rest
+  of that turn.
 - Clicks on the panel reach the page without the island being key; the first
   click into it (or on the lane) makes the window key so typing lands in
   NEO's input — NEO starting to talk never steals what you are typing.

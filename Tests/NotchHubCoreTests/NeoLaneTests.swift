@@ -61,6 +61,15 @@ struct NeoLaneModelTests {
         return lane
     }
 
+    @Test("a card or a wake is the panel's business: the lane does not stir")
+    func panelFactsLeaveTheLaneAlone() {
+        var lane = connected(at: t0)
+        lane.receive(.state(.idle), at: t0)
+        #expect(lane.receive(.card(.browser, open: true), at: t0) == nil)
+        #expect(lane.receive(.woke, at: t0) == nil)
+        #expect(lane.content(at: t0) == nil && !lane.isShown(at: t0))
+    }
+
     @Test("hidden while NEO is idle or away; out while it is busy")
     func visibility() {
         var lane = NeoLaneModel()

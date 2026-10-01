@@ -22,6 +22,7 @@ extension NotchHubApp {
         neoLane.receive(fact, at: now)
         switch fact {
         case let .card(kind, open): neoPanel.card(kind, open: open, at: now)
+        case .woke: neoPanel.show(at: now) // summoned by hand: the explicit show
         case .connected(false): neoPanel.disconnected(at: now)
         default: break
         }
@@ -83,8 +84,10 @@ extension NotchHubApp {
 
     /// `--neo-demo`: a scripted NEO turn, fed straight into the lane without
     /// a core — connect, listen (with what it hears), think, search, speak
-    /// (with what it says), go idle — repeating, so the lane can be watched
-    /// coming out of the notch and tucking back in.
+    /// (with what it says), then ask for an OK, go idle — repeating, so the
+    /// lane can be watched coming out of the notch and tucking back in. The
+    /// panel stays closed through the whole answer (only the orb moves) and
+    /// opens at "Needs your OK"; 5 s after idle it folds.
     func runNeoDemo() {
         let heard = "what's the weather like in Paris this weekend"
         let said = "Paris looks mild this weekend: sunny on Saturday, around 19 degrees, with a few clouds on Sunday."
@@ -131,7 +134,7 @@ extension NotchHubApp {
         }
         neoDemoRound = run
         run(round: 0)
-        log("neo-demo: one turn every \(Int(period)) s")
+        log("neo-demo: one turn every \(Int(period)) s — the panel stays closed while NEO answers; it opens at the OK")
     }
 
     func runNeoDemoRound(_ round: Int) {

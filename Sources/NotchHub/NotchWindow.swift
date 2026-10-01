@@ -326,7 +326,13 @@ final class NotchWindow: NSPanel {
         // is active) and a global monitor (for when the user is in Chrome/other
         // apps).
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
-            self?.handleMouseMove(event.locationInWindow)
+            guard let self else { return event }
+            // Window-local only when the event's window is this one. With no
+            // window at all — the cursor outside the island while NotchHub is
+            // the active app, as it is after a panel closes — the location is
+            // in screen coordinates, and read as local it once opened the
+            // wings with the mouse far away. See `MouseLocation`.
+            self.handleMouseMove(MouseLocation.inWindow(event.locationInWindow, eventWindowFrame: event.window?.frame, windowFrame: self.frame))
             return event
         }
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in

@@ -35,6 +35,12 @@ struct NeoListenerParsingTests {
         #expect(NeoListener.facts(in: #"{"type":"song_close","data":{"sid":"m"},"ts":1}"#) == [.card(.song, open: false)])
     }
 
+    @Test("NEO summoned by hand (the hotkey, the tray) is a fact for the panel")
+    func woke() {
+        #expect(NeoListener.facts(in: #"{"type":"woke","data":{"source":"ui"},"ts":1}"#) == [.woke])
+        #expect(NeoListener.facts(in: #"{"type":"woke","data":{},"ts":1}"#) == [.woke])
+    }
+
     @Test("garbage and unknown states yield nothing rather than a crash")
     func garbage() {
         #expect(NeoListener.facts(in: "not json").isEmpty)

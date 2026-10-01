@@ -97,7 +97,7 @@ public struct NeoLaneModel: Equatable, Sendable {
             notice = text.isEmpty ? nil : (text, now.addingTimeInterval(Self.noteLifetime))
         case let .error(message):
             notice = message.isEmpty ? nil : (message, now.addingTimeInterval(Self.noteLifetime))
-        case .card:
+        case .card, .woke:
             break // the panel's business (`NeoPanelModel`), not the lane's
         }
         lastReported = content(at: now)
