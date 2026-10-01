@@ -1,9 +1,10 @@
 import Foundation
 
-/// Who the pet is.
+/// Who the pet is: the fox in the notch is NEO, the voice assistant — its
+/// poses are what NEO is doing (`PetBrain.neoAnimation`).
 public enum PetIdentity {
     /// The fox's name.
-    public static let name = "Notchy"
+    public static let name = "Neo"
     /// What it says when its panel opens (a holiday greeting takes its place).
     public static var hello: String { "Hi, I'm \(name)!" }
 }

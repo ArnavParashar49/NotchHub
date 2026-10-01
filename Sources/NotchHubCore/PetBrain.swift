@@ -5,6 +5,8 @@ import Foundation
 public enum PetMood: String, CaseIterable, Sendable {
     case idle, sleeping, curious, happy, music, timer, download, meeting, coding
     case charging, lowBattery, notification, celebrating, interaction, mischief, focus
+    /// The pet is NEO, and NEO is doing something (`PetContext.neoState`).
+    case neo
 }
 
 /// The small things the user can do with the pet.
@@ -100,8 +102,15 @@ public struct PetContext: Equatable, Sendable {
     /// The pet has its dock beside a real notch (whether or not the island
     /// rests right now) — where a requested trick can play.
     public var isDocked = false
+    /// What NEO is doing, as its core reports it (after the dwell): the pet
+    /// IS NEO, so this is its pose while NEO is busy. `nil` while NEO is
+    /// off or away; `.idle` is NEO ready, which is the pet's own life.
+    public var neoState: NeoState?
 
     public init() {}
+
+    /// NEO is doing something: the pet shows it.
+    public var isNeoBusy: Bool { (neoState ?? .idle) != .idle }
 
     public var isLowBattery: Bool {
         !isCharging && (batteryPercent ?? 100) <= 10
@@ -111,14 +120,14 @@ public struct PetContext: Equatable, Sendable {
     /// the pet awake while it lasts. (Charging and battery level do not.)
     var engagement: [Bool] {
         [isHovering, isPetHovered, interactionOpen, isMusicPlaying, inMeeting,
-         isAgentWorking, isTimerRunning, isDownloading, isFocusing]
+         isAgentWorking, isTimerRunning, isDownloading, isFocusing, isNeoBusy]
     }
 
     /// What wakes a pet the user put to sleep, when it STARTS: coming back to
     /// the notch, or the Mac starting something. Pointing at the pet or closing
     /// its panel does not.
     var wakeTriggers: [Bool] {
-        [isHovering, isMusicPlaying, inMeeting, isAgentWorking, isTimerRunning, isDownloading, isFocusing]
+        [isHovering, isMusicPlaying, inMeeting, isAgentWorking, isTimerRunning, isDownloading, isFocusing, isNeoBusy]
     }
 }
 
@@ -546,6 +555,12 @@ public struct PetBrain {
             if !c.meetingCameraOn { return base(.meeting, .meetingCameraOff) }
             return base(.meeting, .meetingListen, [.meetingType, .meetingTalk], delay: 4...10)
         }
+        // The pet is NEO: while NEO is busy its pose is what NEO is doing,
+        // over the cursor, sleep and every activity. Its poses animate on
+        // their own, so they take no flourishes.
+        if let neo = c.neoState, neo != .idle {
+            return base(.neo, Self.neoAnimation(for: neo))
+        }
         if forcedSleep {
             return base(.sleeping, .sleep, [.sleepZzz], delay: 14...28, calm: true)
         }
@@ -593,6 +608,24 @@ public struct PetBrain {
             if c.canRoam { idle += [.pounce, .pounce] }
         }
         return base(.idle, .sit, idle, calm: true)
+    }
+
+    /// The pose for what NEO is doing. Listening is attentive (ears up, a slow
+    /// breath); thinking scratches its head; working paces; searching sniffs
+    /// around with the magnifier; speaking talks to a cadence; needing an OK
+    /// insists with its "!"; connecting wakes and stretches. Idle is the
+    /// pet's own life.
+    public static func neoAnimation(for state: NeoState) -> PetAnimationID {
+        switch state {
+        case .idle: return .sit
+        case .connecting: return .neoWake
+        case .listening: return .neoListen
+        case .thinking: return .neoThink
+        case .working: return .neoPace
+        case .searching: return .neoSniff
+        case .speaking: return .neoTalk
+        case .confirming: return .neoAsk
+        }
     }
 
     private func activeFlourishes(_ base: Base, _ context: PetContext) -> [PetAnimationID] {

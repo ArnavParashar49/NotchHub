@@ -24,12 +24,13 @@ wrapper). Three layers, strictly separated:
 
 - **NotchHubOrbs** — NEO's thinking orbs: `OrbEngine`, a port of the
   `thinking-orbs` geometry engine (MIT, see `THIRD_PARTY.md`), and `OrbView`,
-  the canvas that paints it
+  the canvas that paints it (unused by the island since the fox became NEO;
+  kept with its goldens)
 - **NotchHubCore** — pure, testable domain (no GUI):
   - `NotchGeometry` — notch detection + island frame math
-  - `NeoState` · `NeoStateHold` · `NeoLaneModel` · `NeoLaneLayout` — NEO's
-    state, the dwell that keeps its orb from strobing, what its lane shows and
-    when it tucks in, and how wide it is
+  - `NeoState` · `NeoStateHold` · `NeoPresenceModel` · `NeoPanelModel` —
+    NEO's state, the dwell that keeps the fox from strobing, whether NEO is
+    here and busy, and whether its chat is open
   - `Activity` / `ActivityKind` — the activity model
   - `ActivityQueue` — primary + stack, priority ordering, transients, auto-dismiss
   - `IslandStateMachine` — idle / wings / compact / expanded / interactive
@@ -116,31 +117,40 @@ Every other surface follows the setting.
 
 ## NEO in the notch
 
-[NEO](../Neo%202.0/NEO), the voice assistant, lives in the notch. While it is
-ready nothing shows — the island is exactly as it was. The moment its core
-reports anything else (listening, thinking, working, searching, speaking,
-connecting, needs your OK) a lane springs out of the notch's **left** edge:
-NEO's own animated orb, the full notch height less 4 pt (the 64-pt design
-drawn small, its ink lifted to white so it reads on black), and nothing else —
-no status words, no transcript; what NEO hears and says is the panel's to
-show. The lane is the orb plus a little padding (the notch's height plus
-12 pt), the same in every state and every shape, so nothing else grows for it.
-Each state shows for at least 350 ms so the orb never strobes; 1.2 s after NEO
-is ready again the lane tucks back in.
+[NEO](../Neo%202.0/NEO), the voice assistant, lives in the notch — as the
+pet. The pixel fox beside the notch **is NEO**: its name is Neo, it is on
+screen whenever NEO's core is connected (whatever Show Pet says), and while
+NEO is busy its pose is what NEO is doing. The island's shape never changes
+for NEO: with NEO ready the fox lives its own life — the idle island is
+exactly the pre-NEO one, mischief and all — and with NEO active the fox
+simply animates, in whatever shape the island is in (idle, the hover wings,
+the compact bar, the expanded island). Nothing is added, nothing grows.
 
-The lane is never an activity: it sits beside the notch in every shape (idle,
-the hover wings, the compact bar, the expanded island and the panels), the
-notch-height bars grow their left side for it, and it never takes the mouse
-while idle, so clicks pass through as before. A pet visiting the left of the
-notch steps into the notch while the lane is out.
+The poses, from the fox's own frames (`PetBrain.neoAnimation`):
+
+- **connecting** → waking: a stretch, then standing alert
+- **listening** → attentive: ears up, eyes on you, a slow breath
+- **thinking** → the thought bubble, scratching its head
+- **working** → pacing toward the notch and back
+- **searching** → the magnifier, then a sniff along the ground
+- **speaking** → talking to a cadence, with a small bob
+- **needs your OK** → the "!", insisting gently
+- **ready** → settles back into its own life (and 1.2 s after a turn ends,
+  a click on the island still opens the chat)
+
+Each state shows for at least 350 ms so the fox never strobes; a pose
+outranks the cursor, sleep and every activity's mood, but not the fox's own
+panel or a call's controls. NEO starting wakes a fox that was put to sleep
+and ends a game on the dock (the game comes home first — the fox is never
+cut mid-leap).
 
 NotchHub is a second client of NEO's core (`ws://127.0.0.1:8765`, the token in
 `~/.neo/ws-token` — the only thing it reads under `~/.neo`). It sends
 `camera_view visible:false`, so the core never streams camera frames to it,
 and reconnects every 1.5 s while NEO is off. The toggle is **NEO** in
-Settings. `--neo-demo` runs a scripted turn through the lane without a core
+Settings. `--neo-demo` runs a scripted turn through the fox without a core
 (the panel stays closed through the answer and opens at the OK);
-`--neo-snapshots DIR` renders the lane offscreen in every shape.
+`--neo-snapshots DIR` renders each pose offscreen in each island shape.
 `--neo-capturable` is a debug flag that leaves the window visible to screen
 capture in every shape (Ghost Mode and the always-private panel included), so
 `screencapture` of the notch strip shows what the user sees; in memory only.
@@ -160,43 +170,41 @@ and the song card all work as in NEO's window; the page fills the panel
 screen) on the island's black with no card of its own.
 
 - NEO thinking, working, searching or speaking **never opens it**: a voice
-  answer is the orb's alone, animating in the notch. It opens only when NEO
+  answer is the fox's alone, posing in the notch. It opens only when NEO
   needs you — "Needs your OK", a card opening (the browser, the camera, a
   song), NEO's page asking to be seen (a login page, a question) — or when
-  you ask: a click anywhere on the island while the orb is out, or NEO
-  summoned by hand (⌘⇧Space, its menu-bar item: the core's `woke` event,
-  which the wake word never sends). The lane keeps showing either way —
-  but with the panel open its small orb fades out (the chat's own big orb
-  is on screen: one orb at a time) and fades back in as the panel folds;
-  the strip itself stays, so nothing jumps.
-- Once open it folds back to the lane **5 s after NEO is quiet** (idle or
+  you ask: a click anywhere on the island (the fox included) while NEO is
+  active, or NEO summoned by hand (⌘⇧Space, its menu-bar item: the core's
+  `woke` event, which the wake word never sends). The panel draws no fox:
+  the chat's own orb is the only NEO on screen there.
+- Once open it folds back **5 s after NEO is quiet** (idle or
   merely listening) — unless the mouse is in it, a card is open, it is
   pinned, or it was opened by hand and NEO has not answered since; it never
-  folds mid-reply. Esc, the page's collapse button, or a click on the orb in
-  the panel's strip close it at once; closed while NEO was busy it stays closed for the rest
+  folds mid-reply. Esc or the page's collapse button close it at once; closed while NEO was busy it stays closed for the rest
   of that turn.
 - Clicks on the panel reach the page without the island being key; the first
   click into it (or the click on the island that opened it) makes the window
   key and tells the page (`neo://show`) so typing lands in NEO's input — NEO
   starting to talk never steals what you are typing.
 - It is never shown to screen capture, as NEO's own window is not
-  (`GhostMode.alwaysPrivate`), and Ghost Mode hides the lane with the rest.
+  (`GhostMode.alwaysPrivate`), and Ghost Mode hides the fox with the rest.
 - Whenever it connects, NotchHub tells the core `ui_host: notch`, so NEO.app
   keeps its own window hidden (its menu-bar item and hotkeys stay; the
   hotkeys still wake NEO), and `ui_host: window` as it quits, so NEO's own
-  orb returns. Without the installed page nothing is sent and the lane is all
+  orb returns. Without the installed page nothing is sent and the fox is all
   there is.
 
-`NeoLaneModel` (what the lane shows) and `NeoPanelModel` (whether the panel
-is open) are both pure and clock-driven; the panel takes NEO's state from the
-lane's hold, so the two can never disagree.
+`NeoPresenceModel` (NEO's held state and whether its core is there) and
+`NeoPanelModel` (whether the panel is open) are both pure and clock-driven;
+the pet and the panel both take NEO's state from the presence's hold, so
+they can never disagree.
 
 None of this touches the island while NEO is absent: with the core off, or on
-and idle, there is no lane and no panel and every shape is exactly its
-pre-NEO frame (`NeoAbsentTests`, and `--surface-snapshots` / `--app-snapshots`
-/ `--pet-panel-snapshots` render pixel-identical to the build before NEO). If
+and idle, there is no panel and every shape is exactly its pre-NEO frame
+(`NeoAbsentTests`, and `--surface-snapshots` / `--app-snapshots` /
+`--pet-panel-snapshots` render pixel-identical to the build before NEO). If
 the page is not installed, or fails to load, NotchHub behaves as if the NEO
-feature were off — the lane alone, NEO's own window handed back, one log
+feature were off — the fox alone, NEO's own window handed back, one log
 line — and the **NEO** tile in Settings turns the feature off entirely.
 
 ## Permissions
@@ -249,7 +257,7 @@ sharing), Ghost Mode, details
 about the frontmost app (a browser's page and tabs with navigation, the focused
 window's title, and Claude Code / Codex / Foxora Studio session tracking —
 model, working state, tokens, turns, context and Codex plan limits), a pixel-art
-fox named Notchy that lives in the notch, reacts to what you're doing and gets up to mischief
+fox named Neo — NEO itself, see above — that lives in the notch, reacts to what you're doing and gets up to mischief
 when nothing is (hiding behind the notch, peeking out, dashing to the other
 side) — click it to stroke it, ask for tricks, start a 25-minute focus session
 together, or dress it up (colour looks, seasonal hats). It also knows the major

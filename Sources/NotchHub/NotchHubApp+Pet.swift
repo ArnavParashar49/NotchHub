@@ -3,7 +3,10 @@ import NotchHubCore
 import NotchHubSystem
 import SwiftUI
 
-/// The pixel pet: a tiny companion living in the notch.
+/// The pixel pet: a tiny companion living in the notch — and NEO itself.
+/// While NEO's core is connected the pet is on screen whatever Show Pet
+/// says, and while NEO is busy its pose is what NEO is doing
+/// (`PetContext.neoState`, `PetBrain.neoAnimation`).
 ///
 /// Architecture — the pet never looks at views:
 /// island state (activities, wing status, panels) → `petContext()` →
@@ -16,7 +19,7 @@ import SwiftUI
 /// the pet move as one. With the pet hidden, none of this affects the island.
 extension NotchHubApp {
 
-    var petVisible: Bool { petSettings.showPet }
+    var petVisible: Bool { petSettings.showPet || neoPresent }
 
     /// Whether idle keeps the pet's black dock beside the notch. Only on a
     /// display with a notch: elsewhere idle stays fully transparent.
@@ -61,6 +64,8 @@ extension NotchHubApp {
         // lasting activity (music, a timer, a download, a call) holds it up —
         // even one waiting behind a transient readout.
         context.isDocked = petDocked && !queue.all.contains { $0.autoDismiss == 0 }
+        // The pet is NEO: what NEO is doing is its pose.
+        context.neoState = neoPresent ? neoPresence.state : nil
         return context
     }
 
@@ -261,8 +266,6 @@ extension NotchHubApp {
         guard state != .idle || window.hasNotch else { return nil }
         let content = islandModel.contentSize
         let dock = content.petDock ?? .home
-        // NEO's lane has the left side: a pet docked there is in the notch.
-        if state == .idle, dock.side == .left, content.neoLead > 0 { return nil }
         let frame = window.localFrame(for: state, content: content)
         guard let placement = PetLayout.placement(for: state, islandSize: frame.size, notchHeight: window.notchHeight, dock: dock) else {
             return nil

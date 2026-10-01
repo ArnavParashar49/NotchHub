@@ -1,15 +1,16 @@
 import AppKit
 import NotchHubCore
-import NotchHubOrbs
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// `--neo-snapshots DIR`: the real `IslandView` with NEO's lane, rendered
-/// offscreen with `ImageRenderer` in each island shape and NEO state, so the
-/// lane's placement, width, mask and orb can be checked without a core or a
-/// screen recording. The hardware notch is drawn over it in translucent red.
-/// The last row is NEO's panel (its chat hangs down from the notch) with a
-/// stand-in for the page: a web view cannot be rendered offscreen.
+/// `--neo-snapshots DIR`: the real `IslandView` with the pet posing as NEO,
+/// rendered offscreen with `ImageRenderer` in each of NEO's states and in
+/// the island shapes it can be in, so each pose can be checked without a
+/// core or a screen recording. Every row's island is exactly the pre-NEO
+/// island — the pet's pose is all that changes. The hardware notch is drawn
+/// over it in translucent red. The last row is NEO's panel (its chat hangs
+/// down from the notch, with no pet) with a stand-in for the page: a web
+/// view cannot be rendered offscreen.
 @MainActor
 enum NeoSnapshots {
 
@@ -24,35 +25,32 @@ enum NeoSnapshots {
         struct Row {
             let name: String
             let state: IslandState
-            let neo: NeoLaneContent?
+            let neo: NeoState?
             var activity: Activity? = nil
             var wings: WingStatus? = nil
-            var pet: PetDock? = nil
+            /// Which frame of the pose to draw (its loop's n-th cel).
+            var frame: Int = 0
         }
-        let rows: [Row] = [
-            Row(name: "idle, tucked in", state: .idle, neo: nil),
-            Row(name: "idle, connecting", state: .idle, neo: NeoLaneContent(state: .connecting, line: NeoState.connecting.label)),
-            Row(name: "idle, listening (no words yet)", state: .idle, neo: NeoLaneContent(state: .listening, line: NeoState.listening.label)),
-            Row(name: "idle, listening", state: .idle, neo: NeoLaneContent(state: .listening, line: "what's the weather like in Paris this weekend", isTranscript: true)),
-            Row(name: "idle, thinking", state: .idle, neo: NeoLaneContent(state: .thinking, line: NeoState.thinking.label)),
-            Row(name: "idle, searching", state: .idle, neo: NeoLaneContent(state: .searching, line: NeoState.searching.label)),
-            Row(name: "idle, speaking", state: .idle, neo: NeoLaneContent(state: .speaking, line: "Paris looks mild this weekend: sunny on Saturday, around 19 degrees.", isTranscript: true)),
-            Row(name: "idle, confirming", state: .idle, neo: NeoLaneContent(state: .confirming, line: NeoState.confirming.label)),
-            Row(name: "idle, speaking, pet home", state: .idle, neo: NeoLaneContent(state: .speaking, line: "Done.", isTranscript: true), pet: .home),
-            // As the coordinator sizes it: a pet visiting the left steps into the notch.
-            Row(name: "idle, working, pet visiting the left (hidden)", state: .idle, neo: NeoLaneContent(state: .working, line: NeoState.working.label), pet: PetDock(side: .left, reach: 0)),
-            Row(name: "wings, thinking", state: .wings, neo: NeoLaneContent(state: .thinking, line: NeoState.thinking.label),
+        var rows: [Row] = [Row(name: "idle, NEO ready (the pet's own life)", state: .idle, neo: .idle)]
+        for state in NeoState.allCases where state != .idle {
+            let animation = PetBrain.neoAnimation(for: state).animation
+            let frames = max(1, min(animation.frames.count, animation.loops ? 4 : 2))
+            for frame in 0..<frames {
+                rows.append(Row(name: "idle, \(state.rawValue) — \(PetBrain.neoAnimation(for: state).rawValue) cel \(frame)", state: .idle, neo: state, frame: frame))
+            }
+        }
+        rows += [
+            Row(name: "wings, listening", state: .wings, neo: .listening,
                 wings: WingStatus(left: WingItem(symbol: "safari", label: "Safari"), right: [WingItem(symbol: "wifi", label: "Wi-Fi"), WingItem(symbol: "battery.100.bolt", label: "82%", tint: .accent)], musicPlaying: false, strip: nil)),
-            Row(name: "compact (volume), speaking", state: .compact, neo: NeoLaneContent(state: .speaking, line: "Turning it down.", isTranscript: true), activity: .volume(0.62)),
-            Row(name: "expanded (music), listening", state: .expanded, neo: NeoLaneContent(state: .listening, line: "play something quieter", isTranscript: true), activity: .music(title: "Midnight City", artist: "M83")),
-            Row(name: "NEO panel (the chat, 420×520 under the notch), speaking", state: .neoPanel, neo: NeoLaneContent(state: .speaking, line: "Paris looks mild this weekend.", isTranscript: true)),
+            Row(name: "compact (volume), speaking", state: .compact, neo: .speaking, activity: .volume(0.62)),
+            Row(name: "expanded (music), thinking", state: .expanded, neo: .thinking, activity: .music(title: "Midnight City", artist: "M83")),
+            Row(name: "NEO panel (the chat, 420×520 under the notch), speaking — no pet", state: .neoPanel, neo: .speaking),
         ]
 
         let panelHeight = geometry.frame(for: .neoPanel, content: .default).height
         let height: CGFloat = max(44, NotchGeometry.expandedHeight + 8)
         let scale: CGFloat = 2
         let rowHeight = Int(height * scale) + 6
-        // Row heights: the bars' standard height, the panel its own.
         func rowPixels(_ row: Row) -> Int { row.state == .neoPanel ? Int((panelHeight + 8) * scale) + 6 : rowHeight }
         let totalHeight = rows.reduce(0) { $0 + rowPixels($1) }
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
@@ -66,29 +64,23 @@ enum NeoSnapshots {
             var content: IslandContentSize
             switch row.state {
             case .wings:
-                let sides = IslandMetrics.wings(row.wings ?? WingStatus(), petSlot: 0)
+                let sides = IslandMetrics.wings(row.wings ?? WingStatus(), petSlot: PetLayout.barSlot)
                 content = IslandContentSize(compactLead: 0, compactTrail: 0, wingSide: sides.trail)
                 content.wingLead = sides.lead
             case .compact:
-                content = row.activity.map { IslandMetrics.compact($0) } ?? .default
+                content = row.activity.map { IslandMetrics.compact($0, petSlot: PetLayout.barSlot) } ?? .default
             default:
                 content = .default
             }
-            content.petDock = row.pet
-            if let neo = row.neo {
-                content.neoLead = NeoLaneLayout.width(notchHeight: notchHeight)
-                switch row.state {
-                case .idle, .wings, .compact: break
-                default:
-                    let surface = geometry.frame(for: row.state, content: content).width
-                    content.neoLead = NeoLaneLayout.fitted(width: content.neoLead, surfaceWidth: surface, notchWidth: notch.width)
-                }
-            }
+            if row.state == .idle { content.petDock = .home }
             let frame = geometry.frame(for: row.state, content: content)
             let local = CGRect(x: frame.minX - regionMinX, y: 0, width: frame.width, height: frame.height)
-            let petModel = row.pet.map { dock in
-                PetRenderModel(presentation: PetPresentation(mood: .idle, animation: .sit, startedAt: now, mirrored: dock.side == .left))
-            }
+            // The pose as the brain gives it, started so that the wanted cel shows now.
+            let petModel: PetRenderModel? = row.state == .neoPanel ? nil : {
+                let id = row.neo.map(PetBrain.neoAnimation(for:)) ?? .sit
+                let started = now.addingTimeInterval(-Double(row.frame) * id.animation.frameDuration - 0.001)
+                return PetRenderModel(presentation: PetPresentation(mood: (row.neo ?? .idle) == .idle ? .idle : .neo, animation: id, startedAt: started))
+            }()
             let rowHeightPoints = row.state == .neoPanel ? panelHeight + 8 : height
             let placeholder: AnyView? = row.state == .neoPanel
                 ? AnyView(VStack(spacing: 8) {
@@ -99,8 +91,7 @@ enum NeoSnapshots {
             let view = IslandView(
                 current: row.activity, stackCount: 0, state: row.state, localFrame: local, cornerRadius: 10,
                 notchInset: notchHeight, isIdle: row.state == .idle, wingStatus: row.wings ?? WingStatus(),
-                notchWidth: notch.width, contentSize: content, panelContent: placeholder, surfaceVisible: true, pet: petModel, hasNotch: true,
-                neo: row.neo
+                notchWidth: notch.width, contentSize: content, panelContent: placeholder, surfaceVisible: true, pet: petModel, hasNotch: true
             )
             .frame(width: regionWidth, height: rowHeightPoints)
             .background(Color(.sRGB, red: 0.42, green: 0.42, blue: 0.45))
@@ -121,7 +112,7 @@ enum NeoSnapshots {
             context.setFillColor(CGColor(srgbRed: 0.6, green: 0.05, blue: 0.05, alpha: 0.5))
             context.fillPath()
             context.restoreGState()
-            print(String(format: "row %d: %@ — lane %.0f pt, island %.0f×%.0f", index, row.name, content.neoLead, frame.width, frame.height))
+            print(String(format: "row %d: %@ — island %.0f×%.0f", index, row.name, frame.width, frame.height))
         }
 
         let url = URL(fileURLWithPath: directory, isDirectory: true)

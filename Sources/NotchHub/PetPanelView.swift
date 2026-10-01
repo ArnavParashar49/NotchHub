@@ -1,7 +1,7 @@
 import NotchHubCore
 import SwiftUI
 
-/// Notchy's own little panel, opened by clicking the pet: a larger pet; a hello
+/// Neo's own little panel, opened by clicking the pet: a larger pet; a hello
 /// with the look swatches and the hat button; and the actions. Placed by
 /// `PetPanelLayout`, which the window hit-tests.
 struct PetPanelView: View {
@@ -10,7 +10,7 @@ struct PetPanelView: View {
     var hat: PetHat? = nil
     var hatChoice: PetHatChoice = .seasonal
     var isFocusing = false
-    /// "Hi, I'm Notchy!", or today's holiday greeting.
+    /// "Hi, I'm Neo!", or today's holiday greeting.
     var greeting = PetIdentity.hello
     /// Focus can start (the Timers feature is on, or a session is running).
     var focusEnabled = true

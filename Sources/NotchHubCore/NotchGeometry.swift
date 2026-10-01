@@ -231,17 +231,12 @@ public struct NotchGeometry: Equatable {
     public func frame(for state: IslandState, content: IslandContentSize) -> CGRect {
         switch state {
         case .idle:
-            // The pet's dock beside the notch (see `PetDock`) and NEO's lane
-            // left of it; without either — or while the pet hides in the notch
-            // — idle is exactly the notch. The lane takes the left side
-            // outright while it shows: a pet docked there steps into the notch.
-            let dock = content.petDock
-            let lead = content.neoLead > 0 ? content.neoLead : (dock?.lead ?? 0)
-            let trail = dock?.trail ?? 0
-            guard lead > 0 || trail > 0 else { return notchFrame }
-            return compactBar(lead: lead, trail: trail)
-        case .wings: return compactBar(lead: (content.wingLead ?? content.wingSide) + content.neoLead, trail: content.wingSide)
-        case .compact: return compactBar(lead: content.compactLead + content.neoLead, trail: content.compactTrail)
+            // The pet's dock beside the notch (see `PetDock`); without one — or
+            // while the pet hides in the notch — idle is exactly the notch.
+            guard let dock = content.petDock, dock.reach > 0 else { return notchFrame }
+            return compactBar(lead: dock.lead, trail: dock.trail)
+        case .wings: return compactBar(lead: content.wingLead ?? content.wingSide, trail: content.wingSide)
+        case .compact: return compactBar(lead: content.compactLead, trail: content.compactTrail)
         case .expanded: return expandedFrame
         case .interactive: return interactiveFrame
         case .appPanel: return appPanelFrame(height: content.panelHeight)

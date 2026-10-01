@@ -5,11 +5,11 @@ import SwiftUI
 
 /// NEO's panel: its whole chat, expanding down from the notch.
 ///
-/// `NeoPanelModel` decides whether it is open (it opens as NEO starts
-/// answering or a card opens, folds 5 s after NEO is quiet, and follows the
-/// user's clicks and Esc); `applyNeoPanel` makes the island match it. The
-/// model takes NEO's state from the lane's own hold, so the lane and the
-/// panel can never disagree about what NEO is doing. The panel exists only
+/// `NeoPanelModel` decides whether it is open (it opens when NEO needs the
+/// user or a card opens, on a click on the island while NEO is active, folds
+/// 5 s after NEO is quiet, and follows Esc); `applyNeoPanel` makes the
+/// island match it. The model takes NEO's state from the presence's own
+/// hold, so the pet and the panel can never disagree about what NEO is doing. The panel exists only
 /// when NEO's page is installed (`NeoUIBundle`): without it the lane is all
 /// there is, and the core is never told NEO's UI moved.
 extension NotchHubApp {
@@ -125,35 +125,23 @@ extension NotchHubApp {
         scheduleNeoWake(neoNextWake(at: now))
     }
 
-    /// While NEO is active (its orb out of the notch) a click ANYWHERE on
-    /// the island opens NEO's chat — the island is NEO's door, not only the
-    /// orb; with NEO tucked in, clicks keep the island's own meaning. With
-    /// the panel open, a click on the lane in its strip closes it (the rest
-    /// of the panel is the page's). See `NeoIslandClick`. Returns whether
+    /// While NEO is active (the pet is NEO, and it is busy) a click ANYWHERE
+    /// on the island — the pet included — opens NEO's chat: the island is
+    /// NEO's door. With NEO idle, clicks keep the island's own meaning (the
+    /// pet's own panel among them). See `NeoIslandClick`. Returns whether
     /// the click was NEO's.
     func neoIslandClickHit(at point: NSPoint) -> Bool {
-        guard featureSettings.isEnabled(.neo), hasNeoUI else { return false }
-        let content = islandModel.contentSize
-        let island = window.localFrame(for: currentIslandState(), content: content)
-        let lane = NeoLaneLayout.rect(in: island, width: content.neoLead, notchHeight: window.notchHeight)
-        let outcome = NeoIslandClick.outcome(
-            laneShown: content.neoLead > 0, panelOpen: panel == .neo, otherPanel: panel != .none && panel != .neo,
-            point: point, laneRect: lane
-        )
+        guard hasNeoUI else { return false }
         let now = Date()
-        switch outcome {
-        case .none:
-            return false
-        case .open:
-            neoPanel.show(at: now)
-            applyNeoPanel()
-            neoEngageKeyboard()
-        case .close:
-            neoPanel.close(at: now)
-            applyNeoPanel()
-        }
+        let outcome = NeoIslandClick.outcome(
+            neoActive: neoActive(at: now), panelOpen: panel == .neo, otherPanel: panel != .none && panel != .neo
+        )
+        guard outcome == .open else { return false }
+        neoPanel.show(at: now)
+        applyNeoPanel()
+        neoEngageKeyboard()
         scheduleNeoWake(neoNextWake(at: now))
-        log("neo: island clicked → \(neoPanel.isOpen ? "open" : "closed")")
+        log("neo: island clicked → open")
         return true
     }
 
@@ -166,8 +154,8 @@ extension NotchHubApp {
         scheduleNeoWake(neoNextWake(at: now))
     }
 
-    /// The earlier of the lane's and the panel's next change.
+    /// The earlier of NEO's presence's and the panel's next change.
     func neoNextWake(at now: Date) -> Date? {
-        [neoLane.nextWake(at: now), neoPanel.nextWake(at: now)].compactMap { $0 }.min()
+        [neoPresence.nextWake(at: now), neoPanel.nextWake(at: now)].compactMap { $0 }.min()
     }
 }

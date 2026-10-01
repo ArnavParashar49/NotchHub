@@ -31,11 +31,6 @@ public struct IslandContentSize: Equatable, Sendable {
     /// and how far it reaches out. `nil` (no pet dock) keeps idle exactly the
     /// notch.
     public var petDock: PetDock? = nil
-    /// How far NEO's lane reaches LEFT of the notch — the orb and its line —
-    /// while NEO is out of the notch. `0` while it is hidden. Every
-    /// notch-height bar (idle, wings, compact) grows its lead side by this;
-    /// the lane sits beside the notch and the bar's own content moves out.
-    public var neoLead: CGFloat = 0
     /// The page size NEO's panel gives its chat (`NeoPanelLayout.pageSize`);
     /// the panel is that plus the notch strip above it. `nil` is the chat's
     /// standard size.

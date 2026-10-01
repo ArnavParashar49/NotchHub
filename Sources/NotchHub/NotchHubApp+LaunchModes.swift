@@ -139,8 +139,8 @@ extension NotchHubApp {
             startMonitor()
             after(0.6) { $0.toggleCamera() }
         } else if arguments.contains("--neo-demo") {
-            // NEO's lane driven by a scripted turn, with the live listeners
-            // (but not NEO's own) so the lane can be seen beside real wings.
+            // The pet posing as NEO through a scripted turn, with the live
+            // listeners (but not NEO's own) so it can be seen on the real island.
             featureSettings.setEnabled(.neo, enabled: false)
             startMonitor()
             featureSettings.setEnabled(.neo, enabled: true)

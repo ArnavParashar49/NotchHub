@@ -29,6 +29,8 @@ public enum PetAnimationID: String, CaseIterable, Sendable {
     case notify, headphonesOn, headphonesOff, micOn, cameraOn, recordPoint, celebrate
     // Interaction
     case hiWave, pet, eat, play, stroke, leanLeft, leanRight
+    // NEO: the pet IS NEO, and these are what NEO is doing (PetBrain.neoAnimation)
+    case neoWake, neoListen, neoThink, neoPace, neoSniff, neoTalk, neoAsk
 
     public var animation: PetAnimation {
         typealias Cel = PetAnimation.Cel
@@ -157,6 +159,35 @@ public enum PetAnimationID: String, CaseIterable, Sendable {
         case .stroke: return .loop(["pet_1", "pet_2"], 0.3)
         case .leanLeft: return .still("lean_left")
         case .leanRight: return .still("lean_right")
+
+        // NEO's poses — built from the frames the fox already has.
+        case .neoWake:
+            // Connecting: waking up with a stretch, then standing alert.
+            return .once(["wake", "sit_blink", "stretch_1", "stretch_2", "stretch_2", "stretch_1", "alert"], 0.22)
+        case .neoListen:
+            // Listening: ears up, eyes on the user, a slow breath (a 1 px lift).
+            return .loopPath([Cel("alert"), Cel("alert"), Cel("alert"), Cel("alert"), Cel("alert"),
+                              Cel("alert", 0, -1), Cel("alert", 0, -1), Cel("alert", 0, -1)], 0.28)
+        case .neoThink:
+            // Thinking: the thought-bubble frames, scratching its head.
+            return .loop(["code_think_1", "code_think_1", "code_think_2", "code_think_2", "code_think_1", "code_think_2"], 0.4)
+        case .neoPace:
+            // Working: pacing toward the notch and back, a few pixels each way.
+            let out = [Cel("run_1", 0), Cel("run_2", -2), Cel("run_3", -4), Cel("run_4", -5), Cel("run_1", -6), Cel("skid", -6)]
+            let back = [Cel(Self.runFrame(0, mirrored: true), -5), Cel(Self.runFrame(2, mirrored: true), -3),
+                        Cel(Self.runFrame(4, mirrored: true), -1), Cel(Self.runFrame(6, mirrored: true), 0), Cel("skid" + PetFrame.mirrorSuffix, 0)]
+            return .loopPath(out + back + [Cel("alert"), Cel("alert"), Cel("alert")], 0.13)
+        case .neoSniff:
+            // Searching: the magnifier, then a sniff along the ground.
+            return .loop(["code_search_1", "code_search_2", "code_search_1", "code_search_2", "code_search_1",
+                          "sneak_1", "sneak_2", "sneak_1", "sneak_2"], 0.3)
+        case .neoTalk:
+            // Speaking: the mouth opens and closes to a cadence, with a small bob.
+            return .loopPath([Cel("happy"), Cel("sit"), Cel("happy", 0, -1), Cel("sit"), Cel("happy"), Cel("happy"), Cel("sit"),
+                              Cel("happy", 0, -1), Cel("sit"), Cel("sit")], 0.17)
+        case .neoAsk:
+            // Needs your OK: the "!" frames, insisting gently.
+            return .loop(["code_alert", "code_alert", "notify", "code_alert", "code_alert", "code_alert"], 0.4)
         }
     }
 
@@ -240,6 +271,16 @@ public struct PetAnimation: Equatable, Sendable {
 
     public static func loop(_ frames: [String], _ frameDuration: TimeInterval) -> PetAnimation {
         PetAnimation(frames: frames, frameDuration: frameDuration, loops: true, offsets: [])
+    }
+
+    /// A loop that moves: every cel is a frame and where to draw it, forever.
+    public static func loopPath(_ cels: [Cel], _ frameDuration: TimeInterval) -> PetAnimation {
+        PetAnimation(
+            frames: cels.map(\.frame),
+            frameDuration: frameDuration,
+            loops: true,
+            offsets: cels.map { PetOffset($0.dx, $0.dy) }
+        )
     }
 
     /// A one-shot that moves: every cel is a frame and where to draw it.

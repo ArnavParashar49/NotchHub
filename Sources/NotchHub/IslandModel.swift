@@ -52,8 +52,6 @@ final class IslandModel: ObservableObject {
     /// SwiftUI's own `.onHover` never fires for them — the coordinator resolves
     /// the cursor against the hit-test layouts and publishes the answer here.
     @Published var hoveredControl: IslandControl?
-    /// NEO's lane — its orb — while NEO is out of the notch.
-    @Published var neo: NeoLaneContent?
 }
 
 /// The hosted root: a thin adapter that observes the model and hands its values
@@ -80,8 +78,7 @@ struct IslandRootView: View {
             surfaceVisible: model.surfaceVisible,
             meeting: model.meeting,
             pet: model.pet,
-            hasNotch: model.hasNotch,
-            neo: model.neo
+            hasNotch: model.hasNotch
         )
     }
 }

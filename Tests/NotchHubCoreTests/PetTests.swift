@@ -239,3 +239,108 @@ struct PetLayoutTests {
         #expect(p.origin.y + p.size <= 32)
     }
 }
+
+@Suite("The pet is NEO")
+struct PetIsNeoTests {
+
+    let t0 = Date(timeIntervalSince1970: 2_000_000)
+    func at(_ seconds: TimeInterval) -> Date { t0.addingTimeInterval(seconds) }
+
+    private func context(_ state: NeoState?) -> PetContext {
+        var c = PetContext()
+        c.neoState = state
+        c.canRoam = true
+        c.isDocked = true
+        c.mischief = true
+        return c
+    }
+
+    @Test("the pet is named Neo")
+    func name() {
+        #expect(PetIdentity.name == "Neo")
+        #expect(PetIdentity.hello == "Hi, I'm Neo!")
+    }
+
+    @Test("each of NEO's states is a pose of its own; ready is the pet's own life")
+    func poses() {
+        #expect(PetBrain.neoAnimation(for: .connecting) == .neoWake)
+        #expect(PetBrain.neoAnimation(for: .listening) == .neoListen)
+        #expect(PetBrain.neoAnimation(for: .thinking) == .neoThink)
+        #expect(PetBrain.neoAnimation(for: .working) == .neoPace)
+        #expect(PetBrain.neoAnimation(for: .searching) == .neoSniff)
+        #expect(PetBrain.neoAnimation(for: .speaking) == .neoTalk)
+        #expect(PetBrain.neoAnimation(for: .confirming) == .neoAsk)
+        #expect(PetBrain.neoAnimation(for: .idle) == .sit)
+        // The busy poses move on their own: loops, or a wake that holds its last frame.
+        for state in NeoState.allCases where state != .idle {
+            let animation = PetBrain.neoAnimation(for: state).animation
+            #expect(animation.loops || !animation.isStatic, "\(state)")
+        }
+        // Pacing stays within the dock: never under the notch, never off its edge.
+        for offset in PetAnimationID.neoPace.animation.offsets {
+            #expect(offset.dx <= 0 && offset.dx > PetLayout.hiddenOffset + 10 && abs(offset.dy) <= 1)
+        }
+    }
+
+    @Test("while NEO is busy the pet poses as NEO, over the cursor and every activity; ready, it is itself")
+    func busyOverEverything() {
+        var brain = PetBrain(now: t0)
+        var c = context(.speaking)
+        c.isHovering = true
+        c.isMusicPlaying = true
+        c.isAgentWorking = true
+        #expect(brain.update(c, now: t0).mood == .neo)
+        #expect(brain.presentation.animation == .neoTalk)
+        c.neoState = .thinking
+        #expect(brain.update(c, now: at(1)).animation == .neoThink)
+        c.neoState = .idle
+        c.isHovering = false
+        c.isMusicPlaying = false
+        c.isAgentWorking = false
+        let ready = brain.update(c, now: at(2))
+        #expect(ready.mood == .idle && ready.animation == .sit)
+        c.neoState = nil // NEO away: the same
+        #expect(brain.update(c, now: at(3)).mood == .idle)
+    }
+
+    @Test("NEO starting wakes a pet put to sleep, and stops a game on the dock")
+    func wakesAndStopsMischief() {
+        var brain = PetBrain(now: t0)
+        var c = context(.idle)
+        brain.handle(.interaction(.sleep), context: c, now: t0)
+        #expect(brain.update(c, now: at(1)).mood == .sleeping)
+        c.neoState = .listening
+        _ = brain.update(c, now: at(2))
+        // Waking is a moment (the wake animation), then the pose.
+        _ = brain.update(c, now: at(2 + PetAnimationID.wake.animation.duration + 0.1))
+        #expect(brain.presentation.mood == .neo && brain.presentation.animation == .neoListen)
+
+        var playing = PetBrain(now: t0)
+        c.neoState = .idle
+        playing.startMischief(.hideAndSeek, now: t0)
+        #expect(playing.mischief == .hideAndSeek)
+        c.neoState = .working
+        var now = at(0.1)
+        // The game finishes its beat and comes home; then the pet is NEO.
+        for _ in 0..<60 {
+            _ = playing.update(c, now: now)
+            guard playing.mischief != nil else { break }
+            now = playing.nextWakeup(context: c, now: now) ?? now.addingTimeInterval(0.5)
+        }
+        #expect(playing.mischief == nil && playing.dock == .home)
+        #expect(playing.update(c, now: now.addingTimeInterval(0.1)).animation == .neoPace)
+    }
+
+    @Test("the pet's panel and a call still come first; NEO's pose returns after them")
+    func panelAndMeetingFirst() {
+        var brain = PetBrain(now: t0)
+        var c = context(.speaking)
+        c.interactionOpen = true
+        #expect(brain.update(c, now: t0).mood == .interaction)
+        c.interactionOpen = false
+        c.inMeeting = true
+        #expect(brain.update(c, now: at(1)).mood == .meeting)
+        c.inMeeting = false
+        #expect(brain.update(c, now: at(2)).mood == .neo)
+    }
+}
