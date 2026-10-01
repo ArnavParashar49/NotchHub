@@ -204,6 +204,15 @@ public enum NeoLaneLayout {
         outerInset + orbSize(notchHeight: notchHeight) + innerInset
     }
 
+    /// Whether the lane draws its orb in this shape. With NEO's panel open
+    /// the chat's own big orb is on screen, so the lane's small one is not:
+    /// one orb at a time. The lane strip stays part of the island's shape
+    /// (nothing jumps); only the orb fades, on the panel's own spring, and
+    /// fades back as the panel folds.
+    public static func showsOrb(in state: IslandState) -> Bool {
+        state != .neoPanel
+    }
+
     /// The lane's rectangle on an island of `island` (AppKit coordinates,
     /// origin bottom-left): the notch strip at the island's left edge.
     public static func rect(in island: CGRect, width: CGFloat, notchHeight: CGFloat) -> CGRect {

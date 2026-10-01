@@ -421,6 +421,13 @@ struct NeoLaneLayoutTests {
         #expect(expandedLane.minX == expanded.minX && expandedLane.maxY == expanded.maxY && expandedLane.minX < compactLane.minX)
     }
 
+    @Test("one orb at a time: the lane's orb shows in every shape but the open panel, whose chat has its own")
+    func oneOrb() {
+        for state in IslandState.allCases {
+            #expect(NeoLaneLayout.showsOrb(in: state) == (state != .neoPanel), "\(state)")
+        }
+    }
+
     @Test("with NEO active a click anywhere on the island opens the chat; tucked in, clicks are the island's")
     func clicks() {
         let lane = CGRect(x: 100, y: 500, width: 44, height: 32)

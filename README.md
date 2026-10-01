@@ -165,7 +165,10 @@ screen) on the island's black with no card of its own.
   song), NEO's page asking to be seen (a login page, a question) — or when
   you ask: a click anywhere on the island while the orb is out, or NEO
   summoned by hand (⌘⇧Space, its menu-bar item: the core's `woke` event,
-  which the wake word never sends). The lane keeps showing either way.
+  which the wake word never sends). The lane keeps showing either way —
+  but with the panel open its small orb fades out (the chat's own big orb
+  is on screen: one orb at a time) and fades back in as the panel folds;
+  the strip itself stays, so nothing jumps.
 - Once open it folds back to the lane **5 s after NEO is quiet** (idle or
   merely listening) — unless the mouse is in it, a card is open, it is
   pinned, or it was opened by hand and NEO has not answered since; it never

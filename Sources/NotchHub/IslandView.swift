@@ -158,10 +158,12 @@ struct IslandView: View {
     /// back under it, and is masked to the surface like everything else. The
     /// bars make room for it (`IslandContentSize.neoLead`) and lay their
     /// content out past it; the fixed surfaces have it in their strip, where
-    /// nothing else is drawn.
+    /// nothing else is drawn. With NEO's panel open the chat's big orb is the
+    /// one on screen: the lane's fades out on the panel's spring and back
+    /// in as it folds (`NeoLaneLayout.showsOrb`).
     @ViewBuilder
     private var neoLayer: some View {
-        if let neo, contentSize.neoLead > 0 {
+        if let neo, contentSize.neoLead > 0, NeoLaneLayout.showsOrb(in: state) {
             let lane = contentSize.neoLead
             NeoLaneView(content: neo, notchHeight: notchInset, width: lane)
                 .frame(width: lane, height: notchInset, alignment: .leading)
