@@ -36,6 +36,10 @@ public struct IslandContentSize: Equatable, Sendable {
     /// notch-height bar (idle, wings, compact) grows its lead side by this;
     /// the lane sits beside the notch and the bar's own content moves out.
     public var neoLead: CGFloat = 0
+    /// The page size NEO's panel gives its chat (`NeoPanelLayout.pageSize`);
+    /// the panel is that plus the notch strip above it. `nil` is the chat's
+    /// standard size.
+    public var neoPanel: CGSize? = nil
 
     public init(compactLead: CGFloat, compactTrail: CGFloat, wingSide: CGFloat) {
         self.compactLead = max(0, compactLead)

@@ -213,7 +213,7 @@ struct IslandView: View {
     /// they still read as the island, opened up.
     private static let panelStates: Set<IslandState> = [
         .tray, .settings, .fileDrop, .meeting, .skin,
-        .teleprompter, .teleprompterCompose, .camera, .cameraExpanded,
+        .teleprompter, .teleprompterCompose, .camera, .cameraExpanded, .neoPanel,
     ]
 
     /// Whether this surface is exactly notch-height, so its content should sit

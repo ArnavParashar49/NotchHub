@@ -209,6 +209,16 @@ struct NeoLaneLayoutTests {
         #expect(NeoLaneLayout.orbSize(notchHeight: 10) == 16)
     }
 
+    @Test("on a fixed surface the lane is cut to the room beside the notch, the orb kept whole")
+    func fitted() {
+        // NEO's panel: 420 wide around a 185 notch leaves 117 a side.
+        #expect(NeoLaneLayout.fitted(width: 198, surfaceWidth: 420, notchWidth: 185) == 115)
+        #expect(NeoLaneLayout.fitted(width: 90, surfaceWidth: 420, notchWidth: 185) == 90)
+        #expect(NeoLaneLayout.fitted(width: 198, surfaceWidth: 100, notchWidth: 185) == 0)
+        let orbOnly = NeoLaneLayout.width(notchHeight: 32, textWidth: 0)
+        #expect(NeoLaneLayout.fitted(width: 198, surfaceWidth: 420, notchWidth: 185) >= orbOnly)
+    }
+
     @Test("the line is one short line: the lane never spreads past the orb plus 140 pt")
     func cappedLine() {
         #expect(NeoLaneLayout.maxTextWidth == 140)

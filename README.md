@@ -135,11 +135,49 @@ while idle, so clicks pass through as before. A pet visiting the left of the
 notch steps into the notch while the lane is out.
 
 NotchHub is a second client of NEO's core (`ws://127.0.0.1:8765`, the token in
-`~/.neo/ws-token` — the only thing it reads under `~/.neo`). It sends one
-command, `camera_view visible:false`, so the core never streams camera frames
-to it, and reconnects every 1.5 s while NEO is off. The toggle is **NEO** in
+`~/.neo/ws-token` — the only thing it reads under `~/.neo`). It sends
+`camera_view visible:false`, so the core never streams camera frames to it,
+and reconnects every 1.5 s while NEO is off. The toggle is **NEO** in
 Settings. `--neo-demo` runs a scripted turn through the lane without a core;
 `--neo-snapshots DIR` renders the lane offscreen in every shape.
+
+### NEO's panel
+
+With NEO's page installed — NEO's `scripts/install-app.sh` puts its built UI
+in `~/Library/Application Support/NEO/ui/` — the notch is NEO's **only** UI.
+The island expands **down** from the notch into NEO's panel: NEO's own chat
+page, unchanged, in a `WKWebView` served from NotchHub's `neo://app/` scheme
+(`NeoSchemeHandler`, files under that folder only) with the host's values
+injected before its scripts run (`neo://app` is the one origin NEO's core
+admits besides its own; the page opens its own socket with the token). The
+transcript, the confirm buttons, the in-chat browser card, the camera card
+and the song card all work as in NEO's window; the page fills the panel
+(420×520 under the notch strip, growing for a browser card up to 60% of the
+screen) on the island's black with no card of its own.
+
+- It opens when NEO starts answering (thinking, working, searching, speaking,
+  needs your OK), when a card opens, when NEO's page asks (a login page, a
+  question) and when the lane is clicked. The lane keeps showing beside the
+  notch.
+- It folds back to the lane **5 s after NEO is quiet** (idle or merely
+  listening) — unless the mouse is in it, a card is open, it is pinned, or
+  it was opened by hand and NEO has not answered since. Esc, the page's
+  collapse button, or a click on the lane close it at once; closed while NEO
+  was busy it stays closed for the rest of that turn.
+- Clicks on the panel reach the page without the island being key; the first
+  click into it (or on the lane) makes the window key so typing lands in
+  NEO's input — NEO starting to talk never steals what you are typing.
+- It is never shown to screen capture, as NEO's own window is not
+  (`GhostMode.alwaysPrivate`), and Ghost Mode hides the lane with the rest.
+- Whenever it connects, NotchHub tells the core `ui_host: notch`, so NEO.app
+  keeps its own window hidden (its menu-bar item and hotkeys stay; the
+  hotkeys still wake NEO), and `ui_host: window` as it quits, so NEO's own
+  orb returns. Without the installed page nothing is sent and the lane is all
+  there is.
+
+`NeoLaneModel` (what the lane shows) and `NeoPanelModel` (whether the panel
+is open) are both pure and clock-driven; the panel takes NEO's state from the
+lane's hold, so the two can never disagree.
 
 ## Permissions
 

@@ -128,7 +128,7 @@ public enum PetLayout {
         // Utility surfaces the pet steps aside for: a teleprompter with a fox
         // in it is a fox in the way, and the camera's picture is the content.
         case .tray, .settings, .fileDrop, .skin,
-             .teleprompter, .teleprompterCompose, .camera, .cameraExpanded:
+             .teleprompter, .teleprompterCompose, .camera, .cameraExpanded, .neoPanel:
             return nil
         }
     }

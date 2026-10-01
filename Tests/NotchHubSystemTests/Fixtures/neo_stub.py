@@ -2,10 +2,11 @@
 
 Mirrors the parts of neo2/core/server/ws.py the listener depends on: the
 token in the query string, the Origin rule (a request with an Origin header
-that is not NEO's own overlay is refused with 403), the `hello` first, then
-a scripted run of state / transcript / note / error messages. Every command
-a client sends is echoed to stdout as `CMD <json>`, and each connection as
-`OPEN <n>`, so the test can check what the listener said.
+that is not NEO's own overlay or the notch's page is refused with 403), the
+`hello` first, then a scripted run of state / transcript / note / error /
+card messages. Every command a client sends is echoed to stdout as
+`CMD <json>`, each connection as `OPEN <n>` and the Origin it came with as
+`ORIGIN <origin>` (`-` for none), so the test can check what a client said.
 
     neo_stub.py PORT TOKEN [drop]
 
@@ -22,7 +23,7 @@ from websockets.asyncio.server import serve
 PORT = int(sys.argv[1])
 TOKEN = sys.argv[2]
 DROP = len(sys.argv) > 3 and sys.argv[3] == "drop"
-ALLOWED_ORIGINS = {"tauri://localhost"}
+ALLOWED_ORIGINS = {"tauri://localhost", "neo://app"}
 
 connections = 0
 
@@ -33,6 +34,7 @@ def say(line: str) -> None:
 
 def admit(connection, request):
     origin = request.headers.get("Origin")
+    say(f"ORIGIN {origin or '-'}")
     if origin is not None and origin not in ALLOWED_ORIGINS:
         say(f"REJECT origin={origin}")
         return connection.respond(403, "Forbidden origin\n")
@@ -65,6 +67,9 @@ async def handle(ws):
         await send("transcript", {"role": "user", "text": "hello neo", "final": False, "job": ""})
         await send("state", {"state": "thinking", "job": ""})
         await send("tool_start", {"name": "web", "job": ""})  # not the lane's business
+        await send("browser_open", {"sid": "s1", "job": "j1"})  # a card: the panel's business
+        await send("browser_state", {"sid": "s1", "url": "https://example.com"})  # the card's own
+        await send("browser_close", {"sid": "s1", "reason": "done"})
         await send("transcript", {"role": "assistant", "text": "Hi there", "final": True, "job": ""})
         await send("note", {"text": "quiet result"})
         await send("error", {"message": "boom"})

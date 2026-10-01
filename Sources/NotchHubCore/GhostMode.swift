@@ -28,12 +28,15 @@ public enum GhostMode {
     ///   script the room can read is not a teleprompter;
     /// - the camera preview — you open it to check yourself before a call, and
     ///   a picture-in-picture of your own face appearing inside the screen you
-    ///   are sharing is never what you meant.
+    ///   are sharing is never what you meant;
+    /// - NEO's panel — NEO's own window is content-protected (its transcript,
+    ///   its camera card, the pages it browses for you), and hosting it in the
+    ///   notch must not make it any more visible to a share than it was.
     ///
     /// None of these should depend on having remembered to arm Ghost Mode
     /// before the call started.
     public static let alwaysPrivate: Set<IslandState> = [
-        .teleprompter, .teleprompterCompose, .camera, .cameraExpanded,
+        .teleprompter, .teleprompterCompose, .camera, .cameraExpanded, .neoPanel,
     ]
 
     /// Whether the window should be hidden from capture right now.

@@ -92,6 +92,8 @@ public struct NeoLaneModel: Equatable, Sendable {
             notice = text.isEmpty ? nil : (text, now.addingTimeInterval(Self.noteLifetime))
         case let .error(message):
             notice = message.isEmpty ? nil : (message, now.addingTimeInterval(Self.noteLifetime))
+        case .card:
+            break // the panel's business (`NeoPanelModel`), not the lane's
         }
         lastReported = content(at: now)
         return nextWake(at: now)
@@ -199,6 +201,15 @@ public enum NeoLaneLayout {
     public static func width(notchHeight: CGFloat, textWidth: CGFloat) -> CGFloat {
         let text = min(max(0, textWidth), maxTextWidth)
         return outerInset + orbSize(notchHeight: notchHeight) + (text > 0 ? gap + text : 0) + innerInset
+    }
+
+    /// The lane as it fits a FIXED surface (a panel, the expanded island),
+    /// which does not grow for it: the room between the surface's left edge
+    /// and the notch, less a hair, so the orb is always whole and the line
+    /// takes what is left. The bars (idle, wings, compact) grow instead.
+    public static func fitted(width: CGFloat, surfaceWidth: CGFloat, notchWidth: CGFloat) -> CGFloat {
+        let room = ((surfaceWidth - notchWidth) / 2 - 2).rounded(.down)
+        return max(0, min(width, room))
     }
 
     /// The line's width inside a lane of `width`.

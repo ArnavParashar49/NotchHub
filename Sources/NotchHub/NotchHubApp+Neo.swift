@@ -5,28 +5,43 @@ import NotchHubSystem
 /// NEO in the notch.
 ///
 /// NEO's core speaks through `NeoListener` (a system listener like any
-/// other); its facts reach `record`, which feeds `NeoLaneModel`. The model
-/// is pure and clock-driven: it says when something will change on its own
-/// (a held state becoming due, a note expiring, the lane tucking in), and
-/// `scheduleNeoWake` comes back exactly then. NEO's state lives here and in
-/// the model only — never in the activity queue or the state machine — so
-/// the lane can show in every island shape without competing with anything.
+/// other); its facts reach `record`, which feeds `NeoLaneModel` — and, from
+/// the lane's held state and the card facts, `NeoPanelModel` (`+NeoPanel`).
+/// Both models are pure and clock-driven: they say when something will
+/// change on its own (a held state becoming due, a note expiring, the lane
+/// tucking in, the panel folding), and `scheduleNeoWake` comes back exactly
+/// then. NEO's state lives here and in the models only — never in the
+/// activity queue or the state machine — so the lane can show in every
+/// island shape without competing with anything.
 extension NotchHubApp {
 
-    /// A fact from the core: update the lane and plan its next change.
+    /// A fact from the core: update the lane and the panel, and plan their
+    /// next change.
     func neoReceive(_ fact: NeoFact) {
         let now = Date()
-        let wake = neoLane.receive(fact, at: now)
-        scheduleNeoWake(wake)
+        neoLane.receive(fact, at: now)
+        switch fact {
+        case let .card(kind, open): neoPanel.card(kind, open: open, at: now)
+        case .connected(false): neoPanel.disconnected(at: now)
+        default: break
+        }
+        // The panel takes NEO's state from the lane's hold: one truth.
+        neoPanel.receive(state: neoLane.state, at: now)
+        applyNeoPanel()
+        scheduleNeoWake(neoNextWake(at: now))
     }
 
-    /// Advances the lane's clock and re-renders if what it shows changed.
+    /// Advances the clocks and re-renders if what the island shows changed.
     func neoTick() {
         let now = Date()
-        if neoLane.tick(at: now) {
+        var changed = neoLane.tick(at: now)
+        neoPanel.receive(state: neoLane.state, at: now)
+        if neoPanel.tick(at: now) { changed = true }
+        applyNeoPanel()
+        if changed {
             renderIsland()
         }
-        scheduleNeoWake(neoLane.nextWake(at: now))
+        scheduleNeoWake(neoNextWake(at: now))
     }
 
     /// Comes back at `date` (at most one wake-up is ever pending).

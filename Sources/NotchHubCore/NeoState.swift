@@ -63,6 +63,8 @@ public enum NeoFact: Equatable, Sendable {
     case note(String)
     /// Something went wrong in the core.
     case error(String)
+    /// A card (the browser, the camera, a song) opened or closed in the chat.
+    case card(NeoCardKind, open: Bool)
 }
 
 /// Keeps each NEO state on screen for at least `minDwell`, as NEO's own

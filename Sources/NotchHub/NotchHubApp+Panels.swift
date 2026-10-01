@@ -82,6 +82,9 @@ extension NotchHubApp {
         case .camera:
             return cameraContent()
 
+        case .neo:
+            return neoPanelContent()
+
         case .none:
             // A click opens the frontmost app's panel, or the dashboard.
             if currentIslandState() == .appPanel, let content = appPanelContent() {
@@ -127,6 +130,11 @@ extension NotchHubApp {
     /// so taking the island always releases what it replaces.
     func takePanel(_ panel: Panel) {
         releaseCurrentPanel(except: panel)
+        if self.panel == .neo, panel != .neo {
+            // Another surface takes the island from NEO's panel: the panel's
+            // model must know it is closed, or it would take the island back.
+            neoPanel.close(at: Date())
+        }
         self.panel = panel
         machine.send(.activityStarted)
     }
@@ -143,6 +151,9 @@ extension NotchHubApp {
         case .fileDrop:
             fileDropURLs = []
             fileDropPhase = .idle
+        case .neo:
+            // The web view is kept: the chat keeps its place between openings.
+            break
         case .tray, .settings, .pet, .none:
             break
         }
@@ -255,6 +266,7 @@ extension NotchHubApp {
         case .pet: closePetPanel()
         case .teleprompter: closeTeleprompter()
         case .camera: closeCamera()
+        case .neo: closeNeoPanel()
         case .none: break
         }
     }

@@ -12,6 +12,7 @@ extension NotchHubApp {
     func islandHoverEntered() {
         hoverCollapseTask?.cancel()
         hoverCollapseTask = nil
+        neoPanelHover(true)
         machine.send(.hoverEntered)
         if petVisible, petSettings.reactions, !petSleepHoverSession {
             petBrain.handle(.hoverEntered, context: petContext(), now: Date())
@@ -23,6 +24,7 @@ extension NotchHubApp {
     /// Cursor left the island. The machine holds the shape for its grace
     /// period; the collapse is scheduled for exactly when that ends.
     func islandHoverExited() {
+        neoPanelHover(false)
         machine.send(.hoverExited)
         renderIsland()
         log("hoverExited → \(machine.presentation)")

@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import WebKit
 import NotchHubCore
 @testable import NotchHubSystem
 
@@ -19,9 +20,19 @@ struct NeoListenerParsingTests {
             == [.transcript(role: .user, text: "hi", final: false)])
         #expect(NeoListener.facts(in: #"{"type":"note","data":{"text":"n"},"ts":1}"#) == [.note("n")])
         #expect(NeoListener.facts(in: #"{"type":"error","data":{"message":"m"},"ts":1}"#) == [.error("m")])
-        for other in ["browser_open", "camera_state", "song_open", "tool_start", "tool_end", "turn", "confirm", "problems", "erased"] {
+        for other in ["browser_state", "camera_state", "song_state", "tool_start", "tool_end", "turn", "confirm", "problems", "erased", "ui_host"] {
             #expect(NeoListener.facts(in: #"{"type":"\#(other)","data":{"state":"speaking"},"ts":1}"#).isEmpty, "\(other)")
         }
+    }
+
+    @Test("a card's opening and closing are facts for the panel")
+    func cards() {
+        #expect(NeoListener.facts(in: #"{"type":"browser_open","data":{"sid":"s","job":"j"},"ts":1}"#) == [.card(.browser, open: true)])
+        #expect(NeoListener.facts(in: #"{"type":"browser_close","data":{"sid":"s","reason":"done"},"ts":1}"#) == [.card(.browser, open: false)])
+        #expect(NeoListener.facts(in: #"{"type":"camera_open","data":{"sid":"c"},"ts":1}"#) == [.card(.camera, open: true)])
+        #expect(NeoListener.facts(in: #"{"type":"camera_close","data":{"sid":"c","reason":"stopped"},"ts":1}"#) == [.card(.camera, open: false)])
+        #expect(NeoListener.facts(in: #"{"type":"song_open","data":{"sid":"m"},"ts":1}"#) == [.card(.song, open: true)])
+        #expect(NeoListener.facts(in: #"{"type":"song_close","data":{"sid":"m"},"ts":1}"#) == [.card(.song, open: false)])
     }
 
     @Test("garbage and unknown states yield nothing rather than a crash")
@@ -141,7 +152,7 @@ struct NeoListenerStubTests {
         return condition()
     }
 
-    @Test("connects with the token, sends only camera_view off, and relays only the lane's facts", .enabled(if: NeoListenerStubTests.available))
+    @Test("connects with the token, sends only camera_view off, and relays the island's facts", .enabled(if: NeoListenerStubTests.available))
     func connectAndRelay() async throws {
         let stub = try Stub(drop: false)
         defer { stub.stop() }
@@ -159,6 +170,8 @@ struct NeoListenerStubTests {
             .state(.listening), // from the hello — and nothing from its replay
             .transcript(role: .user, text: "hello neo", final: false),
             .state(.thinking),
+            .card(.browser, open: true), // the card's own state in between is not ours
+            .card(.browser, open: false),
             .transcript(role: .assistant, text: "Hi there", final: true),
             .note("quiet result"),
             .error("boom"),
@@ -170,7 +183,75 @@ struct NeoListenerStubTests {
         #expect(await waitFor { stub.lines.contains { $0.hasPrefix("CMD ") } })
         let commands = stub.lines.filter { $0.hasPrefix("CMD ") }
         #expect(commands == ["CMD " + NeoListener.cameraOffCommand])
+        #expect(stub.lines.contains("ORIGIN -"))
         #expect(!stub.lines.contains { $0.hasPrefix("REJECT") })
+    }
+
+    @Test("hosting NEO's UI it says so on connecting, and hands the UI back as it stops", .enabled(if: NeoListenerStubTests.available))
+    func hostsUI() async throws {
+        let stub = try Stub(drop: false)
+        defer { stub.stop() }
+        #expect(await waitFor { stub.lines.contains("READY") })
+
+        let recorder = Recorder()
+        let listener = NeoListener(url: URL(string: "ws://127.0.0.1:\(stub.port)/")!, tokenFile: stub.tokenFile, reconnectDelay: 0.2, hostsUI: true) { recorder.record($0) }
+        listener.start()
+        #expect(await waitFor { stub.lines.filter { $0.hasPrefix("CMD ") }.count == 2 })
+        #expect(stub.lines.filter { $0.hasPrefix("CMD ") } == ["CMD " + NeoListener.cameraOffCommand, "CMD " + NeoListener.hostNotchCommand])
+
+        let began = Date()
+        listener.stop() // waits, briefly, for the hand-back to leave
+        #expect(Date().timeIntervalSince(began) < 1)
+        #expect(await waitFor { stub.lines.contains("CMD " + NeoListener.hostWindowCommand) })
+        #expect(recorder.snapshot.last == .connected(false))
+    }
+
+    /// NEO's page, served by `NeoSchemeHandler` from a temp folder into a
+    /// real `WKWebView` with the host script injected, opens a websocket to
+    /// the stub: the Origin it sends is exactly `neo://app` (what NEO's core
+    /// admits), the token it uses is the injected one, and its message to
+    /// the host comes back through the `neo` handler.
+    @Test("a page from neo://app reaches the core with that origin and the injected token", .enabled(if: NeoListenerStubTests.available))
+    @MainActor
+    func pageOrigin() async throws {
+        let stub = try Stub(drop: false)
+        defer { stub.stop() }
+        #expect(await waitFor { stub.lines.contains("READY") })
+
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("notchhub-neo-page-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let page = """
+        <!doctype html><html><body><script>
+        const port = new URLSearchParams(location.search).get("port");
+        const ws = new WebSocket("ws://127.0.0.1:" + port + "/?token=" + encodeURIComponent(window.__NEO_WS_TOKEN__));
+        ws.onopen = () => { ws.send(JSON.stringify({cmd: "page", host: window.__NEO_HOST__, area: window.__NEO_HOST_AREA__}));
+          window.webkit.messageHandlers.neo.postMessage({type: "size", w: 420, h: 520}); };
+        </script></body></html>
+        """
+        try page.write(to: folder.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
+
+        final class Messages: NSObject, WKScriptMessageHandler, @unchecked Sendable {
+            var bodies: [Any] = []
+            func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) { bodies.append(message.body) }
+        }
+        let messages = Messages()
+        let configuration = WKWebViewConfiguration()
+        configuration.setURLSchemeHandler(NeoSchemeHandler(folder: folder), forURLScheme: NeoSchemeHandler.scheme)
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: NeoHostScript.source(token: stub.token, maxPage: CGSize(width: 760, height: 640)), injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        configuration.userContentController.add(messages, name: "neo")
+        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 420, height: 520), configuration: configuration)
+        web.load(URLRequest(url: URL(string: "neo://app/index.html?port=\(stub.port)")!))
+
+        #expect(await waitFor { stub.lines.contains { $0.hasPrefix("CMD {\"cmd\":\"page\"") } })
+        #expect(stub.lines.contains("ORIGIN \(NeoSchemeHandler.origin)"))
+        #expect(!stub.lines.contains { $0.hasPrefix("REJECT") })
+        let command = stub.lines.first { $0.hasPrefix("CMD {\"cmd\":\"page\"") } ?? ""
+        #expect(command.contains(#""host":"notch""#) && command.contains(#""area":{"w":760,"h":640}"#))
+        #expect(await waitFor { !messages.bodies.isEmpty })
+        #expect(messages.bodies.first.flatMap(NeoHostMessage.parse) == .size(CGSize(width: 420, height: 520)))
+        web.stopLoading()
     }
 
     @Test("a dropped core is reported, and the listener comes back on its own", .enabled(if: NeoListenerStubTests.available))

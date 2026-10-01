@@ -254,7 +254,16 @@ public struct NotchGeometry: Equatable {
         case .teleprompterCompose: return teleprompterComposeFrame
         case .camera: return cameraFrame(expanded: false)
         case .cameraExpanded: return cameraFrame(expanded: true)
+        case .neoPanel: return neoPanelFrame(page: content.neoPanel)
         }
+    }
+
+    /// NEO's panel: its chat page under the notch strip, centred on the
+    /// notch like every other panel, sized to what the page asked for within
+    /// `NeoPanelLayout`'s limits for this screen.
+    public func neoPanelFrame(page: CGSize?) -> CGRect {
+        let size = NeoPanelLayout.pageSize(requested: page, screen: CGSize(width: screenWidth, height: screenHeight))
+        return panel(width: size.width, height: (notchFrame.height + size.height).rounded())
     }
 
     /// The sideways hover peek: a bar exactly as tall as the notch that
@@ -451,6 +460,7 @@ public struct NotchGeometry: Equatable {
             fileDropFrame,
             teleprompterComposeFrame,
             cameraFrame(expanded: true),
+            neoPanelFrame(page: NeoPanelLayout.maxPageSize(screen: CGSize(width: screenWidth, height: screenHeight))),
         ]
         guard let first = frames.first else { return notchFrame }
         return frames.dropFirst().reduce(first) { $0.union($1) }
@@ -489,4 +499,6 @@ public enum IslandState: String, CaseIterable, Equatable {
     case camera
     /// The camera preview, larger.
     case cameraExpanded
+    /// NEO's panel: its whole chat, hanging down from the notch.
+    case neoPanel
 }

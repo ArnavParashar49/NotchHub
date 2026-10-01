@@ -8,6 +8,8 @@ import UniformTypeIdentifiers
 /// offscreen with `ImageRenderer` in each island shape and NEO state, so the
 /// lane's placement, width, mask and orb can be checked without a core or a
 /// screen recording. The hardware notch is drawn over it in translucent red.
+/// The last row is NEO's panel (its chat hangs down from the notch) with a
+/// stand-in for the page: a web view cannot be rendered offscreen.
 @MainActor
 enum NeoSnapshots {
 
@@ -43,16 +45,22 @@ enum NeoSnapshots {
                 wings: WingStatus(left: WingItem(symbol: "safari", label: "Safari"), right: [WingItem(symbol: "wifi", label: "Wi-Fi"), WingItem(symbol: "battery.100.bolt", label: "82%", tint: .accent)], musicPlaying: false, strip: nil)),
             Row(name: "compact (volume), speaking", state: .compact, neo: NeoLaneContent(state: .speaking, line: "Turning it down.", isTranscript: true), activity: .volume(0.62)),
             Row(name: "expanded (music), listening", state: .expanded, neo: NeoLaneContent(state: .listening, line: "play something quieter", isTranscript: true), activity: .music(title: "Midnight City", artist: "M83")),
+            Row(name: "NEO panel (the chat, 420×520 under the notch), speaking", state: .neoPanel, neo: NeoLaneContent(state: .speaking, line: "Paris looks mild this weekend.", isTranscript: true)),
         ]
 
+        let panelHeight = geometry.frame(for: .neoPanel, content: .default).height
         let height: CGFloat = max(44, NotchGeometry.expandedHeight + 8)
         let scale: CGFloat = 2
         let rowHeight = Int(height * scale) + 6
+        // Row heights: the bars' standard height, the panel its own.
+        func rowPixels(_ row: Row) -> Int { row.state == .neoPanel ? Int((panelHeight + 8) * scale) + 6 : rowHeight }
+        let totalHeight = rows.reduce(0) { $0 + rowPixels($1) }
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
-              let context = CGContext(data: nil, width: Int(regionWidth * scale), height: rowHeight * rows.count, bitsPerComponent: 8,
+              let context = CGContext(data: nil, width: Int(regionWidth * scale), height: totalHeight, bitsPerComponent: 8,
                                       bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return 1 }
         context.setFillColor(CGColor(srgbRed: 0.1, green: 0.1, blue: 0.11, alpha: 1))
-        context.fill(CGRect(x: 0, y: 0, width: Int(regionWidth * scale), height: rowHeight * rows.count))
+        context.fill(CGRect(x: 0, y: 0, width: Int(regionWidth * scale), height: totalHeight))
+        var rowTop = 0 // from the top of the image, in pixels
 
         for (index, row) in rows.enumerated() {
             var content: IslandContentSize
@@ -69,19 +77,32 @@ enum NeoSnapshots {
             content.petDock = row.pet
             if let neo = row.neo {
                 content.neoLead = NeoLaneLayout.width(notchHeight: notchHeight, textWidth: IslandMetrics.textWidth(neo.line))
+                switch row.state {
+                case .idle, .wings, .compact: break
+                default:
+                    let surface = geometry.frame(for: row.state, content: content).width
+                    content.neoLead = NeoLaneLayout.fitted(width: content.neoLead, surfaceWidth: surface, notchWidth: notch.width)
+                }
             }
             let frame = geometry.frame(for: row.state, content: content)
             let local = CGRect(x: frame.minX - regionMinX, y: 0, width: frame.width, height: frame.height)
             let petModel = row.pet.map { dock in
                 PetRenderModel(presentation: PetPresentation(mood: .idle, animation: .sit, startedAt: now, mirrored: dock.side == .left))
             }
+            let rowHeightPoints = row.state == .neoPanel ? panelHeight + 8 : height
+            let placeholder: AnyView? = row.state == .neoPanel
+                ? AnyView(VStack(spacing: 8) {
+                    Text("NEO's chat page (a WKWebView, served from neo://app/)").font(.system(size: 12, weight: .semibold))
+                    Text("transcript · confirm buttons · browser, camera and song cards").font(.system(size: 11))
+                }.foregroundStyle(.white.opacity(0.7)).frame(maxWidth: .infinity, maxHeight: .infinity))
+                : nil
             let view = IslandView(
                 current: row.activity, stackCount: 0, state: row.state, localFrame: local, cornerRadius: 10,
                 notchInset: notchHeight, isIdle: row.state == .idle, wingStatus: row.wings ?? WingStatus(),
-                notchWidth: notch.width, contentSize: content, surfaceVisible: true, pet: petModel, hasNotch: true,
+                notchWidth: notch.width, contentSize: content, panelContent: placeholder, surfaceVisible: true, pet: petModel, hasNotch: true,
                 neo: row.neo, notchLeadingX: notch.minX - regionMinX
             )
-            .frame(width: regionWidth, height: height)
+            .frame(width: regionWidth, height: rowHeightPoints)
             .background(Color(.sRGB, red: 0.42, green: 0.42, blue: 0.45))
             let renderer = ImageRenderer(content: view)
             renderer.scale = scale
@@ -89,7 +110,8 @@ enum NeoSnapshots {
                 print("\(row.name): render failed")
                 continue
             }
-            let y = CGFloat(rowHeight * (rows.count - 1 - index))
+            rowTop += rowPixels(row)
+            let y = CGFloat(totalHeight - rowTop)
             context.draw(image, in: CGRect(x: 0, y: y, width: CGFloat(image.width), height: CGFloat(image.height)))
             context.saveGState()
             context.translateBy(x: 0, y: y + CGFloat(image.height))

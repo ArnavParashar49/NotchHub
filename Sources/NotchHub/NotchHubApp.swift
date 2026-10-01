@@ -92,8 +92,16 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     // NEO in the notch. Its lane is state the app keeps, like the weather:
     // never an activity, so it never competes with one. See `+Neo`.
     var neoLane = NeoLaneModel()
-    /// Comes back when the lane will change on its own (a held state, a
-    /// note expiring, the tuck-in after idle).
+    /// Whether NEO's panel (its chat, below the notch) is open — fed NEO's
+    /// state from the lane's hold, so the two always agree. See `+NeoPanel`.
+    var neoPanel = NeoPanelModel()
+    /// NEO's page in its web view, made on first use and kept.
+    var neoWeb: NeoWebHost?
+    /// The page size NEO's page last asked for (a browser card wants more
+    /// than the chat); `nil` is the chat's own size.
+    var neoPanelRequest: CGSize?
+    /// Comes back when the lane or the panel will change on its own (a held
+    /// state, a note expiring, the tuck-in after idle, the panel folding).
     var neoWakeTask: Task<Void, Never>?
     /// `--neo-demo`: the scripted turn, so it can repeat.
     var neoDemoRound: ((Int) -> Void)?
@@ -123,7 +131,7 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     }()
 
     /// A panel that temporarily replaces the queue-driven island.
-    enum Panel { case none, tray, settings, fileDrop, pet, teleprompter, camera }
+    enum Panel { case none, tray, settings, fileDrop, pet, teleprompter, camera, neo }
     var panel: Panel = .none
 
     /// The teleprompter's script and scroll position. Kept across openings, so
@@ -180,7 +188,8 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         window.onClick = { [weak self] in self?.islandClicked() }
         window.onControlHit = { [weak self] point in
             guard let self else { return false }
-            return self.petControlHit(at: point)
+            return self.neoLaneControlHit(at: point)
+                || self.petControlHit(at: point)
                 || self.teleprompterControlHit(at: point)
                 || self.cameraControlHit(at: point)
                 || self.meetingControlHit(at: point)
@@ -193,6 +202,7 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         }
         window.onMediaCommand = { [weak self] command in self?.mediaCommand(command) }
         window.onCancel = { [weak self] in self?.dismissInteractivePanel() }
+        window.onInteractiveClick = { [weak self] in self?.neoEngageKeyboard() }
         window.onFileDraggedIn = { [weak self] in self?.fileDraggedIn() }
         window.onFileDraggedOut = { [weak self] in self?.fileDraggedOut() }
         window.onFileDropped = { [weak self] urls in self?.fileDropped(urls) }
@@ -564,12 +574,22 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             // The pet's panel is centred on the notch; nothing about it is
             // content-driven.
             size = .default
+        case .neoPanel:
+            size = .default
+            size.neoPanel = neoPageSize
         default:
             size = .default
         }
         // NEO's lane, in every shape: the bars grow for it, the fixed
-        // surfaces hold it in their strip.
+        // surfaces hold it in their strip — cut to the room they have.
         size.neoLead = neoLead(for: neo)
+        switch state {
+        case .idle, .wings, .compact:
+            break
+        default:
+            let surface = window.localFrame(for: state, content: size).width
+            size.neoLead = NeoLaneLayout.fitted(width: size.neoLead, surfaceWidth: surface, notchWidth: window.notchWidth)
+        }
         return size
     }
 
@@ -587,6 +607,7 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         case .pet: return .skin
         case .teleprompter: return teleprompterState
         case .camera: return cameraIslandState
+        case .neo: return .neoPanel
         case .none: break
         }
         if machine.activity?.kind == .meeting, machine.presentation == .expanded {

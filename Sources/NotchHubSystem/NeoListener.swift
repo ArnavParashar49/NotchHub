@@ -7,10 +7,13 @@ import NotchHubCore
 /// only admits clients that know the token NEO.app keeps in `~/.neo/ws-token`.
 /// This listener is a second client beside NEO's own overlay: it reads that
 /// one file (nothing else under `~/.neo`), connects with the token, and turns
-/// the core's `hello` / `state` / `transcript` / `note` / `error` messages into
-/// `NeoFact`s. It sends exactly one command — `camera_view visible:false`, so
-/// the core never streams camera frames to a client that cannot show them —
-/// and nothing else, ever.
+/// the core's `hello` / `state` / `transcript` / `note` / `error` messages and
+/// its card openings (`browser_open` …) into `NeoFact`s. It sends two kinds
+/// of command and nothing else, ever: `camera_view visible:false`, so the
+/// core never streams camera frames to a client that cannot show them; and,
+/// when NotchHub hosts NEO's UI (`hostsUI`), `ui_host notch` on every
+/// connection and `ui_host window` as it stops, so NEO.app keeps its own
+/// window hidden while the notch shows NEO and brings it back afterwards.
 ///
 /// NEO may be off. The listener retries every `reconnectDelay` while the core
 /// is not there, quietly: a missing token file or a refused connection is the
@@ -24,12 +27,17 @@ public final class NeoListener: NSObject, SystemListener {
     public static let defaultTokenFile = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".neo/ws-token")
     /// How long after a failed or closed connection the next attempt is made.
     public static let defaultReconnectDelay: TimeInterval = 1.5
-    /// The one command this client sends: no camera preview frames, please.
+    /// No camera preview frames, please.
     public static let cameraOffCommand = #"{"cmd":"camera_view","visible":false}"#
+    /// NEO's UI lives in the notch: NEO.app keeps its window hidden.
+    public static let hostNotchCommand = #"{"cmd":"ui_host","host":"notch"}"#
+    /// …and it is NEO.app's again.
+    public static let hostWindowCommand = #"{"cmd":"ui_host","host":"window"}"#
 
     private let url: URL
     private let tokenFile: URL
     private let reconnectDelay: TimeInterval
+    private let hostsUI: Bool
     private let emit: (SystemEvent) -> Void
 
     /// Every piece of state below is touched only on this queue. The session
@@ -49,15 +57,19 @@ public final class NeoListener: NSObject, SystemListener {
     private var isConnected = false
     private var reconnect: DispatchWorkItem?
 
+    /// - Parameter hostsUI: whether NotchHub has NEO's UI to show in its
+    ///   panel (`NeoUIBundle`), and so takes NEO's UI into the notch.
     public init(
         url: URL = NeoListener.defaultURL,
         tokenFile: URL = NeoListener.defaultTokenFile,
         reconnectDelay: TimeInterval = NeoListener.defaultReconnectDelay,
+        hostsUI: Bool = false,
         emit: @escaping (SystemEvent) -> Void
     ) {
         self.url = url
         self.tokenFile = tokenFile
         self.reconnectDelay = reconnectDelay
+        self.hostsUI = hostsUI
         self.emit = emit
     }
 
@@ -72,25 +84,43 @@ public final class NeoListener: NSObject, SystemListener {
     }
 
     public func stop() {
+        // Hands NEO its UI back before letting go, and waits (briefly) for
+        // that to leave: the app is usually quitting, and a command still in
+        // the socket's buffer when the process ends never arrives. Best
+        // effort — a core that is not there to take it is not waited for.
+        let handedBack = DispatchSemaphore(value: 0)
         queue.async { [self] in
-            guard isRunning else { return }
+            guard isRunning else { handedBack.signal(); return }
             isRunning = false
             reconnect?.cancel()
             reconnect = nil
-            task?.cancel(with: .goingAway, reason: nil)
+            let socket = task
             task = nil
+            if let socket, isConnected, hostsUI {
+                socket.send(.string(Self.hostWindowCommand)) { _ in
+                    socket.cancel(with: .goingAway, reason: nil)
+                    handedBack.signal()
+                }
+            } else {
+                socket?.cancel(with: .goingAway, reason: nil)
+                handedBack.signal()
+            }
             if isConnected {
                 isConnected = false
                 emit(SystemEvent(source: .neo, payload: .neo(.connected(false))))
             }
         }
+        _ = handedBack.wait(timeout: .now() + Self.handBackTimeout)
     }
+
+    /// How long `stop` waits for `ui_host window` to leave.
+    static let handBackTimeout: TimeInterval = 0.4
 
     // MARK: - Connecting
 
     /// The token, read fresh for every attempt (NEO.app may rewrite it), or
     /// `nil` when the file is not there or holds nothing usable.
-    static func readToken(at file: URL) -> String? {
+    public static func readToken(at file: URL) -> String? {
         guard let data = try? Data(contentsOf: file),
               let text = String(data: data, encoding: .utf8) else { return nil }
         let token = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -125,6 +155,10 @@ public final class NeoListener: NSObject, SystemListener {
         // Queued behind the handshake; the core ignores a client's camera
         // messages until it shows the card, and this one never will.
         task.send(.string(Self.cameraOffCommand)) { _ in }
+        if hostsUI {
+            // NEO's UI is in the notch from here on: NEO.app hides its window.
+            task.send(.string(Self.hostNotchCommand)) { _ in }
+        }
         receive(on: task)
     }
 
@@ -177,9 +211,11 @@ public final class NeoListener: NSObject, SystemListener {
 
     // MARK: - Parsing
 
-    /// The facts in one message from the core. Everything else — browser,
-    /// camera and song cards, tool calls, turn metadata, confirmations — is
-    /// not the lane's business and yields nothing.
+    /// The facts in one message from the core. A card's opening and closing
+    /// (`browser_open` / `browser_close`, camera, song) are facts for the
+    /// panel; everything else — the cards' own state, tool calls, turn
+    /// metadata, confirmations — is not the island's business and yields
+    /// nothing.
     public static func facts(in text: String) -> [NeoFact] {
         guard let data = text.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -203,6 +239,12 @@ public final class NeoListener: NSObject, SystemListener {
             return [.note(payload["text"] as? String ?? "")]
         case "error":
             return [.error(payload["message"] as? String ?? "")]
+        case "browser_open": return [.card(.browser, open: true)]
+        case "browser_close": return [.card(.browser, open: false)]
+        case "camera_open": return [.card(.camera, open: true)]
+        case "camera_close": return [.card(.camera, open: false)]
+        case "song_open": return [.card(.song, open: true)]
+        case "song_close": return [.card(.song, open: false)]
         default:
             return []
         }

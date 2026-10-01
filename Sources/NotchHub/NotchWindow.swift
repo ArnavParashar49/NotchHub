@@ -38,6 +38,13 @@ final class IslandContainerView: NSView {
     /// toggles work; otherwise the container consumes them as island clicks.
     var needsInteraction = false
 
+    /// A region (window coordinates) whose clicks go to the hosted view even
+    /// while the window is NOT key: NEO's panel, which opens on its own as
+    /// NEO answers and must take a click on its buttons without first
+    /// having stolen the keyboard. The window makes itself key on the first
+    /// click inside it (`NotchWindow.sendEvent`).
+    var interactiveFrame: CGRect?
+
     /// The notch itself (window coordinates): where the cursor opens the island
     /// while it is idle.
     var idleNotchFrame: CGRect = .zero
@@ -112,6 +119,7 @@ final class IslandContainerView: NSView {
         // An interactive surface (settings) must reach its controls, so defer to
         // the normal hit test and let the SwiftUI hosting view handle the click.
         if needsInteraction { return super.hitTest(point) }
+        if let interactive = interactiveFrame, interactive.contains(point) { return super.hitTest(point) }
         return self
     }
 
@@ -380,6 +388,23 @@ final class NotchWindow: NSPanel {
     override var canBecomeKey: Bool { needsInteraction }
     override var canBecomeMain: Bool { needsInteraction }
 
+    /// Fired as the window takes key status for a click inside
+    /// `interactiveFrame`, before the click is delivered.
+    var onInteractiveClick: (() -> Void)?
+
+    /// A click inside the interactive region of a non-key window (NEO's
+    /// panel, opened on its own) makes the window key first — the app
+    /// activates and the panel can take typing — then the click lands on
+    /// whatever was clicked, so the first click is never swallowed.
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown, !needsInteraction,
+           let interactive = container.interactiveFrame, interactive.contains(event.locationInWindow) {
+            needsInteraction = true
+            onInteractiveClick?()
+        }
+        super.sendEvent(event)
+    }
+
     /// Whether the window may take key/main status to receive control clicks.
     ///
     /// The hover/click island must never steal focus from the user's app, so it
@@ -489,6 +514,9 @@ final class NotchWindow: NSPanel {
     /// The notch's width — the gap the wings leave in the middle of the bar.
     var notchWidth: CGFloat { geometry.notchFrame.width }
 
+    /// The display's size, for surfaces sized against it.
+    var screenSize: CGSize { geometry.screenFrame.size }
+
     /// Re-reads the display geometry (call on screen-parameter changes).
     func refreshGeometry() {
         geometry = NotchGeometry.detectMain()
@@ -512,6 +540,8 @@ final class NotchWindow: NSPanel {
             setFrame(envelope, display: false)
         }
         container.islandFrame = localFrame(for: state, content: content)
+        // NEO's panel takes clicks without being key (see `interactiveFrame`).
+        container.interactiveFrame = state == .neoPanel ? container.islandFrame : nil
         container.idleNotchFrame = localFrame(for: .idle, content: .default)
         container.isIdle = (state == .idle)
         container.hasNotch = geometry.hasNotch

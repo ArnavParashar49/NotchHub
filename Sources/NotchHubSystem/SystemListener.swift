@@ -116,7 +116,12 @@ public final class SystemMonitor {
         add(.notifications, "notifications") { NotificationListener(emit: $0) }
         add(.focus, "focus") { FocusListener(emit: $0) }
         add(.codingAgent, "codingAgent") { CodingAgentListener(emit: $0) }
-        add(.neo, "neo") { NeoListener(emit: $0) }
+        if enabled(.neo) {
+            // With NEO's page installed NotchHub hosts NEO's whole UI, and
+            // says so to the core; without it, the lane alone.
+            let hostsUI = NeoUIBundle.installedFolder() != nil
+            specs.append(ListenerSpec(id: hostsUI ? "neo+ui" : "neo") { NeoListener(hostsUI: hostsUI, emit: $0) })
+        }
         if enabled(.appDetails) {
             // Its configuration is part of its identity: toggling Coding Agent
             // rebuilds it with or without session tracking.
