@@ -408,6 +408,16 @@ final class NotchWindow: NSPanel {
             needsInteraction = true
             onInteractiveClick?()
         }
+        // Esc with NEO's panel open closes it, as it closes any panel. The
+        // web view is first responder then and keeps the key to itself, so
+        // the container's `cancelOperation` never heard it: the page sees
+        // it first (a question on its card answers "no" to Esc), then the
+        // panel folds.
+        if event.type == .keyDown, event.keyCode == 53, container.interactiveFrame != nil {
+            super.sendEvent(event)
+            onCancel?()
+            return
+        }
         super.sendEvent(event)
     }
 
