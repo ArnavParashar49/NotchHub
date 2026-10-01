@@ -51,6 +51,12 @@ struct IslandView: View {
     var pet: PetRenderModel? = nil
     /// Without a notch there is no idle dock, so no idle pet either.
     var hasNotch: Bool = true
+    /// NEO's lane, while NEO is out of the notch. It lives in its own layer
+    /// left of the notch, in every shape, and is never an activity.
+    var neo: NeoLaneContent? = nil
+    /// The notch's left edge in the hosting coordinates, which the lane hangs
+    /// from. `nil` assumes the notch is centred in the island.
+    var notchLeadingX: CGFloat? = nil
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -61,6 +67,8 @@ struct IslandView: View {
                 contentGroup
                     .transition(.islandContent)
             }
+
+            neoLayer
 
             petLayer
         }
@@ -88,7 +96,12 @@ struct IslandView: View {
                     notchWidth: notchWidth,
                     notchHeight: notchInset,
                     trailingReserve: petBarReserve,
-                    leadWidth: contentSize.wingLead,
+                    // NEO's lane sits between the left wing's content and the
+                    // notch: the wing region widens by it, its content stays
+                    // at the outer end.
+                    leadWidth: contentSize.neoLead > 0
+                        ? (contentSize.wingLead ?? contentSize.wingSide) + contentSize.neoLead
+                        : contentSize.wingLead,
                     hovered: hoveredControl
                 )
                 .id("wings")
@@ -139,6 +152,27 @@ struct IslandView: View {
         }
     }
 
+    /// NEO's lane: the orb and its line in the notch-height strip immediately
+    /// left of the notch. It slides out from under the notch and back under
+    /// it, riding the same spring as the surface, and is masked to the
+    /// surface like everything else. The bars make room for it
+    /// (`IslandContentSize.neoLead`); the fixed surfaces have it in their
+    /// strip, where nothing else is drawn left of the notch.
+    @ViewBuilder
+    private var neoLayer: some View {
+        if let neo, contentSize.neoLead > 0 {
+            let lane = contentSize.neoLead
+            let notchX = notchLeadingX.map { $0 - localFrame.minX } ?? (localFrame.width - notchWidth) / 2
+            NeoLaneView(content: neo, notchHeight: notchInset, width: lane)
+                .frame(width: lane, height: notchInset, alignment: .leading)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .offset(x: notchX - lane)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .mask(surfaceShape)
+                .allowsHitTesting(false)
+        }
+    }
+
     /// Room kept free for the pet at the right of notch-height bars.
     private var petBarReserve: CGFloat { pet == nil ? 0 : PetLayout.barSlot }
 
@@ -149,8 +183,10 @@ struct IslandView: View {
     /// top like the notch, and in the pet's idle dock a continuation of the
     /// physical notch (see `NotchShape.surface`). Every radius animates.
     private var surfaceShape: NotchShape {
-        let docked = state == .idle && pet != nil && hasNotch
-        return NotchShape.surface(islandRadius: surfaceRadius, idleDock: docked ? contentSize.petDock : nil)
+        // NEO's idle lane continues the physical notch exactly as the pet's
+        // dock does, so its outer corner takes the notch's own radius.
+        let docked = state == .idle && hasNotch && (pet != nil || contentSize.neoLead > 0)
+        return NotchShape.surface(islandRadius: surfaceRadius, idleDock: docked ? (contentSize.petDock ?? PetDock(side: .right, reach: 0)) : nil)
     }
 
     /// The bottom-corner radius for the current (target) shape. One animatable
@@ -285,7 +321,9 @@ struct IslandView: View {
                 }
             }
             .padding(.leading, DesignTokens.compactInset)
-            .frame(width: contentSize.compactLead, alignment: .leading)
+            // NEO's lane sits between the glyph and the notch: the wing
+            // widens by it, the glyph stays at the outer end.
+            .frame(width: contentSize.compactLead + contentSize.neoLead, alignment: .leading)
 
             // Notch
             Color.clear.frame(width: notchWidth)

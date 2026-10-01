@@ -45,7 +45,7 @@ extension NotchHubApp {
             notchWidth: window.notchWidth,
             inset: DesignTokens.wingInset,
             trailingReserve: petBarReserve,
-            lead: islandModel.contentSize.wingLead
+            lead: wingHitLead
         ) else { return false }
         performBrowserAction(action)
         return true
@@ -154,7 +154,7 @@ extension NotchHubApp {
                 notchWidth: window.notchWidth,
                 inset: DesignTokens.wingInset,
                 trailingReserve: petBarReserve,
-                lead: islandModel.contentSize.wingLead
+                lead: wingHitLead
             ).map { .wingBrowser($0) }
         case .appPanel:
             let frame = window.localFrame(for: .appPanel, content: islandModel.contentSize)

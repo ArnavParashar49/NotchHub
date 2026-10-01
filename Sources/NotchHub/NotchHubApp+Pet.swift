@@ -261,6 +261,8 @@ extension NotchHubApp {
         guard state != .idle || window.hasNotch else { return nil }
         let content = islandModel.contentSize
         let dock = content.petDock ?? .home
+        // NEO's lane has the left side: a pet docked there is in the notch.
+        if state == .idle, dock.side == .left, content.neoLead > 0 { return nil }
         let frame = window.localFrame(for: state, content: content)
         guard let placement = PetLayout.placement(for: state, islandSize: frame.size, notchHeight: window.notchHeight, dock: dock) else {
             return nil

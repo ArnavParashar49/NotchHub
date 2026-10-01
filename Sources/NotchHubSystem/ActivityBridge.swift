@@ -169,7 +169,9 @@ public enum ActivityBridge {
 
         // Panel and wing state the app keeps itself — the Tray, the frontmost
         // app, privacy dots, the weather, the next-event readout.
-        case .clipboardCaptured, .frontmostApp, .appContext, .privacy, .weather, .calendarNext:
+        // NEO's lane is the app's own state too: never an activity, so it can
+        // never compete with one.
+        case .clipboardCaptured, .frontmostApp, .appContext, .privacy, .weather, .calendarNext, .neo:
             return [.refresh]
 
         case .didWake, .willSleep:

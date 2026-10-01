@@ -129,6 +129,13 @@ extension NotchHubApp {
         } else if arguments.contains("--camera") {
             startMonitor()
             after(0.6) { $0.toggleCamera() }
+        } else if arguments.contains("--neo-demo") {
+            // NEO's lane driven by a scripted turn, with the live listeners
+            // (but not NEO's own) so the lane can be seen beside real wings.
+            featureSettings.setEnabled(.neo, enabled: false)
+            startMonitor()
+            featureSettings.setEnabled(.neo, enabled: true)
+            after(0.6) { $0.runNeoDemo() }
         } else {
             // Once launch has finished, so the app is up and answering the
             // system before any listener reaches for files, scripts or

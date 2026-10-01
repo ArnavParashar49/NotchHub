@@ -27,6 +27,7 @@ struct IslandSettings {
     var teleprompter: Bool = true
     var camera: Bool = true
     var ghostMode: Bool = false
+    var neo: Bool = true
     var showPet: Bool = true
     var petReactions: Bool = true
     var petIdleAnimations: Bool = true
@@ -92,6 +93,7 @@ extension IslandSettings {
         teleprompter = featureSettings.isEnabled(.teleprompter)
         camera = featureSettings.isEnabled(.camera)
         ghostMode = featureSettings.isEnabled(.ghostMode)
+        neo = featureSettings.isEnabled(.neo)
     }
 
     /// Persists this view model's toggles back into a `FeatureSettings`.
@@ -118,6 +120,7 @@ extension IslandSettings {
         settings.setEnabled(.teleprompter, enabled: teleprompter)
         settings.setEnabled(.camera, enabled: camera)
         settings.setEnabled(.ghostMode, enabled: ghostMode)
+        settings.setEnabled(.neo, enabled: neo)
         return settings
     }
 }
@@ -187,6 +190,8 @@ struct SettingsView: View {
                 Item(title: "Coding Agent", symbol: "sparkles", key: \.codingAgent),
                 Item(title: "Ghost Mode", symbol: "eye.slash.fill", key: \.ghostMode,
                      detail: "Hidden from screen sharing"),
+                Item(title: "NEO", symbol: "waveform.circle.fill", key: \.neo,
+                     detail: "The orb beside the notch"),
             ]),
             Group(title: PetIdentity.name, tint: SettingsMetrics.ink, items: [
                 Item(title: "Show \(PetIdentity.name)", symbol: "pawprint.fill", key: \.showPet),

@@ -40,6 +40,8 @@ public struct SystemEvent: Equatable {
         case codingAgent
         /// Current weather for the configured city.
         case weather
+        /// NEO's core: its state and transcript.
+        case neo
     }
 
     /// What happened.
@@ -114,6 +116,12 @@ public struct SystemEvent: Equatable {
         case codingAgent(running: Bool, agent: String)
         /// Current conditions for the configured city.
         case weather(temperature: Double, condition: String, symbol: String)
+
+        // MARK: - NEO
+
+        /// A fact from NEO's core: connected or not, its state, a transcript
+        /// line, a note or an error. Never an activity.
+        case neo(NeoFact)
     }
 
     public let source: Source

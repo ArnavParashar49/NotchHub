@@ -22,8 +22,14 @@ popping in.
 SwiftPM package, native Swift + SwiftUI/AppKit only (no Electron, no web
 wrapper). Three layers, strictly separated:
 
+- **NotchHubOrbs** — NEO's thinking orbs: `OrbEngine`, a port of the
+  `thinking-orbs` geometry engine (MIT, see `THIRD_PARTY.md`), and `OrbView`,
+  the canvas that paints it
 - **NotchHubCore** — pure, testable domain (no GUI):
   - `NotchGeometry` — notch detection + island frame math
+  - `NeoState` · `NeoStateHold` · `NeoLaneModel` · `NeoLaneLayout` — NEO's
+    state, the dwell that keeps its orb from strobing, what its lane shows and
+    when it tucks in, and how wide it is
   - `Activity` / `ActivityKind` — the activity model
   - `ActivityQueue` — primary + stack, priority ordering, transients, auto-dismiss
   - `IslandStateMachine` — idle / wings / compact / expanded / interactive
@@ -45,6 +51,8 @@ wrapper). Three layers, strictly separated:
   - Listeners for battery, volume, brightness, now-playing, downloads,
     clipboard, meetings, privacy, Bluetooth, calendar, weather, focus,
     notifications, coding agents, Wi-Fi and the frontmost app
+  - `NeoListener` — a client of NEO's core websocket, relaying its state and
+    transcript as `NeoFact`s
   - `CameraController` — the camera. `@MainActor`, and its own `phase` is the
     only truth about whether the hardware is on, so nothing can infer it from
     a panel being open
@@ -105,6 +113,30 @@ is on.** A script the room can read is not a teleprompter, and a picture of your
 own face inside the screen you are sharing is never what you meant — neither
 should depend on having remembered to arm anything before the call started.
 Every other surface follows the setting.
+
+## NEO in the notch
+
+[NEO](../Neo%202.0/NEO), the voice assistant, lives in the notch. While it is
+ready nothing shows — the island is exactly as it was. The moment its core
+reports anything else (listening, thinking, working, searching, speaking,
+connecting, needs your OK) a lane springs out of the notch's **left** edge:
+NEO's own animated orb at notch height, and one line — what NEO hears while
+listening, what it says while speaking, "Thinking…" and so on. Each state
+shows for at least 350 ms so the orb never strobes; 1.2 s after NEO is ready
+again the lane tucks back in, with the last reply readable until it goes.
+
+The lane is never an activity: it sits beside the notch in every shape (idle,
+the hover wings, the compact bar, the expanded island and the panels), the
+notch-height bars grow their left side for it, and it never takes the mouse
+while idle, so clicks pass through as before. A pet visiting the left of the
+notch steps into the notch while the lane is out.
+
+NotchHub is a second client of NEO's core (`ws://127.0.0.1:8765`, the token in
+`~/.neo/ws-token` — the only thing it reads under `~/.neo`). It sends one
+command, `camera_view visible:false`, so the core never streams camera frames
+to it, and reconnects every 1.5 s while NEO is off. The toggle is **NEO** in
+Settings. `--neo-demo` runs a scripted turn through the lane without a core;
+`--neo-snapshots DIR` renders the lane offscreen in every shape.
 
 ## Permissions
 

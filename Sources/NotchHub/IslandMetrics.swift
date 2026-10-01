@@ -132,7 +132,7 @@ enum IslandMetrics {
     /// Rounded UP: SwiftUI lays text out on whole pixels, so a fractional
     /// measurement of e.g. 40.4pt would allocate 40 and truncate. Ceiling it
     /// guarantees the frame is never narrower than the glyphs.
-    private static func textWidth(_ string: String) -> CGFloat {
+    static func textWidth(_ string: String) -> CGFloat {
         let base = NSFont.systemFont(ofSize: DesignTokens.compactFontSize, weight: .semibold)
         let font: NSFont
         if let descriptor = base.fontDescriptor.withDesign(.rounded),

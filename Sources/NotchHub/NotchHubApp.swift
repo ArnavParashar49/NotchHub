@@ -89,6 +89,15 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     /// pushing it as one kept the island permanently out of idle.
     var weatherActivity: Activity?
 
+    // NEO in the notch. Its lane is state the app keeps, like the weather:
+    // never an activity, so it never competes with one. See `+Neo`.
+    var neoLane = NeoLaneModel()
+    /// Comes back when the lane will change on its own (a held state, a
+    /// note expiring, the tuck-in after idle).
+    var neoWakeTask: Task<Void, Never>?
+    /// `--neo-demo`: the scripted turn, so it can repeat.
+    var neoDemoRound: ((Int) -> Void)?
+
     // Persistent wing status. The wings show what is *currently true* about the
     // machine, so these are held here and updated by events rather than read
     // from the activity queue, whose entries auto-dismiss.
@@ -193,6 +202,8 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         islandModel.notchWidth = geometry.notchFrame.width
         islandModel.hasNotch = geometry.hasNotch
         islandModel.localFrame = window.swiftUIFrame(for: .idle)
+        // The window is a fixed envelope, so the notch's place in it is too.
+        islandModel.notchLeadingX = islandModel.localFrame.minX
         hostingView = NSHostingView(rootView: IslandRootView(model: islandModel))
         window.installContent(hostingView)
         window.apply(state: .idle)
@@ -380,6 +391,8 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             timerElapsed = elapsed
         case .timerFinished:
             timerElapsed = nil
+        case let .neo(fact):
+            neoReceive(fact)
         default:
             break
         }
@@ -444,7 +457,8 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         // captured has to be out of the capture path BEFORE its first frame.
         applyGhostMode(for: state)
         let status = wingStatus()
-        let contentSize = computeContentSize(state: state, status: status)
+        let neo = neoContent(at: Date())
+        let contentSize = computeContentSize(state: state, status: status, neo: neo)
         let panel = panelContent()
         window.apply(state: state, content: contentSize)
 
@@ -452,6 +466,8 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         let frame = window.swiftUIFrame(for: state, content: contentSize)
         let isIdle = state == .idle
         let wasIdle = model.isIdle
+        let neoShown = neo != nil
+        let neoWasShown = model.neo != nil
         let surfaceChanged = model.state != state
             || model.localFrame != frame
             || model.current?.id != machine.activity?.id
@@ -460,8 +476,9 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             ? IslandMotion.between(from: model.localFrame, fromIdle: wasIdle, to: frame, toIdle: isIdle)
             : .none
 
-        // With the pet shown, idle keeps a small black dock beside the notch.
-        if !isIdle || petDocked {
+        // With the pet shown, idle keeps a small black dock beside the notch;
+        // with NEO out, its lane.
+        if !isIdle || petDocked || neoShown {
             surfaceFadeTask?.cancel()
             surfaceFadeTask = nil
             if !model.surfaceVisible {
@@ -483,6 +500,9 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             model.wingStatus = status
             model.panelContent = panel
             model.meeting = meeting
+            // NEO's lane slides out (and back in) on the same spring as the
+            // surface that makes room for it.
+            model.neo = neo
             // In the same transaction as the shape, so the pet's move from where
             // it was drawn rides the island's spring.
             publishPet(petUpdate)
@@ -500,7 +520,9 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         clearStalePetHover()
         clearStaleControlHover()
 
-        if isIdle, !wasIdle, !petDocked {
+        // Fade the surface once it has drained home: after a retract, or once
+        // NEO's lane has tucked back into an otherwise empty notch.
+        if isIdle, !petDocked, !neoShown, !wasIdle || neoWasShown {
             scheduleSurfaceFade()
         }
     }
@@ -518,31 +540,37 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         }
     }
 
-    func computeContentSize(state: IslandState, status: WingStatus) -> IslandContentSize {
+    func computeContentSize(state: IslandState, status: WingStatus, neo: NeoLaneContent? = nil) -> IslandContentSize {
+        var size: IslandContentSize
         switch state {
         case .appPanel:
-            var size = IslandContentSize.default
+            size = .default
             size.panelHeight = appPanelHeight()
-            return size
         case .wings:
             let sides = IslandMetrics.wings(status, petSlot: petBarReserve)
-            var size = IslandContentSize(compactLead: 0, compactTrail: 0, wingSide: sides.trail)
+            size = IslandContentSize(compactLead: 0, compactTrail: 0, wingSide: sides.trail)
             size.wingLead = sides.lead
-            return size
         case .compact:
-            guard let current = machine.activity else { return .default }
-            return IslandMetrics.compact(current, petSlot: petBarReserve)
+            size = machine.activity.map { IslandMetrics.compact($0, petSlot: petBarReserve) } ?? .default
         case .idle:
-            var size = IslandContentSize.default
+            size = .default
             size.petDock = petIdleDock
-            return size
+            // NEO's lane has the left side while it shows: a pet visiting the
+            // left of the notch steps into the notch until the lane is gone.
+            if neo != nil, let dock = size.petDock, dock.side == .left {
+                size.petDock = PetDock(side: .left, reach: 0)
+            }
         case .skin:
             // The pet's panel is centred on the notch; nothing about it is
             // content-driven.
-            return .default
+            size = .default
         default:
-            return .default
+            size = .default
         }
+        // NEO's lane, in every shape: the bars grow for it, the fixed
+        // surfaces hold it in their strip.
+        size.neoLead = neoLead(for: neo)
+        return size
     }
 
     /// The shape the island should take right now.

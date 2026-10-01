@@ -31,6 +31,9 @@ public enum Feature: String, CaseIterable, Codable {
     case camera
     /// Hide the island from screen sharing and recordings.
     case ghostMode
+    /// NEO, the voice assistant, living in the notch: its orb and what it
+    /// hears and says, left of the notch while it is busy.
+    case neo
 }
 
 /// Which features are currently enabled, persisted to `UserDefaults`.
@@ -72,7 +75,7 @@ public struct FeatureSettings: Codable, Equatable {
     /// knew about. A feature added since is switched on by default for an
     /// existing install, instead of reading as "turned off".
     static let originalFeatures: Set<Feature> = Set(Feature.allCases)
-        .subtracting([.appDetails, .teleprompter, .camera, .ghostMode])
+        .subtracting([.appDetails, .teleprompter, .camera, .ghostMode, .neo])
 
     /// Decoded through RAW STRINGS, dropping any name this build no longer has.
     ///

@@ -253,6 +253,12 @@ if let index = arguments.firstIndex(of: "--surface-snapshots") {
     exit(MainActor.assumeIsolated { SurfaceSnapshots.render(directory: directory, filter: filter) })
 }
 
+// --neo-snapshots DIR: NEO's lane in each island shape and state (headless).
+if let index = arguments.firstIndex(of: "--neo-snapshots") {
+    let directory = index + 1 < arguments.count ? arguments[index + 1] : "."
+    exit(MainActor.assumeIsolated { NeoSnapshots.render(directory: directory) })
+}
+
 // --pet-snapshots DIR: the real IslandView's pet layer in each dock shape (headless).
 if let index = arguments.firstIndex(of: "--pet-snapshots") {
     let directory = index + 1 < arguments.count ? arguments[index + 1] : "."
