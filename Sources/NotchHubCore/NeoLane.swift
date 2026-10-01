@@ -181,10 +181,13 @@ public enum NeoLaneLayout {
     public static let gap: CGFloat = 8
     /// From the line to the notch's edge.
     public static let innerInset: CGFloat = 10
-    /// The orb's inset from the top and bottom of the notch strip.
-    public static let orbInset: CGFloat = 4
-    /// The longest a line may be before it is cut.
-    public static let maxTextWidth: CGFloat = 220
+    /// The orb's inset from the top and bottom of the notch strip: the orb is
+    /// the full notch height less a hair, so it is the first thing you see.
+    public static let orbInset: CGFloat = 2
+    /// The longest a line may be before it is cut: one short line beside the
+    /// orb, never a lane that spreads across the menu bar. A transcript is
+    /// head-truncated, so its latest words are the ones that fit.
+    public static let maxTextWidth: CGFloat = 140
 
     /// The orb's diameter: the notch's height less its insets.
     public static func orbSize(notchHeight: CGFloat) -> CGFloat {

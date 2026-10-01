@@ -76,6 +76,29 @@ struct NeoLaneModelTests {
         #expect(lane.content(at: t0.addingTimeInterval(1)) == NeoLaneContent(state: .listening, line: "Listening…"))
     }
 
+    @Test("the lane shows on the wake itself: connecting / listening within the dwell")
+    func wakeShowsAtOnce() {
+        var lane = NeoLaneModel()
+        lane.receive(.connected(true), at: t0)
+        lane.receive(.state(.idle), at: t0)
+        // The wake comes 100 ms after idle was applied: the hold keeps idle
+        // for 250 ms more, but the lane is already out, orb and label.
+        let wake = t0.addingTimeInterval(0.1)
+        let due = lane.receive(.state(.connecting), at: wake)
+        #expect(lane.isShown(at: wake))
+        #expect(lane.content(at: wake) != nil)
+        // The connecting orb itself is on by the end of the dwell — never later.
+        #expect(due != nil && due! <= wake.addingTimeInterval(0.35))
+        lane.tick(at: wake.addingTimeInterval(0.25))
+        #expect(lane.content(at: wake.addingTimeInterval(0.25)) == NeoLaneContent(state: .connecting, line: "Connecting…"))
+
+        // And a listen with no connecting first (the hotkey while the voice is up).
+        var quick = NeoLaneModel()
+        quick.receive(.connected(true), at: t0)
+        quick.receive(.state(.listening), at: t0.addingTimeInterval(5))
+        #expect(quick.content(at: t0.addingTimeInterval(5)) == NeoLaneContent(state: .listening, line: "Listening…"))
+    }
+
     @Test("what it hears while listening, what it says while speaking")
     func lines() {
         var lane = connected(at: t0)
@@ -179,11 +202,19 @@ struct NeoLaneModelTests {
 @Suite("NEO lane width")
 struct NeoLaneLayoutTests {
 
-    @Test("the orb fills the notch strip less its insets, never smaller than 16")
+    @Test("the orb is the notch's height less 4 pt, never smaller than 16")
     func orbSize() {
-        #expect(NeoLaneLayout.orbSize(notchHeight: 32) == 24)
-        #expect(NeoLaneLayout.orbSize(notchHeight: 38) == 30)
+        #expect(NeoLaneLayout.orbSize(notchHeight: 32) == 28)
+        #expect(NeoLaneLayout.orbSize(notchHeight: 38) == 34)
         #expect(NeoLaneLayout.orbSize(notchHeight: 10) == 16)
+    }
+
+    @Test("the line is one short line: the lane never spreads past the orb plus 140 pt")
+    func cappedLine() {
+        #expect(NeoLaneLayout.maxTextWidth == 140)
+        let widest = NeoLaneLayout.width(notchHeight: 32, textWidth: 10_000)
+        #expect(widest == NeoLaneLayout.outerInset + 28 + NeoLaneLayout.gap + 140 + NeoLaneLayout.innerInset)
+        #expect(widest <= 200)
     }
 
     @Test("the lane is content-driven: insets + orb + gap + a capped line")

@@ -120,8 +120,11 @@ Every other surface follows the setting.
 ready nothing shows — the island is exactly as it was. The moment its core
 reports anything else (listening, thinking, working, searching, speaking,
 connecting, needs your OK) a lane springs out of the notch's **left** edge:
-NEO's own animated orb at notch height, and one line — what NEO hears while
-listening, what it says while speaking, "Thinking…" and so on. Each state
+NEO's own animated orb, the full notch height less 4 pt (the 64-pt design
+drawn small, its ink lifted to white so it reads on black), and one short line
+beside it — what NEO hears while listening, what it says while speaking,
+"Thinking…" and so on; a transcript is cut from its start, so the latest words
+are the ones that fit, and the lane never grows past the orb plus 140 pt. Each state
 shows for at least 350 ms so the orb never strobes; 1.2 s after NEO is ready
 again the lane tucks back in, with the last reply readable until it goes.
 
