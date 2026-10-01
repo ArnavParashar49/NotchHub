@@ -191,7 +191,7 @@ struct SettingsView: View {
                 Item(title: "Ghost Mode", symbol: "eye.slash.fill", key: \.ghostMode,
                      detail: "Hidden from screen sharing"),
                 Item(title: "NEO", symbol: "waveform.circle.fill", key: \.neo,
-                     detail: "The orb beside the notch"),
+                     detail: "Its orb and chat in the notch"),
             ]),
             Group(title: PetIdentity.name, tint: SettingsMetrics.ink, items: [
                 Item(title: "Show \(PetIdentity.name)", symbol: "pawprint.fill", key: \.showPet),

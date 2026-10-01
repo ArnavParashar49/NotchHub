@@ -179,6 +179,14 @@ screen) on the island's black with no card of its own.
 is open) are both pure and clock-driven; the panel takes NEO's state from the
 lane's hold, so the two can never disagree.
 
+None of this touches the island while NEO is absent: with the core off, or on
+and idle, there is no lane and no panel and every shape is exactly its
+pre-NEO frame (`NeoAbsentTests`, and `--surface-snapshots` / `--app-snapshots`
+/ `--pet-panel-snapshots` render pixel-identical to the build before NEO). If
+the page is not installed, or fails to load, NotchHub behaves as if the NEO
+feature were off — the lane alone, NEO's own window handed back, one log
+line — and the **NEO** tile in Settings turns the feature off entirely.
+
 ## Permissions
 
 - **Automation** — reading the track from Spotify, and the page and tabs of

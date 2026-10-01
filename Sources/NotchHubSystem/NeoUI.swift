@@ -15,9 +15,20 @@ public enum NeoUIBundle {
     public static let defaultFolder = URL(fileURLWithPath: NSHomeDirectory())
         .appendingPathComponent("Library/Application Support/NEO/ui", isDirectory: true)
 
-    /// The folder holding NEO's page, or `nil` when it is not installed.
+    /// The folder holding NEO's page, or `nil` when it is not installed — or
+    /// when the page failed to load this run (`disableForThisRun`).
     public static func installedFolder(_ folder: URL = defaultFolder) -> URL? {
-        FileManager.default.isReadableFile(atPath: folder.appendingPathComponent("index.html").path) ? folder : nil
+        guard !isDisabledForThisRun else { return nil }
+        return FileManager.default.isReadableFile(atPath: folder.appendingPathComponent("index.html").path) ? folder : nil
+    }
+
+    /// Whether the page is off for the rest of this run: it failed to load,
+    /// so NotchHub behaves as if it were not installed — the lane alone, and
+    /// NEO's own window handed back — rather than showing an empty panel.
+    public private(set) static var isDisabledForThisRun = false
+
+    public static func disableForThisRun() {
+        isDisabledForThisRun = true
     }
 }
 

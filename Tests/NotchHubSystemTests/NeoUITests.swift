@@ -103,3 +103,62 @@ struct NeoUITests {
         #expect(NeoSchemeHandler.indexURL.absoluteString == "neo://app/index.html")
     }
 }
+
+/// NEO's REAL built page (`ui/dist`, pointed at by `NOTCHHUB_NEO_DIST`)
+/// booting under the scheme handler with the host script: the bundle's
+/// module scripts load from `neo://app/assets/…`, the page takes the notch
+/// host and theme, renders its chat (never its pill), and raises no script
+/// error. `WebSocket` is stubbed before the page runs, so the test never
+/// reaches a core — least of all the real one on 8765.
+enum NeoBuiltPage {
+    static let dist: URL? = {
+        guard let path = ProcessInfo.processInfo.environment["NOTCHHUB_NEO_DIST"] else { return nil }
+        return NeoUIBundle.installedFolder(URL(fileURLWithPath: path, isDirectory: true))
+    }()
+}
+
+@Suite("NEO's built page in the notch", .enabled(if: NeoBuiltPage.dist != nil))
+struct NeoBuiltPageTests {
+
+    @Test("boots from neo://app/, in notch mode, with no errors and no socket")
+    @MainActor
+    func boots() async throws {
+        let folder = try #require(NeoBuiltPage.dist)
+        let configuration = WKWebViewConfiguration()
+        configuration.setURLSchemeHandler(NeoSchemeHandler(folder: folder), forURLScheme: NeoSchemeHandler.scheme)
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: NeoHostScript.source(token: String(repeating: "ab", count: 32), maxPage: CGSize(width: 760, height: 640)),
+            injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        configuration.userContentController.addUserScript(WKUserScript(source: """
+            window.__errors = []; window.__sockets = [];
+            window.addEventListener("error", (e) => window.__errors.push(String(e.message)));
+            window.addEventListener("unhandledrejection", (e) => window.__errors.push("rejection: " + String(e.reason)));
+            window.WebSocket = class { constructor(url) { window.__sockets.push(url); this.readyState = 0; } send() {} close() {} };
+            window.WebSocket.OPEN = 1;
+            """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 420, height: 520), configuration: configuration)
+        web.load(URLRequest(url: NeoSchemeHandler.indexURL))
+
+        func js(_ source: String) async -> Any? {
+            await withCheckedContinuation { continuation in
+                web.evaluateJavaScript(source) { value, _ in continuation.resume(returning: value) }
+            }
+        }
+        let deadline = Date().addingTimeInterval(8)
+        var rendered = false
+        while Date() < deadline, !rendered {
+            try await Task.sleep(nanoseconds: 100_000_000)
+            rendered = (await js("!!document.querySelector('#root .card')") as? Bool) ?? false
+        }
+        #expect(rendered, "the chat card rendered")
+        #expect(await js("document.documentElement.dataset.host") as? String == "notch")
+        #expect(await js("!!document.querySelector('.pill')") as? Bool == false)
+        #expect(await js("!!document.querySelector('.input-row input')") as? Bool == true)
+        #expect(await js("document.documentElement.dataset.sim") as? String == nil)
+        #expect(await js("JSON.stringify(window.__errors)") as? String == "[]")
+        // It reached for its socket with the injected token, and for nothing else.
+        let sockets = await js("JSON.stringify(window.__sockets)") as? String ?? ""
+        #expect(sockets.contains("ws://127.0.0.1:8765/?token=\(String(repeating: "ab", count: 32))"), Comment(rawValue: sockets))
+        web.stopLoading()
+    }
+}

@@ -22,6 +22,10 @@ final class NeoWebHost: NSObject, WKNavigationDelegate, WKUIDelegate {
     let webView: WKWebView
     /// A message from the page, already parsed.
     var onMessage: ((NeoHostMessage) -> Void)?
+    /// The page could not load (a broken install, a missing file): reported
+    /// once, after which the host is not used again.
+    var onFailure: ((String) -> Void)?
+    private var failed = false
 
     init(folder: URL, token: String, maxPage: CGSize) {
         let configuration = WKWebViewConfiguration()
@@ -57,6 +61,24 @@ final class NeoWebHost: NSObject, WKNavigationDelegate, WKUIDelegate {
             return
         }
         onMessage?(message)
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        fail("did not load: \(error.localizedDescription)")
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        fail("failed: \(error.localizedDescription)")
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        fail("its web process ended")
+    }
+
+    private func fail(_ reason: String) {
+        guard !failed else { return }
+        failed = true
+        onFailure?(reason)
     }
 
     /// The page never navigates away: a link it did not route through the

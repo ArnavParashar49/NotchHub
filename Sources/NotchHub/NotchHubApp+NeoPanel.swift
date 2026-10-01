@@ -24,6 +24,7 @@ extension NotchHubApp {
         guard let folder = neoUIFolder, let token = NeoListener.readToken(at: NeoListener.defaultTokenFile) else { return nil }
         let host = NeoWebHost(folder: folder, token: token, maxPage: NeoPanelLayout.maxPageSize(screen: window.screenSize))
         host.onMessage = { [weak self] message in self?.neoHostMessage(message) }
+        host.onFailure = { [weak self] reason in self?.neoPageFailed(reason) }
         neoWeb = host
         log("neo: page loaded from \(folder.path)")
         return host
@@ -40,8 +41,25 @@ extension NotchHubApp {
             log("neo: panel open")
         } else if !shouldOpen, panel == .neo {
             closePanel()
+            // Straight back to the island's resting shape, as if the panel had
+            // been an activity that ended — not a bare compact bar waiting for
+            // the next tick to tuck it in.
+            renderQueue()
             log("neo: panel closed")
         }
+    }
+
+    /// NEO's page could not load: for the rest of this run NotchHub behaves
+    /// as if the page were not installed — the panel closes and never opens,
+    /// the lane goes on, and the listener is restarted without the UI so it
+    /// hands NEO its own window back (`ui_host window`). One log line.
+    func neoPageFailed(_ reason: String) {
+        log("neo: page \(reason) — the panel is off for this run")
+        NeoUIBundle.disableForThisRun()
+        neoWeb = nil
+        neoPanel.close(at: Date())
+        applyNeoPanel()
+        monitor?.restart { $0 is NeoListener }
     }
 
     func neoPanelContent() -> AnyView {

@@ -199,6 +199,92 @@ struct NeoLaneModelTests {
     }
 }
 
+/// With the NEO feature ON and NEO absent — its core not running, or
+/// running and idle — nothing about the island changes: no lane, no panel,
+/// every shape exactly its pre-NEO frame.
+@Suite("NEO absent: the island is as it was")
+struct NeoAbsentTests {
+
+    let geometry = NotchGeometry.make(screenFrame: CGRect(x: 0, y: 0, width: 1728, height: 1117), safeAreaInsets: NSEdgeInsets(top: 32, left: 0, bottom: 0, right: 0))
+    let t0 = Date(timeIntervalSinceReferenceDate: 5_000)
+
+    @Test("no core: the lane has nothing to show, however long it waits")
+    func noCore() {
+        var lane = NeoLaneModel()
+        #expect(lane.content(at: t0) == nil)
+        #expect(!lane.isShown(at: t0))
+        #expect(lane.nextWake(at: t0) == nil)
+        let ticked1 = lane.tick(at: t0.addingTimeInterval(3_600))
+        #expect(!ticked1)
+        #expect(lane.content(at: t0.addingTimeInterval(3_600)) == nil)
+        // A core that is up and idle is the same as none.
+        lane.receive(.connected(true), at: t0)
+        lane.receive(.state(.idle), at: t0)
+        #expect(lane.content(at: t0) == nil && lane.nextWake(at: t0) == nil)
+    }
+
+    @Test("no core: the panel never opens on its own — not on hover, not on time")
+    func noPanel() {
+        var panel = NeoPanelModel()
+        panel.hover(true, at: t0)
+        panel.hover(false, at: t0.addingTimeInterval(1))
+        panel.receive(state: .idle, at: t0.addingTimeInterval(2))
+        panel.receive(state: .listening, at: t0.addingTimeInterval(3))
+        let ticked2 = panel.tick(at: t0.addingTimeInterval(3_600))
+        #expect(!ticked2)
+        #expect(!panel.isOpen && panel.nextWake(at: t0) == nil)
+        panel.disconnected(at: t0)
+        #expect(!panel.isOpen)
+    }
+
+    @Test("every island shape has exactly its pre-NEO frame")
+    func frames() {
+        let content = IslandContentSize.default
+        #expect(content.neoLead == 0 && content.neoPanel == nil)
+        #expect(geometry.frame(for: .idle, content: content) == geometry.notchFrame)
+        #expect(geometry.frame(for: .wings, content: content) == geometry.wingsBar(sideWidth: NotchGeometry.wingWidth))
+        #expect(geometry.frame(for: .compact, content: content) == geometry.compactBar(lead: NotchGeometry.compactLeadOverhang, trail: NotchGeometry.compactTrailOverhang))
+        #expect(geometry.frame(for: .compact, content: content) == geometry.compactFrame)
+        #expect(geometry.frame(for: .expanded, content: content) == geometry.expandedFrame)
+        #expect(geometry.frame(for: .interactive, content: content) == geometry.interactiveFrame)
+        #expect(geometry.frame(for: .tray, content: content) == geometry.trayFrame)
+        #expect(geometry.frame(for: .settings, content: content) == geometry.settingsFrame)
+        #expect(geometry.frame(for: .skin, content: content) == geometry.skinFrame)
+        #expect(geometry.frame(for: .meeting, content: content) == geometry.meetingFrame)
+        #expect(geometry.frame(for: .fileDrop, content: content) == geometry.fileDropFrame)
+        #expect(geometry.frame(for: .teleprompter, content: content) == geometry.teleprompterFrame)
+        #expect(geometry.frame(for: .camera, content: content) == geometry.cameraFrame(expanded: false))
+        // The idle dock for the pet is the pet's, untouched by NEO.
+        var pet = content
+        pet.petDock = PetDock(side: .right, reach: 40)
+        #expect(geometry.frame(for: .idle, content: pet) == geometry.compactBar(lead: 0, trail: 40))
+        // And NEO's own fields move only NEO's own shape.
+        var neo = content
+        neo.neoPanel = CGSize(width: 900, height: 900)
+        for state in IslandState.allCases where state != .neoPanel {
+            #expect(geometry.frame(for: state, content: neo) == geometry.frame(for: state, content: content), "\(state)")
+        }
+    }
+
+    @Test("the lane's hit region is nothing while the lane is tucked in")
+    func noHitRegion() {
+        // What the window hit-tests: the lane's width. Tucked in, it is 0 —
+        // there is nothing a click could land on.
+        #expect(IslandContentSize.default.neoLead == 0)
+        #expect(NeoLaneLayout.width(notchHeight: 32, textWidth: 0) > 0) // only once it shows
+        #expect(NeoLaneLayout.fitted(width: 0, surfaceWidth: 420, notchWidth: 185) == 0)
+    }
+
+    @Test("Ghost Mode and capture are exactly as before for every pre-NEO shape")
+    func ghost() {
+        for state in IslandState.allCases where state != .neoPanel {
+            let before: Set<IslandState> = [.teleprompter, .teleprompterCompose, .camera, .cameraExpanded]
+            #expect(GhostMode.hidesFromCapture(state: state, ghostModeEnabled: false) == before.contains(state), "\(state)")
+            #expect(GhostMode.hidesFromCapture(state: state, ghostModeEnabled: true))
+        }
+    }
+}
+
 @Suite("NEO lane width")
 struct NeoLaneLayoutTests {
 
