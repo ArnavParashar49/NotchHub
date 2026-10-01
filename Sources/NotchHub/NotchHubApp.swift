@@ -105,6 +105,10 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     var neoWakeTask: Task<Void, Never>?
     /// `--neo-demo`: the scripted turn, so it can repeat.
     var neoDemoRound: ((Int) -> Void)?
+    /// `--neo-capturable`: the window stays visible to screen capture in
+    /// every shape for this run, so a debug `screencapture` of the notch
+    /// strip can show NEO's lane and panel. Never saved; see `+Ghost`.
+    var capturableForDebug = false
 
     // Persistent wing status. The wings show what is *currently true* about the
     // machine, so these are held here and updated by events rather than read
@@ -211,12 +215,15 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         islandModel.notchInset = geometry.notchFrame.height
         islandModel.notchWidth = geometry.notchFrame.width
         islandModel.hasNotch = geometry.hasNotch
-        islandModel.localFrame = window.swiftUIFrame(for: .idle)
-        // The window is a fixed envelope, so the notch's place in it is too.
-        islandModel.notchLeadingX = islandModel.localFrame.minX
         hostingView = NSHostingView(rootView: IslandRootView(model: islandModel))
         window.installContent(hostingView)
+        // Sizes the window to its envelope. Nothing is measured against the
+        // window before this: `localFrame` and the notch's place are taken
+        // from the envelope, never from the compact frame the window is born
+        // with (their origins are hundreds of points apart).
         window.apply(state: .idle)
+        islandModel.localFrame = window.swiftUIFrame(for: .idle)
+        islandModel.notchLeadingX = window.notchLeadingX
         window.orderFrontRegardless()
 
         registerHotKeys()
@@ -506,6 +513,10 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             model.state = state
             model.contentSize = contentSize
             model.localFrame = frame
+            // Where the notch is in the window right now: the lane hangs
+            // from it, and a stale value (one measured before the window was
+            // sized to its envelope) put the lane outside the island.
+            model.notchLeadingX = window.notchLeadingX
             model.isIdle = isIdle
             model.wingStatus = status
             model.panelContent = panel

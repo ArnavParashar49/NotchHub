@@ -514,6 +514,11 @@ final class NotchWindow: NSPanel {
     /// The notch's width — the gap the wings leave in the middle of the bar.
     var notchWidth: CGFloat { geometry.notchFrame.width }
 
+    /// The notch's left edge in the window's own coordinates (the same in
+    /// AppKit and SwiftUI, which differ only vertically). Read AFTER `apply`
+    /// has sized the window to its envelope — see `NotchGeometry.notchLeadingX`.
+    var notchLeadingX: CGFloat { geometry.notchLeadingX(inWindow: frame) }
+
     /// The display's size, for surfaces sized against it.
     var screenSize: CGSize { geometry.screenFrame.size }
 

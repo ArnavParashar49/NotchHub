@@ -437,6 +437,17 @@ public struct NotchGeometry: Equatable {
 
     /// The union of every surface the island can become.
     ///
+    /// The notch's left edge in the local coordinates of a window whose frame
+    /// is `window` (x runs the same way in AppKit and SwiftUI, so this serves
+    /// both). NEO's lane hangs from it in every shape. It must be measured in
+    /// the frame the window actually has — the envelope it is sized to in
+    /// `apply`, not the compact frame it is born with: the two origins differ
+    /// by hundreds of points, and a value taken against the wrong one puts
+    /// the lane outside the island, where its mask hides it entirely.
+    public func notchLeadingX(inWindow window: CGRect) -> CGFloat {
+        notchFrame.minX - window.minX
+    }
+
     /// The window is sized to this once and then never resized. AppKit resizes
     /// a window instantly, with no animation, so a frame that changed on every
     /// hover would make the island jump even while its content animated —

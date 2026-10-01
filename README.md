@@ -121,12 +121,12 @@ ready nothing shows — the island is exactly as it was. The moment its core
 reports anything else (listening, thinking, working, searching, speaking,
 connecting, needs your OK) a lane springs out of the notch's **left** edge:
 NEO's own animated orb, the full notch height less 4 pt (the 64-pt design
-drawn small, its ink lifted to white so it reads on black), and one short line
-beside it — what NEO hears while listening, what it says while speaking,
-"Thinking…" and so on; a transcript is cut from its start, so the latest words
-are the ones that fit, and the lane never grows past the orb plus 140 pt. Each state
-shows for at least 350 ms so the orb never strobes; 1.2 s after NEO is ready
-again the lane tucks back in, with the last reply readable until it goes.
+drawn small, its ink lifted to white so it reads on black), and nothing else —
+no status words, no transcript; what NEO hears and says is the panel's to
+show. The lane is the orb plus a little padding (the notch's height plus
+12 pt), the same in every state and every shape, so nothing else grows for it.
+Each state shows for at least 350 ms so the orb never strobes; 1.2 s after NEO
+is ready again the lane tucks back in.
 
 The lane is never an activity: it sits beside the notch in every shape (idle,
 the hover wings, the compact bar, the expanded island and the panels), the
@@ -140,6 +140,9 @@ NotchHub is a second client of NEO's core (`ws://127.0.0.1:8765`, the token in
 and reconnects every 1.5 s while NEO is off. The toggle is **NEO** in
 Settings. `--neo-demo` runs a scripted turn through the lane without a core;
 `--neo-snapshots DIR` renders the lane offscreen in every shape.
+`--neo-capturable` is a debug flag that leaves the window visible to screen
+capture in every shape (Ghost Mode and the always-private panel included), so
+`screencapture` of the notch strip shows what the user sees; in memory only.
 
 ### NEO's panel
 

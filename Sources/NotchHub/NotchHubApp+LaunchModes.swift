@@ -39,6 +39,15 @@ extension NotchHubApp {
             log("ghost: disabled for this run only (--no-ghost)")
         }
 
+        // `--neo-capturable`: leave the window visible to screen capture in
+        // EVERY shape (Ghost Mode and the always-private surfaces included),
+        // so a `screencapture` of the notch strip shows NEO's lane and panel
+        // during a debug run. In memory only, never saved.
+        if arguments.contains("--neo-capturable") {
+            capturableForDebug = true
+            log("ghost: window left capturable for this run only (--neo-capturable)")
+        }
+
         if let index = arguments.firstIndex(of: "--art"), index + 1 < arguments.count {
             let path = arguments[index + 1]
             demoArtwork = FileManager.default.contents(atPath: path)

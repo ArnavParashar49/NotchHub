@@ -65,11 +65,11 @@ extension NotchHubApp {
         return neoLane.content(at: now)
     }
 
-    /// How far the lane reaches left of the notch for `content`: measured
-    /// from the line it will draw, like every other bar.
+    /// How far the lane reaches left of the notch while it shows: the orb
+    /// and its padding, whatever NEO is doing.
     func neoLead(for content: NeoLaneContent?) -> CGFloat {
-        guard let content else { return 0 }
-        return NeoLaneLayout.width(notchHeight: window.notchHeight, textWidth: IslandMetrics.textWidth(content.line))
+        guard content != nil else { return 0 }
+        return NeoLaneLayout.width(notchHeight: window.notchHeight)
     }
 
     /// The left wing's width as the hit layouts need it: the measured wing

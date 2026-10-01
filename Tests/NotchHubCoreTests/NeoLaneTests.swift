@@ -271,7 +271,7 @@ struct NeoAbsentTests {
         // What the window hit-tests: the lane's width. Tucked in, it is 0 —
         // there is nothing a click could land on.
         #expect(IslandContentSize.default.neoLead == 0)
-        #expect(NeoLaneLayout.width(notchHeight: 32, textWidth: 0) > 0) // only once it shows
+        #expect(NeoLaneLayout.width(notchHeight: 32) > 0) // only once it shows
         #expect(NeoLaneLayout.fitted(width: 0, surfaceWidth: 420, notchWidth: 185) == 0)
     }
 
@@ -295,31 +295,27 @@ struct NeoLaneLayoutTests {
         #expect(NeoLaneLayout.orbSize(notchHeight: 10) == 16)
     }
 
-    @Test("on a fixed surface the lane is cut to the room beside the notch, the orb kept whole")
+    @Test("on a fixed surface the lane keeps its width: every panel has room for the orb")
     func fitted() {
+        let lane = NeoLaneLayout.width(notchHeight: 32)
         // NEO's panel: 420 wide around a 185 notch leaves 117 a side.
+        #expect(NeoLaneLayout.fitted(width: lane, surfaceWidth: 420, notchWidth: 185) == lane)
+        #expect(NeoLaneLayout.fitted(width: lane, surfaceWidth: 514, notchWidth: 185) == lane)
+        // Only a surface narrower than the notch plus two lanes would cut it.
+        #expect(NeoLaneLayout.fitted(width: lane, surfaceWidth: 100, notchWidth: 185) == 0)
         #expect(NeoLaneLayout.fitted(width: 198, surfaceWidth: 420, notchWidth: 185) == 115)
-        #expect(NeoLaneLayout.fitted(width: 90, surfaceWidth: 420, notchWidth: 185) == 90)
-        #expect(NeoLaneLayout.fitted(width: 198, surfaceWidth: 100, notchWidth: 185) == 0)
-        let orbOnly = NeoLaneLayout.width(notchHeight: 32, textWidth: 0)
-        #expect(NeoLaneLayout.fitted(width: 198, surfaceWidth: 420, notchWidth: 185) >= orbOnly)
     }
 
-    @Test("the line is one short line: the lane never spreads past the orb plus 140 pt")
-    func cappedLine() {
-        #expect(NeoLaneLayout.maxTextWidth == 140)
-        let widest = NeoLaneLayout.width(notchHeight: 32, textWidth: 10_000)
-        #expect(widest == NeoLaneLayout.outerInset + 28 + NeoLaneLayout.gap + 140 + NeoLaneLayout.innerInset)
-        #expect(widest <= 200)
-    }
-
-    @Test("the lane is content-driven: insets + orb + gap + a capped line")
+    @Test("the lane is the orb plus a little padding — the notch's height plus 12 pt — and nothing else")
     func width() {
         let orb = NeoLaneLayout.orbSize(notchHeight: 32)
-        #expect(NeoLaneLayout.width(notchHeight: 32, textWidth: 0) == 12 + orb + 10)
-        #expect(NeoLaneLayout.width(notchHeight: 32, textWidth: 60) == 12 + orb + 8 + 60 + 10)
-        #expect(NeoLaneLayout.width(notchHeight: 32, textWidth: 1_000) == 12 + orb + 8 + NeoLaneLayout.maxTextWidth + 10)
-        #expect(NeoLaneLayout.textWidth(notchHeight: 32, laneWidth: NeoLaneLayout.width(notchHeight: 32, textWidth: 60)) == 60)
+        #expect(NeoLaneLayout.width(notchHeight: 32) == 8 + orb + 8)
+        // The notch's height plus 12 pt: 32 → 44, 38 → 50.
+        #expect(NeoLaneLayout.width(notchHeight: 32) == 44)
+        #expect(NeoLaneLayout.width(notchHeight: 38) == 50)
+        // No words: the lane's width takes nothing but the notch's height,
+        // so what NEO hears or says never widens it.
+        #expect(NeoLaneLayout.width(notchHeight: 32) <= 60)
     }
 
     private func geometry() -> NotchGeometry {
@@ -384,6 +380,30 @@ struct NeoLaneLayoutTests {
         content.neoLead = 100
         #expect(g.frame(for: .expanded, content: content) == g.expandedFrame)
         #expect(g.frame(for: .interactive, content: content) == g.interactiveFrame)
+    }
+
+    @Test("the notch's place is measured in the envelope the window is sized to, not the frame it is born with")
+    func notchLeadingX() {
+        let g = geometry()
+        // The window is created at the compact frame and sized once, later,
+        // to the envelope (with NotchWindow's 24 pt margin). The lane hangs
+        // from the notch's left edge in WINDOW coordinates, so the two give
+        // very different answers — and the first put the lane left of the
+        // island, where its mask hid it entirely.
+        let envelope = g.envelopeFrame.insetBy(dx: -24, dy: -24)
+        let inEnvelope = g.notchLeadingX(inWindow: envelope)
+        let inCompact = g.notchLeadingX(inWindow: g.compactFrame)
+        #expect(abs(inEnvelope - (g.notchFrame.minX - envelope.minX)) < 0.001)
+        #expect(inEnvelope > inCompact + 100)
+
+        var content = IslandContentSize.default
+        content.neoLead = NeoLaneLayout.width(notchHeight: g.notchFrame.height)
+        let islandMinX = g.frame(for: .idle, content: content).minX - envelope.minX
+        // Measured in the envelope, the lane ends at the notch and starts at
+        // the island's own left edge, which grew for it…
+        #expect(abs((inEnvelope - content.neoLead) - islandMinX) < 0.001)
+        // …measured against the compact frame it would lie wholly outside.
+        #expect(inCompact < islandMinX)
     }
 
     @Test("the lane's motion is the island's own: a peek out, a collapse back")

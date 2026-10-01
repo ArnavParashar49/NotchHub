@@ -32,8 +32,12 @@ extension NotchHubApp {
     /// that must not be captured is already out of the capture path by the time
     /// its first frame exists. Setting it afterwards would leave exactly one
     /// frame of the teleprompter in the recording.
+    ///
+    /// `--neo-capturable` (a debug run) overrides both reasons: the window is
+    /// left capturable in every shape, so a screenshot of the notch strip can
+    /// show what the user sees. In memory only.
     func applyGhostMode(for state: IslandState) {
-        window.hidesFromCapture = GhostMode.hidesFromCapture(
+        window.hidesFromCapture = !capturableForDebug && GhostMode.hidesFromCapture(
             state: state,
             ghostModeEnabled: ghostModeEnabled
         )

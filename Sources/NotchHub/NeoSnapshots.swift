@@ -76,7 +76,7 @@ enum NeoSnapshots {
             }
             content.petDock = row.pet
             if let neo = row.neo {
-                content.neoLead = NeoLaneLayout.width(notchHeight: notchHeight, textWidth: IslandMetrics.textWidth(neo.line))
+                content.neoLead = NeoLaneLayout.width(notchHeight: notchHeight)
                 switch row.state {
                 case .idle, .wings, .compact: break
                 default:

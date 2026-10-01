@@ -1,13 +1,18 @@
 import CoreGraphics
 import Foundation
 
-/// What NEO's lane shows: the orb's state and one line of text beside it.
+/// What NEO's lane shows: the orb's state, and the line that describes it.
+///
+/// The lane DRAWS only the orb (`NeoLaneLayout`); `line` is what NEO hears,
+/// says or is doing, kept for accessibility (the lane's spoken label) and
+/// for anything that wants to know what the orb stands for. It never widens
+/// the lane.
 public struct NeoLaneContent: Equatable, Sendable {
     public var state: NeoState
-    /// The line beside the orb: what NEO hears, what it says, or its label.
+    /// What the orb stands for: what NEO hears, what it says, or its label.
     public var line: String
-    /// Whether `line` is a transcript, which is read from its END (the latest
-    /// words matter), rather than a label read from its start.
+    /// Whether `line` is a transcript (its latest words matter) rather than
+    /// a label.
     public var isTranscript: Bool
 
     public init(state: NeoState, line: String, isTranscript: Bool = false) {
@@ -169,51 +174,39 @@ public struct NeoLaneModel: Equatable, Sendable {
     }
 }
 
-/// Where the lane's pieces go, and how wide it is.
+/// Where the orb goes, and how wide the lane is.
 ///
 /// The lane lives in the notch-height strip immediately LEFT of the notch:
-/// `[inset][orb][gap][text][inset][notch]`. The orb is at the lane's outer end,
-/// so it is the first thing to emerge when the lane slides out of the notch,
-/// and the line ends beside the notch, so its latest words are nearest the
-/// orb's home. The width is content-driven like every other bar.
+/// `[inset][orb][inset][notch]` — the orb and nothing else, no words. Its
+/// width is the orb plus a little padding on either side (the notch's height
+/// plus 12 pt), the same in every state and every island shape, so nothing
+/// else ever grows for it.
 public enum NeoLaneLayout {
     /// From the lane's outer edge to the orb.
-    public static let outerInset: CGFloat = 12
-    /// Between the orb and the line.
-    public static let gap: CGFloat = 8
-    /// From the line to the notch's edge.
-    public static let innerInset: CGFloat = 10
+    public static let outerInset: CGFloat = 8
+    /// From the orb to the notch's edge.
+    public static let innerInset: CGFloat = 8
     /// The orb's inset from the top and bottom of the notch strip: the orb is
     /// the full notch height less a hair, so it is the first thing you see.
     public static let orbInset: CGFloat = 2
-    /// The longest a line may be before it is cut: one short line beside the
-    /// orb, never a lane that spreads across the menu bar. A transcript is
-    /// head-truncated, so its latest words are the ones that fit.
-    public static let maxTextWidth: CGFloat = 140
 
     /// The orb's diameter: the notch's height less its insets.
     public static func orbSize(notchHeight: CGFloat) -> CGFloat {
         max(16, notchHeight - orbInset * 2)
     }
 
-    /// How far the lane reaches left of the notch for a line of `textWidth`
-    /// (0 for no line).
-    public static func width(notchHeight: CGFloat, textWidth: CGFloat) -> CGFloat {
-        let text = min(max(0, textWidth), maxTextWidth)
-        return outerInset + orbSize(notchHeight: notchHeight) + (text > 0 ? gap + text : 0) + innerInset
+    /// How far the lane reaches left of the notch: the orb and its padding.
+    public static func width(notchHeight: CGFloat) -> CGFloat {
+        outerInset + orbSize(notchHeight: notchHeight) + innerInset
     }
 
     /// The lane as it fits a FIXED surface (a panel, the expanded island),
     /// which does not grow for it: the room between the surface's left edge
-    /// and the notch, less a hair, so the orb is always whole and the line
-    /// takes what is left. The bars (idle, wings, compact) grow instead.
+    /// and the notch, less a hair. Every such surface is wider than the
+    /// lane, so this is the lane's own width; it only ever cuts the lane on
+    /// a surface narrower than the notch plus two lanes.
     public static func fitted(width: CGFloat, surfaceWidth: CGFloat, notchWidth: CGFloat) -> CGFloat {
         let room = ((surfaceWidth - notchWidth) / 2 - 2).rounded(.down)
         return max(0, min(width, room))
-    }
-
-    /// The line's width inside a lane of `width`.
-    public static func textWidth(notchHeight: CGFloat, laneWidth: CGFloat) -> CGFloat {
-        max(0, laneWidth - outerInset - orbSize(notchHeight: notchHeight) - gap - innerInset)
     }
 }
