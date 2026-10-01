@@ -19,7 +19,7 @@ import SwiftUI
 /// The coordinator is split across files by concern:
 /// - `NotchHubApp.swift` — state, events, rendering, the ticker
 /// - `NotchHubApp+LaunchModes.swift` — launch flags, demos, inspection hooks
-/// - `NotchHubApp+Panels.swift` — Tray, settings, dictation, file drop, hotkeys
+/// - `NotchHubApp+Panels.swift` — Tray, settings, file drop, hotkeys
 /// - `NotchHubApp+Meeting.swift` — live-call controls
 /// - `NotchHubApp+Interaction.swift` — hover, click, media, context menu
 @MainActor
@@ -59,12 +59,6 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     var traySearch = ""
     var trayFilter: TrayFilter = .all
 
-    // Dictation, on-device.
-    lazy var dictation = DictationController { [weak self] event in
-        self?.handle(event)
-    }
-    var dictationSession = DictationSession()
-
     // Live surfaces carrying richer state than an Activity can hold.
     var meeting: Meeting?
     var skin: AppSkin?
@@ -73,6 +67,8 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     /// The user switched an app panel to the dashboard (its clock). Reset once
     /// the panel closes.
     var showsDashboardOverApp = false
+    /// The drawn control the cursor is resting on (`resolveHoveredControl`).
+    var hoveredControl: IslandControl?
 
     // The pixel pet.
     var petBrain = PetBrain()
@@ -81,9 +77,6 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     var petCursorSide: PetContext.Side?
     var petWakeTask: Task<Void, Never>?
     var petWakeAt: Date?
-    /// The island edge beside the pet when it was clicked: the pet panel hangs
-    /// from there, under the pet and the cursor.
-    var petPanelAnchor: PetPanelAnchor?
     /// Sleep was chosen in the pet panel during this hover; see `petContext`.
     var petSleepHoverSession = false
     /// Strokes on the big pet in its panel.
@@ -121,8 +114,22 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     }()
 
     /// A panel that temporarily replaces the queue-driven island.
-    enum Panel { case none, tray, dictation, settings, fileDrop, pet }
+    enum Panel { case none, tray, settings, fileDrop, pet, teleprompter, camera }
     var panel: Panel = .none
+
+    /// The teleprompter's script and scroll position. Kept across openings, so
+    /// closing it and coming back resumes the same take.
+    var teleprompter = TeleprompterState()
+    /// Carries a fresh script measurement back into the island, off the layout
+    /// pass that produced it (`recordTeleprompterDistance`).
+    var pendingTeleprompterRefresh: Task<Void, Never>?
+
+    /// The mini camera. The controller owns the capture session; this is only
+    /// the latest state it reported.
+    lazy var camera = CameraController { [weak self] state in
+        self?.cameraChanged(state)
+    }
+    var cameraState = CameraState()
 
     /// The live file-sharing session.
     var fileDropURLs: [URL] = []
@@ -157,11 +164,16 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         window = NotchWindow(geometry: geometry)
         window.onHoverEnter = { [weak self] in self?.islandHoverEntered() }
         window.onHoverExit = { [weak self] in self?.islandHoverExited() }
-        window.onMouseMove = { [weak self] point in self?.petMouseMoved(point) }
+        window.onMouseMove = { [weak self] point in
+            self?.updateHoveredControl(at: point)
+            self?.petMouseMoved(point)
+        }
         window.onClick = { [weak self] in self?.islandClicked() }
         window.onControlHit = { [weak self] point in
             guard let self else { return false }
             return self.petControlHit(at: point)
+                || self.teleprompterControlHit(at: point)
+                || self.cameraControlHit(at: point)
                 || self.meetingControlHit(at: point)
                 || self.dashboardControlHit(at: point)
                 || self.wingsControlHit(at: point)
@@ -195,6 +207,9 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         ticker?.invalidate()
         monitor?.stop()
+        // Quitting must let go of the camera, not leave the indicator light on
+        // until the process is reaped.
+        camera.close()
     }
 
     func log(_ message: @autoclosure () -> String) {
@@ -231,12 +246,18 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         applyPetSettings(model.petSettings)
         let features = model.toFeatureSettings()
         if features != featureSettings {
+            let ghostChanged = features.isEnabled(.ghostMode) != featureSettings.isEnabled(.ghostMode)
             featureSettings = features
             featureSettings.save()
             if !featureSettings.isEnabled(.calendar) {
                 nextEvent = nil
             }
             scheduleMonitorUpdate()
+            // Ghost Mode runs no listener, so nothing else would apply it. The
+            // panel's own redraw already happened with the OLD value, and a
+            // person toggling this is usually about to share their screen —
+            // waiting for the next unrelated event is not good enough.
+            if ghostChanged { renderIsland() }
         }
 
         let city = model.weatherCity.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -328,13 +349,6 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             log("clipboard: captured kind=\(clip.kind)")
             trayStore.add(clip)
             TrayPersistence.save(trayStore)
-        case let .dictation(session):
-            dictationSession = session
-            if session.isActive {
-                panel = .dictation
-            } else if panel == .dictation {
-                panel = .none
-            }
         case let .meetingStarted(meeting), let .meetingUpdated(meeting):
             // A state the listener could not read is a guess: keep ours.
             var incoming = meeting
@@ -414,7 +428,7 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     /// motion is derived from the before/after frames (`IslandMotion`), so the
     /// same change always moves the same way.
     ///
-    /// A panel (Tray, dictation) or a call's expanded controls take their own
+    /// A panel (Tray, settings) or a call's expanded controls take their own
     /// shape; otherwise the island follows the state machine. The window itself
     /// never resizes — only the island inside it does.
     func renderIsland(stackCount: Int? = nil) {
@@ -426,6 +440,9 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         }
         let petUpdate = updatePet()
         let state = currentIslandState()
+        // Before anything is drawn for this shape: a surface that must not be
+        // captured has to be out of the capture path BEFORE its first frame.
+        applyGhostMode(for: state)
         let status = wingStatus()
         let contentSize = computeContentSize(state: state, status: status)
         let panel = panelContent()
@@ -481,6 +498,7 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         // While idle, only the pet itself (not its whole dock) takes the mouse.
         window.idlePetFrame = isIdle && petOnScreen ? petRect() : nil
         clearStalePetHover()
+        clearStaleControlHover()
 
         if isIdle, !wasIdle, !petDocked {
             scheduleSurfaceFade()
@@ -519,9 +537,9 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             size.petDock = petIdleDock
             return size
         case .skin:
-            var size = IslandContentSize.default
-            size.panelAnchor = panel == .pet ? petPanelAnchor : nil
-            return size
+            // The pet's panel is centred on the notch; nothing about it is
+            // content-driven.
+            return .default
         default:
             return .default
         }
@@ -536,10 +554,11 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     func currentIslandState() -> IslandState {
         switch panel {
         case .tray: return .tray
-        case .dictation: return .dictation
         case .settings: return .settings
         case .fileDrop: return .fileDrop
         case .pet: return .skin
+        case .teleprompter: return teleprompterState
+        case .camera: return cameraIslandState
         case .none: break
         }
         if machine.activity?.kind == .meeting, machine.presentation == .expanded {
@@ -587,6 +606,15 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     /// matter.
     func wingStatusItems() -> [WingItem] {
         var items: [WingItem] = []
+
+        // Ghost Mode leads, because it changes what everything else here MEANS
+        // — and because it is the one state you can only discover from the
+        // island itself. The glyph is hidden from capture along with the rest
+        // of the island, so it reminds the person at the Mac without ever
+        // appearing in the share it is telling them about.
+        if ghostModeEnabled {
+            items.append(WingItem(symbol: "eye.slash.fill", label: "Hidden", tint: .accent))
+        }
 
         // Charging is the one battery status that wants attention.
         if isCharging {

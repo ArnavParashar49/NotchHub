@@ -613,22 +613,22 @@ struct PetMischiefTests {
         #expect(IslandMotion.between(from: docked, fromIdle: true, to: g.compactBar(lead: PetLayout.idleDock, trail: 0), toIdle: true) == .morph)
     }
 
-    @Test("the pet panel's content hangs under the pet on either side")
-    func panelSides() {
+    @Test("the pet panel's content is centred, wherever the pet was when it was clicked")
+    func panelContentIsCentred() {
         let g = geometry()
-        let right = g.petPanelFrame(anchor: PetPanelAnchor(edge: g.notchFrame.maxX + 300, side: .right))
-        let chips = PetPanelLayout.actions(in: right, notchInset: 32, side: .right)
-        #expect(chips.last!.rect.maxX == right.maxX - PetPanelLayout.horizontalInset)
-        for chip in chips {
-            #expect(right.contains(chip.rect))
-            let centre = CGPoint(x: chip.rect.midX, y: chip.rect.midY)
-            #expect(PetPanelLayout.action(at: centre, in: right, notchInset: 32, side: .right) == chip.action)
-        }
-        let left = g.petPanelFrame(anchor: PetPanelAnchor(edge: g.notchFrame.minX - PetLayout.idleDock, side: .left))
-        let leftChips = PetPanelLayout.actions(in: left, notchInset: 32, side: .left)
+        let panel = g.petPanelFrame
+        let chips = PetPanelLayout.actions(in: panel, notchInset: 32)
         let petWidth = PetLayout.artSize * PetPanelLayout.petScale
-        #expect(leftChips.first!.rect.minX == left.minX + PetPanelLayout.horizontalInset + petWidth + PetPanelLayout.spacing)
-        #expect(leftChips.allSatisfy { left.contains($0.rect) })
+        let contentMinX = PetPanelLayout.contentMinX(in: panel)
+        // The whole block — big pet, then the chips — is centred in the panel.
+        #expect(abs((contentMinX + PetPanelLayout.contentWidth / 2) - panel.midX) < 1)
+        #expect(chips.first!.rect.minX == contentMinX + petWidth + PetPanelLayout.spacing)
+        #expect(abs(chips.last!.rect.maxX - (contentMinX + PetPanelLayout.contentWidth)) < 1)
+        for chip in chips {
+            #expect(panel.contains(chip.rect))
+            let centre = CGPoint(x: chip.rect.midX, y: chip.rect.midY)
+            #expect(PetPanelLayout.action(at: centre, in: panel, notchInset: 32) == chip.action)
+        }
     }
 
     @Test("settings saved before Mischief existed keep their values")

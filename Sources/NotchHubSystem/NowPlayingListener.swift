@@ -40,11 +40,17 @@ public enum MediaBrowsers {
         "(" + mediaURLMarkers.map { "\(variable) contains \"\($0)\"" }.joined(separator: " or ") + ")"
     }
 
-    /// Returns `title|||url` for the first media tab (the front tab wins), or "".
+    /// Returns `title|||url` for the first media tab (the front tab wins), or
+    /// the literal "none".
+    ///
+    /// "none" rather than an empty string on purpose: an empty result is what
+    /// AppleScript also gives back when the script could not run at all, and
+    /// the island has to tell "there is no media tab" (act now) apart from "I
+    /// could not ask" (say nothing). See `BrowserMedia.Probe`.
     static func findMediaTabScript(_ browser: Browser) -> String {
         """
         tell application "\(browser.appName)"
-            if (count of windows) is 0 then return ""
+            if (count of windows) is 0 then return "none"
             try
                 set curURL to URL of \(browser.activeTabProperty) of front window
                 if \(isMedia("curURL")) then return (\(browser.titleProperty) of \(browser.activeTabProperty) of front window) & "|||" & curURL
@@ -58,7 +64,7 @@ public enum MediaBrowsers {
                     if \(isMedia("u")) then return (item j of item i of titleLists) & "|||" & u
                 end repeat
             end repeat
-            return ""
+            return "none"
         end tell
         """
     }
@@ -124,7 +130,17 @@ public final class NowPlayingListener: SystemListener {
     private var pollStartedAt: Date?
     private let pollTimeout: TimeInterval = 10
 
-    /// Number of consecutive failed browser queries, for stop hysteresis.
+    /// Consecutive polls where the browsers answered "no media tab". This is
+    /// evidence, so it clears a track quickly.
+    private var consecutiveEmpty = 0
+    /// The confirming poll a first "no media tab" answer schedules.
+    private var confirmStopWork: DispatchWorkItem?
+    /// How soon that confirmation runs. Short, because it exists to make the
+    /// stop feel immediate: waiting out another full poll interval to confirm
+    /// what the browser has already said is most of the delay the user sees.
+    private static let stopConfirmDelay: TimeInterval = 0.4
+    /// Consecutive polls where no browser could be asked at all. This is the
+    /// absence of evidence, so it clears a track only very reluctantly.
     private var consecutiveFailures = 0
 
     /// The distributed notifications players post, and who posts them.
@@ -183,6 +199,10 @@ public final class NowPlayingListener: SystemListener {
         pollStartedAt = nil
         artworkCache.removeAll()
         artworkOrder.removeAll()
+        // A restarted listener must not inherit a half-counted stop.
+        cancelStopConfirmation()
+        consecutiveEmpty = 0
+        consecutiveFailures = 0
     }
 
     // MARK: - Polling
@@ -289,11 +309,20 @@ public final class NowPlayingListener: SystemListener {
     }
 
     /// Runs on `queryQueue`: asks each running browser for a media tab.
+    ///
+    /// A browser that answers "none" has ANSWERED — that is not a failure, and
+    /// the loop keeps asking the others before concluding anything.
     private func queryBrowserFallbackOffMain() {
         let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+        var anyAnswered = false
 
         for browser in MediaBrowsers.all where running.contains(browser.bundleID) {
+            // Nil here means the script could not run; "none" means it ran and
+            // found nothing.
             guard let result = runScript(MediaBrowsers.findMediaTabScript(browser)) else { continue }
+            anyAnswered = true
+            guard result != "none" else { continue }
+
             let parts = result.components(separatedBy: "|||")
             let parsed = parseBrowserMedia(rawTitle: parts[0], urlString: parts.count > 1 ? parts[1] : "")
             DispatchQueue.main.async { [weak self] in
@@ -303,39 +332,85 @@ public final class NowPlayingListener: SystemListener {
             return
         }
 
+        let probe: BrowserMedia.Probe = anyAnswered ? .none : .failed
         DispatchQueue.main.async { [weak self] in
             self?.pollFinished()
-            self?.browserFallbackFailed()
+            self?.browserFallbackEmpty(probe)
         }
     }
 
-    /// Records a failed browser query on the main queue, with hysteresis so a
-    /// single transient miss does not drop a playing track.
-    private func browserFallbackFailed() {
-        // Music and Spotify announce stops themselves; a failed browser poll
+    /// Main queue: the browsers produced no track. `probe` says whether that is
+    /// because there is none, or because none of them could be asked.
+    ///
+    /// The distinction is the whole point. Closing a YouTube tab used to leave
+    /// the island playing it for the better part of half a minute, because a
+    /// tab that had genuinely gone was counted as ten transient failures.
+    private func browserFallbackEmpty(_ probe: BrowserMedia.Probe) {
+        // Music and Spotify announce stops themselves; a quiet browser poll
         // must not clear their track.
         let apps = NSWorkspace.shared.runningApplications
         let playerRunning = apps.contains {
             $0.bundleIdentifier == "com.apple.Music" || $0.bundleIdentifier == "com.spotify.client"
         }
         if playerRunning {
+            cancelStopConfirmation()
+            consecutiveEmpty = 0
             consecutiveFailures = 0
             return
         }
 
-        consecutiveFailures += 1
-        if consecutiveFailures >= 10, lastTitle != nil {
-            emit(SystemEvent(source: .nowPlaying, payload: .nowPlayingStopped))
-            lastTitle = nil
-            lastArtist = nil
-            lastPlaying = nil
-            lastArtworkData = nil
+        let threshold: Int
+        if probe == .none {
+            consecutiveEmpty += 1
+            consecutiveFailures = 0
+            threshold = BrowserMedia.stopAfterEmptyPolls
+        } else {
+            consecutiveFailures += 1
+            threshold = BrowserMedia.stopAfterFailedPolls
         }
+        let count = probe == .none ? consecutiveEmpty : consecutiveFailures
+
+        // Not yet sure, but the browser has already said there is nothing: ask
+        // again straight away rather than waiting out another whole poll
+        // interval. The confirmation is what the user experiences as the delay.
+        if probe == .none, count < threshold, lastTitle != nil {
+            scheduleStopConfirmation()
+            return
+        }
+        guard count >= threshold, lastTitle != nil else { return }
+
+        cancelStopConfirmation()
+        NotchLog.debug("nowPlaying: stopped after \(count) \(probe == .none ? "empty" : "failed") poll(s)")
+        emit(SystemEvent(source: .nowPlaying, payload: .nowPlayingStopped))
+        lastTitle = nil
+        lastArtist = nil
+        lastPlaying = nil
+        lastArtworkData = nil
+        consecutiveEmpty = 0
+        consecutiveFailures = 0
+    }
+
+    /// Re-polls shortly, to confirm (or contradict) a first "no media tab".
+    private func scheduleStopConfirmation() {
+        cancelStopConfirmation()
+        let work = DispatchWorkItem { [weak self] in
+            self?.confirmStopWork = nil
+            self?.poll()
+        }
+        confirmStopWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.stopConfirmDelay, execute: work)
+    }
+
+    private func cancelStopConfirmation() {
+        confirmStopWork?.cancel()
+        confirmStopWork = nil
     }
 
     /// Handles a parsed browser result on the main queue: reuse cached artwork,
     /// fetch a YouTube thumbnail, then announce the track.
     private func handleBrowserResult(_ parsed: (title: String, artist: String, videoId: String?), source: String) {
+        cancelStopConfirmation()
+        consecutiveEmpty = 0
         consecutiveFailures = 0
         let key = "\(parsed.title)\u{0}\(parsed.artist)"
         if let cached = artworkCache[key] {
@@ -393,11 +468,7 @@ public final class NowPlayingListener: SystemListener {
     // MARK: - Parsing
 
     private func parseBrowserMedia(rawTitle: String, urlString: String) -> (title: String, artist: String, videoId: String?) {
-        var clean = rawTitle
-        for suffix in [" - YouTube", " - Spotify", " - SoundCloud", " - Apple Music"] {
-            clean = clean.replacingOccurrences(of: suffix, with: "")
-        }
-        clean = clean.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = BrowserMedia.normalizeTitle(rawTitle)
 
         var artist = "YouTube"
         var title = clean

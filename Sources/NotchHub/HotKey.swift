@@ -4,7 +4,7 @@ import Foundation
 /// A system-wide hotkey.
 ///
 /// Carbon's `RegisterEventHotKey` is the only global shortcut that needs no
-/// Accessibility permission, which matters here: dictation and the Tray must
+/// Accessibility permission, which matters here: Ghost Mode and the Tray must
 /// work on a fresh install before the user has granted anything.
 final class HotKey {
 
@@ -57,9 +57,11 @@ final class HotKey {
 
     /// Virtual key codes for the letters the app uses.
     enum Key {
-        static let m: UInt32 = UInt32(kVK_ANSI_M)
         static let v: UInt32 = UInt32(kVK_ANSI_V)
         static let t: UInt32 = UInt32(kVK_ANSI_T)
+        static let p: UInt32 = UInt32(kVK_ANSI_P)
+        static let c: UInt32 = UInt32(kVK_ANSI_C)
+        static let g: UInt32 = UInt32(kVK_ANSI_G)
         static let comma: UInt32 = UInt32(kVK_ANSI_Comma)
     }
 

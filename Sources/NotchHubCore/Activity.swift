@@ -22,8 +22,6 @@ public enum ActivityKind: String, CaseIterable, Codable, Equatable {
     case clipboard
     /// A live call the island can drive: timer, mute, camera, leave.
     case meeting
-    /// On-device dictation, in progress.
-    case dictation
     /// A coding agent (Claude Code, Codex, …) working on the machine.
     case codingAgent
     /// The frontmost app, dressed for the island.
@@ -52,7 +50,6 @@ public enum ActivityKind: String, CaseIterable, Codable, Equatable {
         case .wifi: return "wifi"
         case .clipboard: return "doc.on.clipboard"
         case .meeting: return "video.fill"
-        case .dictation: return "waveform"
         case .codingAgent: return "chevron.left.forwardslash.chevron.right"
         case .skin: return "app.fill"
         case .custom: return "sparkles"
@@ -63,7 +60,6 @@ public enum ActivityKind: String, CaseIterable, Codable, Equatable {
     public var basePriority: Int {
         switch self {
         case .lowBattery: return 90
-        case .dictation: return 85
         case .recording, .microphone, .camera: return 80
         case .meeting: return 75
         case .timer: return 70
@@ -89,7 +85,7 @@ public enum ActivityKind: String, CaseIterable, Codable, Equatable {
         case .battery, .wifi, .bluetooth, .airpods: return 2.4
         case .clipboard, .notification: return 3.0
         case .music, .timer, .download, .recording, .microphone, .camera,
-             .lowBattery, .focus, .dnd, .calendar, .meeting, .dictation, .skin,
+             .lowBattery, .focus, .dnd, .calendar, .meeting, .skin,
              .codingAgent, .custom:
             return 0 // persistent until replaced or explicitly removed
         }
@@ -256,7 +252,7 @@ public struct Activity: Identifiable, Equatable {
     /// genuinely different detailed layout are worth expanding.
     public var canExpand: Bool {
         switch kind {
-        case .music, .meeting, .dictation:
+        case .music, .meeting:
             return true
         case .volume, .brightness, .battery, .lowBattery, .wifi, .bluetooth,
              .airpods, .recording, .microphone, .camera, .calendar, .focus,
@@ -271,7 +267,7 @@ public struct Activity: Identifiable, Equatable {
     /// still opens the call panel (`canExpand`).
     public var expandsOnHover: Bool {
         switch kind {
-        case .music, .dictation: return true
+        case .music: return true
         default: return false
         }
     }
@@ -444,16 +440,6 @@ public extension Activity {
             title: meeting.title.isEmpty ? meeting.app.name : meeting.title,
             subtitle: meeting.context,
             symbol: meeting.app.symbol
-        )
-    }
-
-    /// On-device dictation in progress.
-    static func dictation(_ session: DictationSession) -> Activity {
-        Activity(
-            kind: .dictation,
-            title: "Dictation",
-            subtitle: session.displayText,
-            symbol: "waveform"
         )
     }
 

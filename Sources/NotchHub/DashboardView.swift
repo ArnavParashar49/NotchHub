@@ -23,8 +23,12 @@ struct DashboardView: View {
     let isCameraActive: Bool
     let timerElapsed: TimeInterval?
     let timerEnabled: Bool
-    let isDictating: Bool
-    let dictationEnabled: Bool
+    /// Whether the teleprompter is showing, and whether the feature is on.
+    let isTeleprompting: Bool
+    let teleprompterEnabled: Bool
+    /// Whether the camera preview is showing, and whether the feature is on.
+    let isCameraPreviewing: Bool
+    let cameraEnabled: Bool
     let trayCount: Int
 
     var body: some View {
@@ -198,8 +202,11 @@ struct DashboardView: View {
                 Text(timerElapsed.map { Activity.format($0) } ?? "Timer")
                     .monospacedDigit()
             }
-            chip(width: DashboardLayout.dictationChipWidth, active: isDictating, enabled: dictationEnabled) {
-                Image(systemName: "mic.fill")
+            chip(width: DashboardLayout.glyphChipWidth, active: isTeleprompting, enabled: teleprompterEnabled) {
+                Image(systemName: "text.alignleft")
+            }
+            chip(width: DashboardLayout.glyphChipWidth, active: isCameraPreviewing, enabled: cameraEnabled) {
+                Image(systemName: "video.fill")
             }
             chip(width: DashboardLayout.trayChipWidth, active: false, enabled: true) {
                 Image(systemName: "tray.full.fill")

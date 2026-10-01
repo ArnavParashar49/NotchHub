@@ -97,13 +97,10 @@ struct PetTouchTests {
         )
         #expect(g.skinFrame.width >= PetPanelLayout.panelWidth)
         let notch = g.notchFrame
-        var panels: [(PetSide?, CGRect)] = [(nil, g.skinFrame), (.left, g.petPanelFrame(anchor: PetPanelAnchor(edge: notch.minX - PetLayout.idleDock, side: .left)))]
-        for reach in stride(from: PetLayout.idleDock, through: 300, by: 22) {
-            panels.append((.right, g.petPanelFrame(anchor: PetPanelAnchor(edge: notch.maxX + reach, side: .right))))
-        }
-        for (side, frame) in panels {
+        // The panel is centred whatever opened it, so `skinFrame` IS the panel.
+        for frame in [g.skinFrame, g.petPanelFrame] {
             #expect(g.envelopeFrame.contains(frame))
-            let layout = PetPanelLayout.layout(in: frame, notchInset: 32, side: side, notch: notch)
+            let layout = PetPanelLayout.layout(in: frame, notchInset: 32)
             // The big pet (and the hat and hop above it) stays beside the notch.
             #expect(layout.pet.maxX <= notch.minX || layout.pet.minX >= notch.maxX, "big pet under the notch (\(frame))")
             let targets: [(PetPanelLayout.Hit, CGRect)] = layout.actions.map { (.action($0.action), $0.rect) }
@@ -113,9 +110,9 @@ struct PetTouchTests {
             #expect(layout.looks.map(\.look) == PetLook.allCases)
             for (index, target) in targets.enumerated() {
                 let (hit, rect) = target
-                #expect(frame.contains(rect), "\(hit) outside the panel (\(String(describing: side)))")
+                #expect(frame.contains(rect), "\(hit) outside the panel")
                 #expect(rect.maxY <= frame.maxY - 32, "\(hit) under the notch")
-                #expect(PetPanelLayout.hit(at: CGPoint(x: rect.midX, y: rect.midY), in: frame, notchInset: 32, side: side, notch: notch) == hit)
+                #expect(PetPanelLayout.hit(at: CGPoint(x: rect.midX, y: rect.midY), in: frame, notchInset: 32) == hit)
                 for other in targets[(index + 1)...] {
                     #expect(!rect.intersects(other.1), "\(hit) overlaps \(other.0)")
                 }

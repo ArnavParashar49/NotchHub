@@ -31,9 +31,6 @@ public struct IslandContentSize: Equatable, Sendable {
     /// and how far it reaches out. `nil` (no pet dock) keeps idle exactly the
     /// notch.
     public var petDock: PetDock? = nil
-    /// Where the pet's panel hangs from: the island edge beside the pet when it
-    /// was clicked, in screen coordinates. `nil` centres it.
-    public var panelAnchor: PetPanelAnchor? = nil
 
     public init(compactLead: CGFloat, compactTrail: CGFloat, wingSide: CGFloat) {
         self.compactLead = max(0, compactLead)

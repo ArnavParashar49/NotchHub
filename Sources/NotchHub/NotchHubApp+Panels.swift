@@ -4,7 +4,7 @@ import NotchHubSystem
 import SwiftUI
 
 /// The surfaces that temporarily replace the queue-driven island — the Tray,
-/// settings, dictation, file drop — plus the global hotkeys that open them.
+/// settings, the file drop — plus the global hotkeys that open them.
 extension NotchHubApp {
 
     /// The surface that replaces the queue-driven content, when one is showing.
@@ -32,13 +32,6 @@ extension NotchHubApp {
                     onPin: { [weak self] clip in self?.togglePin(clip) },
                     onDelete: { [weak self] clip in self?.deleteClip(clip) }
                 )
-            )
-
-        case .dictation:
-            return AnyView(
-                DictationView(session: dictationSession) { [weak self] in
-                    self?.dictation.finish()
-                }
             )
 
         case .settings:
@@ -74,7 +67,6 @@ extension NotchHubApp {
         case .pet:
             return AnyView(PetPanelView(
                 presentation: petBrain.presentation,
-                side: petPanelAnchor?.side,
                 look: petSettings.look,
                 hat: petSettings.hat.hat(on: Date(), holiday: todaysHoliday()),
                 hatChoice: petSettings.hat,
@@ -83,6 +75,12 @@ extension NotchHubApp {
                 focusEnabled: featureSettings.isEnabled(.timers) || timerService.isCountingDown,
                 contentLeading: petPanelContentLeading()
             ))
+
+        case .teleprompter:
+            return teleprompterContent()
+
+        case .camera:
+            return cameraContent()
 
         case .none:
             // A click opens the frontmost app's panel, or the dashboard.
@@ -118,14 +116,44 @@ extension NotchHubApp {
         renderIsland()
     }
 
-    /// Where the pet panel's content starts, from the panel's left edge — laid
-    /// out by `PetPanelLayout`, which keeps the big pet clear of the notch.
+    // MARK: - Panel ownership
+
+    /// Takes the island for `panel`, releasing whatever held it first.
+    ///
+    /// Only ONE panel can be on the island, and one of them holds hardware: the
+    /// camera has a live capture session. Setting `panel` directly — which every
+    /// opener used to do — swapped the surface and left that hardware running
+    /// with nothing on screen owning it. Every opener goes through here instead,
+    /// so taking the island always releases what it replaces.
+    func takePanel(_ panel: Panel) {
+        releaseCurrentPanel(except: panel)
+        self.panel = panel
+        machine.send(.activityStarted)
+    }
+
+    /// Lets go of whatever the current panel owns. Does not change `panel`
+    /// itself — the caller is either replacing it or closing it.
+    func releaseCurrentPanel(except keep: Panel? = nil) {
+        guard panel != keep else { return }
+        switch panel {
+        case .camera:
+            camera.close()
+        case .teleprompter:
+            teleprompter.pause()
+        case .fileDrop:
+            fileDropURLs = []
+            fileDropPhase = .idle
+        case .tray, .settings, .pet, .none:
+            break
+        }
+    }
+
+    /// Where the pet panel's content starts, from the panel's left edge — taken
+    /// from `PetPanelLayout`, so the view draws exactly where the window
+    /// hit-tests.
     func petPanelContentLeading() -> CGFloat {
-        var content = IslandContentSize.default
-        content.panelAnchor = petPanelAnchor
-        let frame = window.localFrame(for: .skin, content: content)
-        let notch = window.localFrame(for: .idle, content: .default)
-        return PetPanelLayout.contentMinX(in: frame, side: petPanelAnchor?.side, notch: notch) - frame.minX
+        let frame = window.localFrame(for: .skin, content: .default)
+        return PetPanelLayout.contentMinX(in: frame) - frame.minX
     }
 
     // MARK: - Tray
@@ -133,19 +161,10 @@ extension NotchHubApp {
     /// Puts a clip back on the pasteboard so it can be pasted anywhere.
     func copyToPasteboard(_ clip: TrayClip) {
         log("tray: selected \(clip.kind)")
+        guard let text = clip.text else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        switch clip.kind {
-        case .image, .screenshot:
-            if let path = clip.imagePath, let image = NSImage(contentsOfFile: path) {
-                pasteboard.writeObjects([image])
-            }
-        case .file:
-            let urls = clip.filePaths.map { URL(fileURLWithPath: $0) as NSURL }
-            if !urls.isEmpty { pasteboard.writeObjects(urls) }
-        default:
-            if let text = clip.text { pasteboard.setString(text, forType: .string) }
-        }
+        pasteboard.setString(text, forType: .string)
         trayStore.moveToFront(id: clip.id)
         TrayPersistence.save(trayStore)
         closePanel()
@@ -169,8 +188,7 @@ extension NotchHubApp {
             closeTray()
             return
         }
-        panel = .tray
-        machine.send(.activityStarted)
+        takePanel(.tray)
         // The Tray's rows are real buttons (copy, pin, delete), so it needs
         // the same key/click handling the settings panel gets.
         window.needsInteraction = true
@@ -185,7 +203,7 @@ extension NotchHubApp {
         log("tray: closed")
     }
 
-    // MARK: - Timer & dictation
+    // MARK: - Timer
 
     /// Starts or stops the island's own stopwatch, gated on the timers setting.
     func toggleTimer() {
@@ -205,19 +223,6 @@ extension NotchHubApp {
         }
     }
 
-    /// Starts or stops dictation, gated on the dictation setting.
-    func toggleDictation() {
-        if panel == .dictation {
-            dictation.finish()
-            return
-        }
-        guard featureSettings.isEnabled(.dictation) else {
-            log("dictation: disabled by settings")
-            return
-        }
-        dictation.begin()
-    }
-
     // MARK: - Settings
 
     /// Opens the settings panel, or closes it if it is already showing.
@@ -226,8 +231,7 @@ extension NotchHubApp {
             closeSettings()
             return
         }
-        panel = .settings
-        machine.send(.activityStarted)
+        takePanel(.settings)
         // The settings panel holds real controls, so the window must be able
         // to take key status to receive their clicks.
         window.needsInteraction = true
@@ -247,14 +251,17 @@ extension NotchHubApp {
         switch panel {
         case .settings: closeSettings()
         case .tray: closeTray()
-        case .dictation: dictation.finish()
         case .fileDrop: closeFileDrop()
         case .pet: closePetPanel()
+        case .teleprompter: closeTeleprompter()
+        case .camera: closeCamera()
         case .none: break
         }
     }
 
+    /// Puts the island back, releasing whatever the panel owned.
     func closePanel() {
+        releaseCurrentPanel()
         panel = .none
         window.needsInteraction = false
         renderIsland()
@@ -265,10 +272,9 @@ extension NotchHubApp {
     /// A file entered the island's drop zone: reveal the drop surface.
     func fileDraggedIn() {
         guard featureSettings.isEnabled(.fileSharing) else { return }
-        panel = .fileDrop
+        takePanel(.fileDrop)
         fileDropPhase = .hovering
         window.needsInteraction = true
-        machine.send(.activityStarted)
         refreshPanel()
     }
 
@@ -314,15 +320,14 @@ extension NotchHubApp {
 
     // MARK: - Hotkeys
 
-    /// ⌥⌘V opens the Tray; ⌥⌘M dictates; ⌥⌘, opens settings; ⌥⌘T toggles the
-    /// timer. Carbon hotkeys need no permission.
+    /// ⌥⌘V opens the Tray; ⌥⌘, opens settings; ⌥⌘T toggles the timer; ⌥⌘P the
+    /// teleprompter; ⌥⌘C the camera; ⌥⌘G Ghost Mode. Carbon hotkeys need no
+    /// permission — which matters most for Ghost Mode, the one people reach for
+    /// with a call already running.
     func registerHotKeys() {
         hotKeys.append(contentsOf: [
             HotKey(keyCode: HotKey.Key.v, modifiers: [.option, .command]) { [weak self] in
                 self?.toggleTray()
-            },
-            HotKey(keyCode: HotKey.Key.m, modifiers: [.option, .command]) { [weak self] in
-                self?.toggleDictation()
             },
             HotKey(keyCode: HotKey.Key.comma, modifiers: [.option, .command]) { [weak self] in
                 self?.toggleSettings()
@@ -330,7 +335,16 @@ extension NotchHubApp {
             HotKey(keyCode: HotKey.Key.t, modifiers: [.option, .command]) { [weak self] in
                 self?.toggleTimer()
             },
+            HotKey(keyCode: HotKey.Key.p, modifiers: [.option, .command]) { [weak self] in
+                self?.toggleTeleprompter()
+            },
+            HotKey(keyCode: HotKey.Key.c, modifiers: [.option, .command]) { [weak self] in
+                self?.toggleCamera()
+            },
+            HotKey(keyCode: HotKey.Key.g, modifiers: [.option, .command]) { [weak self] in
+                self?.toggleGhostMode()
+            },
         ].compactMap { $0 })
-        log("hotkeys: \(hotKeys.count)/4 registered")
+        log("hotkeys: \(hotKeys.count)/6 registered")
     }
 }

@@ -56,24 +56,13 @@ public struct PetSettings: Codable, Equatable, Sendable {
     }
 }
 
-/// Where the pet's panel hangs from: the island edge beside the pet when it was
-/// clicked (screen x), on the pet's side of the notch.
-public struct PetPanelAnchor: Equatable, Sendable {
-    public var edge: CGFloat
-    public var side: PetSide
-
-    public init(edge: CGFloat, side: PetSide) {
-        self.edge = edge
-        self.side = side
-    }
-}
-
 /// The small panel a click on the pet opens: a larger pet; a hello with the look
 /// swatches and the hat button beside it; and a row of actions. Drawn by
-/// `PetPanelView`, hit-tested by the window (`hit(at:in:notchInset:side:)`).
+/// `PetPanelView`, hit-tested by the window (`hit(at:in:notchInset:)`).
 ///
-/// The content sits under the pet that was clicked: from the panel's right
-/// edge when it hangs from a pet on the right, otherwise from its left edge.
+/// The content is CENTRED in the panel, which is itself centred on the notch —
+/// so the panel opens as a symmetric stretch out of the compact bar rather than
+/// lurching toward whichever side the pet happened to be clicked on.
 public enum PetPanelLayout {
     public static let petScale: CGFloat = 3
     public static let horizontalInset: CGFloat = 18
@@ -106,14 +95,13 @@ public enum PetPanelLayout {
         contentWidth + horizontalInset * 2
     }
 
-    /// Where the content block starts, horizontally. Given the notch (same
-    /// coordinates as `frame`), the big pet is kept out from under it, where its
-    /// hat and its hops would be cut off (the panel is wide enough for that; see
-    /// `NotchGeometry.petPanelFrame`).
-    public static func contentMinX(in frame: CGRect, side: PetSide?, notch: CGRect? = nil) -> CGFloat {
-        let minX = side == .right ? frame.maxX - horizontalInset - contentWidth : frame.minX + horizontalInset
-        guard let notch, minX + petSize > notch.minX, minX < notch.maxX else { return minX }
-        return notch.minX - petSize
+    /// Where the content block starts, horizontally: centred in the panel.
+    ///
+    /// The panel is centred on the notch and is wider than `contentWidth`, so a
+    /// centred block leaves equal margins and puts the big pet clear to the left
+    /// of the cutout, where its hat and its hops are never cut off.
+    public static func contentMinX(in frame: CGRect) -> CGFloat {
+        (frame.midX - contentWidth / 2).rounded()
     }
 
     /// Every hit target of the panel, in AppKit coordinates (origin bottom-left).
@@ -125,12 +113,12 @@ public enum PetPanelLayout {
     }
 
     /// The panel's targets for a frame; content sits below the notch strip.
-    public static func layout(in frame: CGRect, notchInset: CGFloat, side: PetSide? = nil, notch: CGRect? = nil) -> Layout {
+    public static func layout(in frame: CGRect, notchInset: CGFloat) -> Layout {
         let contentHeight = frame.height - notchInset
         let textBlock = titleHeight + rowGap + chipSize.height
         let blockHeight = max(textBlock, petSize)
         let top = frame.maxY - notchInset - ((contentHeight - blockHeight) / 2).rounded(.down)
-        let minX = contentMinX(in: frame, side: side, notch: notch)
+        let minX = contentMinX(in: frame)
         let pet = CGRect(x: minX, y: top - (blockHeight + petSize) / 2, width: petSize, height: petSize)
 
         let textTop = top - (blockHeight - textBlock) / 2
@@ -160,8 +148,8 @@ public enum PetPanelLayout {
         case pet
     }
 
-    public static func hit(at point: CGPoint, in frame: CGRect, notchInset: CGFloat, side: PetSide? = nil, notch: CGRect? = nil) -> Hit? {
-        let layout = layout(in: frame, notchInset: notchInset, side: side, notch: notch)
+    public static func hit(at point: CGPoint, in frame: CGRect, notchInset: CGFloat) -> Hit? {
+        let layout = layout(in: frame, notchInset: notchInset)
         if let chip = layout.actions.first(where: { $0.rect.insetBy(dx: -2, dy: -3).contains(point) }) {
             return .action(chip.action)
         }
@@ -178,12 +166,12 @@ public enum PetPanelLayout {
     }
 
     /// The action chips for a panel frame.
-    public static func actions(in frame: CGRect, notchInset: CGFloat, side: PetSide? = nil) -> [(action: PetInteraction, rect: CGRect)] {
-        layout(in: frame, notchInset: notchInset, side: side).actions
+    public static func actions(in frame: CGRect, notchInset: CGFloat) -> [(action: PetInteraction, rect: CGRect)] {
+        layout(in: frame, notchInset: notchInset).actions
     }
 
-    public static func action(at point: CGPoint, in frame: CGRect, notchInset: CGFloat, side: PetSide? = nil) -> PetInteraction? {
-        guard case let .action(action)? = hit(at: point, in: frame, notchInset: notchInset, side: side) else { return nil }
+    public static func action(at point: CGPoint, in frame: CGRect, notchInset: CGFloat) -> PetInteraction? {
+        guard case let .action(action)? = hit(at: point, in: frame, notchInset: notchInset) else { return nil }
         return action
     }
 }

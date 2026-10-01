@@ -281,6 +281,8 @@ final class NotchWindow: NSPanel {
 
     init(geometry: NotchGeometry) {
         self.geometry = geometry
+        // NSPanel's own default, read before anything can change it.
+        self.defaultSharingType = .readWrite
         let frame = geometry.compactFrame
         super.init(
             contentRect: frame,
@@ -557,6 +559,35 @@ final class NotchWindow: NSPanel {
 
     /// Uniform margin around the island so its shadow is never clipped.
     static let shadowMargin: CGFloat = 24
+
+    // MARK: - Ghost Mode
+
+    /// Whether the island is hidden from screen capture.
+    ///
+    /// `NSWindow.sharingType = .none` takes the window out of every capture
+    /// path macOS has — screen sharing in a call, QuickTime and Screenshot
+    /// recordings, ⇧⌘3/4/5, and anything built on ScreenCaptureKit — while
+    /// leaving it on the physical display. It is the OS doing the hiding, not
+    /// the app drawing something different, so there is no frame where the
+    /// island leaks into a recording.
+    var hidesFromCapture: Bool = false {
+        didSet {
+            guard hidesFromCapture != oldValue else { return }
+            // Restore whatever the window had rather than assuming a value:
+            // turning Ghost Mode off must put the window back exactly as it
+            // was, not merely somewhere capturable.
+            sharingType = hidesFromCapture ? .none : defaultSharingType
+            log("ghost: hidesFromCapture=\(hidesFromCapture)")
+        }
+    }
+
+    /// The window's sharing type before Ghost Mode ever touched it.
+    ///
+    /// Captured in `init`, NOT lazily: a lazy property is evaluated on first
+    /// READ, which is inside the `didSet` that turns Ghost Mode back OFF — by
+    /// which point `sharingType` is already `.none`, so it would restore the
+    /// hidden value and the island never came back into capture.
+    private let defaultSharingType: NSWindow.SharingType
 
     /// The island's frame in window-local AppKit coordinates (bottom-left
     /// origin). The container's hit testing lives in this space.

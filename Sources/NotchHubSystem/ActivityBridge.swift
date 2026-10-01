@@ -167,9 +167,9 @@ public enum ActivityBridge {
             // moment it finishes is worth taking the island for.
             return running ? [.refresh] : [.presentTransient(.codingAgentFinished(agent))]
 
-        // Panel and wing state the app keeps itself — the Tray, dictation, the
-        // frontmost app, privacy dots, the weather, the next-event readout.
-        case .clipboardCaptured, .dictation, .frontmostApp, .appContext, .privacy, .weather, .calendarNext:
+        // Panel and wing state the app keeps itself — the Tray, the frontmost
+        // app, privacy dots, the weather, the next-event readout.
+        case .clipboardCaptured, .frontmostApp, .appContext, .privacy, .weather, .calendarNext:
             return [.refresh]
 
         case .didWake, .willSleep:

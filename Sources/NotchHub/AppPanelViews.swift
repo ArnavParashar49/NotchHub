@@ -8,6 +8,13 @@ import SwiftUI
 /// `AppPanelLayout`, which the window hit-tests.
 struct AppPanelStrip: View {
     let notchInset: CGFloat
+    /// The control the cursor is resting on, so the strip's two targets light
+    /// like the rest of the panel instead of being silently clickable.
+    var hovered: IslandControl? = nil
+
+    private func isHovered(_ action: AppPanelAction) -> Bool {
+        hovered == .appPanel(action)
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -15,17 +22,22 @@ struct AppPanelStrip: View {
                 Text(DashboardFormat.clock(context.date).time)
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(isHovered(.dashboard) ? DesignTokens.textPrimary : DesignTokens.textSecondary)
                     .frame(width: AppPanelLayout.clockSize.width, height: AppPanelLayout.clockSize.height, alignment: .leading)
             }
             Spacer(minLength: 0)
             Image(systemName: "ellipsis")
                 .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(DesignTokens.textTertiary)
+                .foregroundStyle(isHovered(.settings) ? DesignTokens.textPrimary : DesignTokens.textTertiary)
                 .frame(width: AppPanelLayout.moreSize.width, height: AppPanelLayout.moreSize.height)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(isHovered(.settings) ? DesignTokens.hoverHighlight : .clear)
+                )
         }
         .padding(.horizontal, AppPanelLayout.horizontalInset)
         .frame(height: notchInset)
+        .animation(DesignTokens.springHover, value: hovered)
     }
 }
 
@@ -61,6 +73,19 @@ struct BrowserPanelView: View {
     let appName: String
     let iconData: Data?
     let browser: BrowserContext
+    /// The control the cursor is resting on, resolved against `AppPanelLayout`
+    /// — the same geometry the window hit-tests with, so nothing can highlight
+    /// in one place and be clicked in another.
+    var hovered: IslandControl? = nil
+
+    /// The browser control under the cursor, if the cursor is on one.
+    private var hoveredAction: BrowserAction? {
+        guard case let .appPanel(.browser(action))? = hovered else { return nil }
+        return action
+    }
+
+    /// The namespace the travelling hover highlight lives in.
+    @Namespace private var hoverHighlight
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -72,7 +97,8 @@ struct BrowserPanelView: View {
                 .padding(.top, AppPanelLayout.tabsHeaderGap)
             VStack(spacing: AppPanelLayout.tabRowSpacing) {
                 ForEach(browser.nearbyTabs(limit: AppPanelLayout.maxTabRows), id: \.index) { tab in
-                    tabRow(tab, isActive: tab.index == browser.activeIndex)
+                    tabRow(tab, isActive: tab.index == browser.activeIndex,
+                           isHovered: hoveredAction == .selectTab(tab.index))
                 }
             }
             .padding(.top, AppPanelLayout.tabRowsGap)
@@ -81,7 +107,7 @@ struct BrowserPanelView: View {
         .padding(.horizontal, AppPanelLayout.horizontalInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .overlay(alignment: .top) {
-            AppPanelStrip(notchInset: notchInset).offset(y: -notchInset)
+            AppPanelStrip(notchInset: notchInset, hovered: hovered).offset(y: -notchInset)
         }
     }
 
@@ -105,24 +131,43 @@ struct BrowserPanelView: View {
         }
     }
 
-    /// Back, forward and reload as segments of one capsule.
+    /// Back, forward and reload as segments of one capsule, with the same
+    /// travelling hover highlight the hover strip's cluster uses — the two are
+    /// the same control in two sizes, so they must feel identical.
     private var navigation: some View {
         HStack(spacing: 0) {
-            ForEach(Array(AppPanelLayout.navControls.enumerated()), id: \.offset) { index, action in
-                if index > 0 {
-                    Rectangle()
-                        .fill(Color.white.opacity(0.10))
-                        .frame(width: 0.5, height: 12)
-                        .frame(width: 0)
-                }
-                Image(systemName: WingView.symbol(for: action))
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                    .frame(width: AppPanelLayout.navButtonSize.width, height: AppPanelLayout.navButtonSize.height)
+            ForEach(Array(AppPanelLayout.navControls.enumerated()), id: \.offset) { _, action in
+                navButton(action)
             }
         }
         .background(Capsule().fill(DesignTokens.controlClusterFill))
-        .overlay(Capsule().strokeBorder(DesignTokens.controlClusterStroke, lineWidth: 0.5))
+        .overlay(
+            Capsule().strokeBorder(
+                hoveredAction == nil
+                    ? DesignTokens.controlClusterStroke
+                    : DesignTokens.controlClusterStrokeActive,
+                lineWidth: 0.5
+            )
+        )
+        // See `WingView.browserControls`: the cluster owns the animation so the
+        // highlight's matched geometry can interpolate between segments.
+        .animation(DesignTokens.springHover, value: hoveredAction)
+    }
+
+    private func navButton(_ action: BrowserAction) -> some View {
+        let isHovered = hoveredAction == action
+        return Image(systemName: WingView.symbol(for: action))
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(isHovered ? DesignTokens.textPrimary : DesignTokens.controlGlyphIdle)
+            .scaleEffect(isHovered ? DesignTokens.hoverScale : 1)
+            .frame(width: AppPanelLayout.navButtonSize.width, height: AppPanelLayout.navButtonSize.height)
+            .background {
+                if isHovered {
+                    Capsule()
+                        .fill(DesignTokens.hoverHighlight)
+                        .matchedGeometryEffect(id: "browser-nav-hover", in: hoverHighlight)
+                }
+            }
     }
 
     // MARK: Tabs
@@ -141,19 +186,26 @@ struct BrowserPanelView: View {
                 .frame(height: 16)
                 .background(Capsule().fill(Color.white.opacity(0.08)))
             Spacer(minLength: 0)
-            HStack(spacing: 4) {
-                Image(systemName: "plus")
-                    .font(.system(size: 9, weight: .heavy))
-                Text("New Tab")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-            }
-            .foregroundStyle(DesignTokens.accent)
-            .frame(width: AppPanelLayout.newTabSize.width, height: AppPanelLayout.newTabSize.height)
-            .background(Capsule().fill(DesignTokens.accent.opacity(0.14)))
+            newTabButton
         }
     }
 
-    private func tabRow(_ tab: BrowserTab, isActive: Bool) -> some View {
+    private var newTabButton: some View {
+        let isHovered = hoveredAction == .newTab
+        return HStack(spacing: 4) {
+            Image(systemName: "plus")
+                .font(.system(size: 9, weight: .heavy))
+            Text("New Tab")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+        }
+        .foregroundStyle(DesignTokens.accent)
+        .frame(width: AppPanelLayout.newTabSize.width, height: AppPanelLayout.newTabSize.height)
+        .background(Capsule().fill(DesignTokens.accent.opacity(isHovered ? 0.26 : 0.14)))
+        .scaleEffect(isHovered ? 1.04 : 1)
+        .animation(DesignTokens.springHover, value: isHovered)
+    }
+
+    private func tabRow(_ tab: BrowserTab, isActive: Bool, isHovered: Bool) -> some View {
         HStack(spacing: 10) {
             TabMonogram(tab: tab)
             Text(tab.title.isEmpty ? "Untitled" : tab.title)
@@ -181,8 +233,17 @@ struct BrowserPanelView: View {
         .frame(height: AppPanelLayout.tabRowHeight)
         .background(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Color.white.opacity(isActive ? 0.10 : 0.035))
+                .fill(rowFill(isActive: isActive, isHovered: isHovered))
         )
+        // A row has no cluster to travel in, so it lights in place — and moves
+        // a hair toward the cursor, the way a Finder sidebar row does.
+        .scaleEffect(isHovered ? 1.012 : 1, anchor: .leading)
+        .animation(DesignTokens.springHover, value: isHovered)
+    }
+
+    private func rowFill(isActive: Bool, isHovered: Bool) -> Color {
+        if isHovered { return DesignTokens.hoverRowFill }
+        return Color.white.opacity(isActive ? 0.10 : 0.035)
     }
 }
 
@@ -219,6 +280,8 @@ private struct TabMonogram: View {
 /// stats, the context window, and plan limits where the tool records them.
 struct AgentPanelView: View {
     let notchInset: CGFloat
+    /// The control the cursor is resting on, for the notch strip's two targets.
+    var hovered: IslandControl? = nil
     let iconData: Data?
     let session: AgentSession
 
@@ -262,7 +325,7 @@ struct AgentPanelView: View {
         .padding(.bottom, AppPanelLayout.bottomInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .overlay(alignment: .top) {
-            AppPanelStrip(notchInset: notchInset).offset(y: -notchInset)
+            AppPanelStrip(notchInset: notchInset, hovered: hovered).offset(y: -notchInset)
         }
     }
 

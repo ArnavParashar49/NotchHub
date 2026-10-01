@@ -32,6 +32,22 @@ public extension KeyChord.Key {
     static let t: UInt16 = 0x11
 }
 
+// MARK: - Pointer feedback
+
+/// A control the cursor can be resting on.
+///
+/// The island never takes key focus, so its controls are drawn rather than
+/// being real SwiftUI buttons and SwiftUI's own `.onHover` never fires for
+/// them. The coordinator resolves the cursor against the SAME layout the window
+/// hit-tests with and publishes the result here, so a control cannot highlight
+/// in one place and be clickable in another.
+public enum IslandControl: Equatable, Sendable {
+    /// A browser button on the hover strip's right wing.
+    case wingBrowser(BrowserAction)
+    /// A control in the frontmost app's panel.
+    case appPanel(AppPanelAction)
+}
+
 // MARK: - Hover strip
 
 /// The browser controls on the right wing of the hover strip. `WingView` draws

@@ -8,7 +8,7 @@ import CoreGraphics
 /// touches `NSScreen`.
 public struct NotchGeometry: Equatable {
     /// The full display frame this geometry was derived from. Panel surfaces
-    /// (tray, dictation, meeting, skin) are sized against it.
+    /// (tray, meeting, teleprompter, camera, skin) are sized against it.
     public let screenFrame: CGRect
     /// The physical notch cutout, in screen coordinates.
     public let notchFrame: CGRect
@@ -62,6 +62,15 @@ public struct NotchGeometry: Equatable {
     /// LEFT and RIGHT of the cutout. Measured wings size each side to its own
     /// content (`IslandContentSize.wingLead`); this default is used for both.
     public static let wingWidth: CGFloat = 84
+    /// How wide a wing actually gets once its content is measured — a browser's
+    /// nav cluster, an agent's token readout — which is the widest the hover
+    /// strip realistically becomes in use.
+    ///
+    /// `wingWidth` above is the strip's BARE resting width, before anything has
+    /// been measured into it; the strip you actually see while hovering is
+    /// almost always this instead. Surfaces that want to line up with the strip
+    /// match this one, so they agree with it in practice rather than in theory.
+    public static let wingContentWidth: CGFloat = 110
     /// A generous ceiling on how far the content-driven surfaces (the wings and
     /// the compact bar) may stretch from the notch edge.
     ///
@@ -232,11 +241,14 @@ public struct NotchGeometry: Equatable {
         case .interactive: return interactiveFrame
         case .appPanel: return appPanelFrame(height: content.panelHeight)
         case .tray: return trayFrame
-        case .dictation: return dictationFrame
         case .meeting: return meetingFrame
-        case .skin: return petPanelFrame(anchor: content.panelAnchor)
+        case .skin: return petPanelFrame
         case .settings: return settingsFrame
         case .fileDrop: return fileDropFrame
+        case .teleprompter: return teleprompterFrame
+        case .teleprompterCompose: return teleprompterComposeFrame
+        case .camera: return cameraFrame(expanded: false)
+        case .cameraExpanded: return cameraFrame(expanded: true)
         }
     }
 
@@ -304,26 +316,41 @@ public struct NotchGeometry: Equatable {
         screenFrame.height > 0 ? screenFrame.height : notchFrame.maxY
     }
 
-    /// A panel of `width` × `height`, centred and hung from the top of the
-    /// screen so it grows out of the notch.
+    /// A panel of `width` × `height`, centred on the NOTCH and hung from the top
+    /// of the screen so it grows out of it.
+    ///
+    /// Centred on `notchFrame.midX` and hung from `notchFrame.maxY` rather than
+    /// on the screen's own width and height: a display whose frame does not
+    /// start at the origin (a MacBook driven beside an external primary, where
+    /// `NSScreen.main.frame.origin` is the external display's width) would
+    /// otherwise put every panel hundreds of points away from the notch the
+    /// island is anchored to — on the wrong display entirely.
     private func panel(width: CGFloat, height: CGFloat) -> CGRect {
         let w = min(width, screenWidth)
         return CGRect(
-            x: screenWidth / 2 - w / 2,
-            y: screenHeight - height,
+            x: notchFrame.midX - w / 2,
+            y: notchFrame.maxY - height,
             width: w,
             height: height
         )
     }
 
-    /// The clipboard Tray: a wide, tall browser. NotchBay's signature surface.
+    /// The clipboard Tray: a compact browser for a text-only history.
+    ///
+    /// Half the height it used to be. It was sized as a wide, tall sheet back
+    /// when clips could be images and screenshots and needed room to be
+    /// recognised; a list of copied STRINGS does not, and at the old size most
+    /// of it was empty black.
+    ///
+    /// Its width is the HOVER STRIP's, so the two surfaces share an outline:
+    /// the Tray opens as the bar you were already looking at, growing straight
+    /// down out of it rather than to some unrelated width of its own.
+    ///
+    /// Matched to the strip carrying CONTENT (`wingContentWidth`) rather than to
+    /// its bare resting width: the strip is content-driven, so the one on screen
+    /// when you reach for the Tray is the wider one nearly every time.
     public var trayFrame: CGRect {
-        panel(width: min(screenWidth * 0.44, 700), height: 420)
-    }
-
-    /// The dictation overlay: a compact strip with a waveform.
-    public var dictationFrame: CGRect {
-        panel(width: min(screenWidth * 0.26, 420), height: 110)
+        panel(width: wingsBar(sideWidth: Self.wingContentWidth).width, height: 210)
     }
 
     /// A live call's control panel.
@@ -346,36 +373,45 @@ public struct NotchGeometry: Equatable {
         panel(width: max(360, PetPanelLayout.panelWidth), height: 96)
     }
 
-    /// The pet's panel, hung under the pet: its outer edge where the island's
-    /// edge beside the pet was when the pet was clicked (so the cursor starts
-    /// inside it), reaching across at least the whole notch so it stays one
-    /// shape with it.
-    public func petPanelFrame(anchor: PetPanelAnchor?) -> CGRect {
-        guard let anchor else { return skinFrame }
-        switch anchor.side {
-        case .right:
-            let maxX = max(anchor.edge, notchFrame.maxX)
-            var minX = min(maxX - skinFrame.width, notchFrame.minX)
-            // Content laid out from the right would put the big pet under the
-            // notch: reach far enough left for it to sit beside the notch instead.
-            let petMinX = maxX - PetPanelLayout.horizontalInset - PetPanelLayout.contentWidth
-            if petMinX + PetPanelLayout.petSize > notchFrame.minX {
-                minX = min(minX, notchFrame.minX - PetPanelLayout.petSize - PetPanelLayout.horizontalInset)
-            }
-            return CGRect(x: minX, y: skinFrame.minY, width: maxX - minX, height: skinFrame.height)
-        case .left:
-            // The big pet sits at the panel's left: keep it clear of the notch.
-            let minX = min(anchor.edge, notchFrame.minX - PetPanelLayout.horizontalInset - PetPanelLayout.petSize)
-            let maxX = max(minX + skinFrame.width, notchFrame.maxX)
-            return CGRect(x: minX, y: skinFrame.minY, width: maxX - minX, height: skinFrame.height)
-        }
-    }
+    /// The pet's panel: the same centred surface every other panel uses.
+    ///
+    /// It used to hang from whichever island edge the pet was clicked beside,
+    /// which made a click on the pet at the right of a compact bar open a panel
+    /// stretching far to the LEFT of the notch — the island appeared to lurch
+    /// sideways instead of growing out of the notch. Centring it means the
+    /// panel shares the notch's own midline with the compact bar it grew from,
+    /// so the expansion is a symmetric stretch: `IslandMotion` reads it as an
+    /// ordinary `expand` and it springs open exactly like the dashboard.
+    public var petPanelFrame: CGRect { skinFrame }
 
     /// The settings panel: a header, three groups of feature tiles, the
     /// weather card and a footer — tall enough to show them all without
     /// scrolling on a laptop display (it still scrolls on a short screen).
     public var settingsFrame: CGRect {
         panel(width: min(screenWidth * 0.32, 460), height: min(740, screenHeight - 40))
+    }
+
+    /// The teleprompter, reading: wide enough for a comfortable line length at
+    /// the reading size, and just tall enough for a few lines plus the control
+    /// bar. Deliberately NOT a tall page — the point of a notch teleprompter is
+    /// that it sits above your work rather than covering it.
+    public var teleprompterFrame: CGRect {
+        panel(width: min(screenWidth * 0.40, 560), height: 196)
+    }
+
+    /// The teleprompter, composing: the same width, taller for the editor.
+    public var teleprompterComposeFrame: CGRect {
+        panel(width: min(screenWidth * 0.40, 560), height: 304)
+    }
+
+    /// The camera preview: a 16:9 picture under the notch strip, plus its
+    /// control bar. Sized from the picture so the preview is never letterboxed.
+    public func cameraFrame(expanded: Bool) -> CGRect {
+        let width = expanded
+            ? min(screenWidth * 0.46, 660)
+            : min(screenWidth * 0.26, 380)
+        let picture = (width - CameraLayout.horizontalInset * 2) * 9 / 16
+        return panel(width: width, height: (notchFrame.height + CameraLayout.chromeHeight + picture).rounded())
     }
 
     /// The file-sharing drop surface: wide enough to be an easy drop target,
@@ -404,11 +440,12 @@ public struct NotchGeometry: Equatable {
             interactiveFrame,
             appPanelFrame(height: Self.appPanelMaxHeight),
             trayFrame,
-            dictationFrame,
             meetingFrame,
             skinFrame,
             settingsFrame,
             fileDropFrame,
+            teleprompterComposeFrame,
+            cameraFrame(expanded: true),
         ]
         guard let first = frames.first else { return notchFrame }
         return frames.dropFirst().reduce(first) { $0.union($1) }
@@ -431,8 +468,6 @@ public enum IslandState: String, CaseIterable, Equatable {
     case appPanel
     /// The clipboard Tray browser.
     case tray
-    /// The dictation overlay.
-    case dictation
     /// A live call's control panel.
     case meeting
     /// The frontmost-app skin.
@@ -441,4 +476,12 @@ public enum IslandState: String, CaseIterable, Equatable {
     case settings
     /// The file-sharing drop surface.
     case fileDrop
+    /// The teleprompter, scrolling a script.
+    case teleprompter
+    /// The teleprompter, being written or pasted into.
+    case teleprompterCompose
+    /// The camera preview.
+    case camera
+    /// The camera preview, larger.
+    case cameraExpanded
 }

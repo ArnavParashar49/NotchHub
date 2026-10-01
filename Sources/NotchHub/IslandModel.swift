@@ -47,6 +47,11 @@ final class IslandModel: ObservableObject {
     @Published var pet: PetRenderModel?
     /// Whether this display has a notch (no idle dock or idle pet without one).
     @Published var hasNotch: Bool = true
+    /// The drawn control the cursor is resting on. The island's controls are
+    /// drawn rather than being real buttons (it never takes key focus), so
+    /// SwiftUI's own `.onHover` never fires for them — the coordinator resolves
+    /// the cursor against the hit-test layouts and publishes the answer here.
+    @Published var hoveredControl: IslandControl?
 }
 
 /// The hosted root: a thin adapter that observes the model and hands its values
@@ -68,6 +73,7 @@ struct IslandRootView: View {
             notchWidth: model.notchWidth,
             contentSize: model.contentSize,
             panelContent: model.panelContent,
+            hoveredControl: model.hoveredControl,
             canControlMedia: model.canControlMedia,
             surfaceVisible: model.surfaceVisible,
             meeting: model.meeting,

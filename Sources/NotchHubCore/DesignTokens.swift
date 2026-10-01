@@ -181,6 +181,37 @@ public enum DesignTokens {
     public static let springSettle = springMorph
     /// Numeric: monospaced digits ride a very stiff spring to avoid jitter.
     public static let springNumeric = Animation.spring(response: 0.15, dampingFraction: 1.0)
+    /// A highlight travelling between segments of one control cluster.
+    ///
+    /// Quick and almost critically damped: the pointer is already there, so the
+    /// highlight has to catch up without a wobble that would read as lag. This
+    /// is the spring every drawn control uses for its hover state, so hovering
+    /// anything in the island feels like the same material.
+    public static let springHover = Animation.spring(response: 0.26, dampingFraction: 0.86, blendDuration: 0.1)
+    /// The tint change that rides alongside `springHover`. Slightly faster, so
+    /// the glyph lights up as the highlight arrives rather than after it.
+    public static let hoverTint = Animation.easeOut(duration: 0.14)
+
+    // MARK: - Hover surfaces
+    //
+    // Drawn controls (the browser cluster, panel rows) share one hover
+    // language: the cluster itself stays quiet and a single highlight travels
+    // to the segment under the cursor, which lifts from secondary to primary
+    // ink. No glow, no coloured wash — the island is monochrome, and a
+    // travelling highlight is what macOS's own segmented controls do.
+
+    /// The travelling highlight behind the hovered segment of a cluster.
+    public static let hoverHighlight = Color.white.opacity(0.18)
+    /// A hovered row or standalone control, which has no cluster to travel in.
+    public static let hoverRowFill = Color.white.opacity(0.12)
+    /// The cluster's hairline, brightened while the cursor is somewhere in it.
+    public static let controlClusterStrokeActive = Color.white.opacity(0.26)
+    /// Ink for a cluster glyph the cursor is NOT on. Secondary, so the hovered
+    /// one reads as the one that will act.
+    public static let controlGlyphIdle = Color.white.opacity(0.66)
+    /// How much a hovered glyph grows. Small enough to feel like pressure
+    /// rather than a zoom.
+    public static let hoverScale: CGFloat = 1.10
 
     /// The spring for a motion, or `nil` when nothing visible moves.
     public static func animation(for motion: IslandMotion) -> Animation? {

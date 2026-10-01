@@ -20,11 +20,13 @@ struct IslandSettings {
     var focus: Bool = true
     var weather: Bool = false
     var clipboard: Bool = true
-    var dictation: Bool = true
     var fileSharing: Bool = true
     var privacy: Bool = true
     var codingAgent: Bool = true
     var appDetails: Bool = true
+    var teleprompter: Bool = true
+    var camera: Bool = true
+    var ghostMode: Bool = false
     var showPet: Bool = true
     var petReactions: Bool = true
     var petIdleAnimations: Bool = true
@@ -83,11 +85,13 @@ extension IslandSettings {
         focus = featureSettings.isEnabled(.focus)
         weather = featureSettings.isEnabled(.weather)
         clipboard = featureSettings.isEnabled(.clipboard)
-        dictation = featureSettings.isEnabled(.dictation)
         fileSharing = featureSettings.isEnabled(.fileSharing)
         privacy = featureSettings.isEnabled(.privacy)
         codingAgent = featureSettings.isEnabled(.codingAgent)
         appDetails = featureSettings.isEnabled(.appDetails)
+        teleprompter = featureSettings.isEnabled(.teleprompter)
+        camera = featureSettings.isEnabled(.camera)
+        ghostMode = featureSettings.isEnabled(.ghostMode)
     }
 
     /// Persists this view model's toggles back into a `FeatureSettings`.
@@ -107,11 +111,13 @@ extension IslandSettings {
         settings.setEnabled(.focus, enabled: focus)
         settings.setEnabled(.weather, enabled: weather)
         settings.setEnabled(.clipboard, enabled: clipboard)
-        settings.setEnabled(.dictation, enabled: dictation)
         settings.setEnabled(.fileSharing, enabled: fileSharing)
         settings.setEnabled(.privacy, enabled: privacy)
         settings.setEnabled(.codingAgent, enabled: codingAgent)
         settings.setEnabled(.appDetails, enabled: appDetails)
+        settings.setEnabled(.teleprompter, enabled: teleprompter)
+        settings.setEnabled(.camera, enabled: camera)
+        settings.setEnabled(.ghostMode, enabled: ghostMode)
         return settings
     }
 }
@@ -140,6 +146,9 @@ struct SettingsView: View {
         let title: String
         let symbol: String
         let key: WritableKeyPath<IslandSettings, Bool>
+        /// A line under the title, for a tile whose name does not say enough on
+        /// its own. Most do; Ghost Mode has to say what it actually hides.
+        var detail: String? = nil
         var id: String { title }
     }
 
@@ -170,11 +179,14 @@ struct SettingsView: View {
             ]),
             Group(title: "Tools", tint: SettingsMetrics.ink, items: [
                 Item(title: "Clipboard", symbol: "doc.on.clipboard.fill", key: \.clipboard),
-                Item(title: "Dictation", symbol: "mic.fill", key: \.dictation),
+                Item(title: "Teleprompter", symbol: "text.alignleft", key: \.teleprompter),
+                Item(title: "Camera", symbol: "video.fill", key: \.camera),
                 Item(title: "File Sharing", symbol: "square.and.arrow.up.fill", key: \.fileSharing),
                 Item(title: "Privacy Indicators", symbol: "hand.raised.fill", key: \.privacy),
                 Item(title: "App Details", symbol: "macwindow", key: \.appDetails),
                 Item(title: "Coding Agent", symbol: "sparkles", key: \.codingAgent),
+                Item(title: "Ghost Mode", symbol: "eye.slash.fill", key: \.ghostMode,
+                     detail: "Hidden from screen sharing"),
             ]),
             Group(title: PetIdentity.name, tint: SettingsMetrics.ink, items: [
                 Item(title: "Show \(PetIdentity.name)", symbol: "pawprint.fill", key: \.showPet),
@@ -292,6 +304,7 @@ struct SettingsView: View {
                     FeatureTile(
                         title: item.title,
                         symbol: item.symbol,
+                        detail: item.detail,
                         tint: group.tint,
                         isOn: settings[keyPath: item.key]
                     ) {
@@ -392,6 +405,7 @@ private enum SettingsMetrics {
 private struct FeatureTile: View {
     let title: String
     let symbol: String
+    var detail: String? = nil
     let tint: Color
     let isOn: Bool
     let action: () -> Void
@@ -419,6 +433,13 @@ private struct FeatureTile: View {
                     .foregroundStyle(isOn ? DesignTokens.textPrimary : DesignTokens.textSecondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
+                if let detail {
+                    Text(detail)
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(DesignTokens.textTertiary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
             }
             .padding(10)
             .frame(maxWidth: .infinity, minHeight: SettingsMetrics.tileHeight, maxHeight: SettingsMetrics.tileHeight, alignment: .leading)

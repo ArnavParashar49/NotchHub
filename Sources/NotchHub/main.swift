@@ -244,6 +244,15 @@ if let index = arguments.firstIndex(of: "--app-snapshots") {
     exit(MainActor.assumeIsolated { PetStoryboard.appSnapshots(directory: directory) })
 }
 
+// --surface-snapshots DIR: every state of the teleprompter, camera and
+// dashboard surfaces, with hit targets (headless).
+if let index = arguments.firstIndex(of: "--surface-snapshots") {
+    let directory = index + 1 < arguments.count ? arguments[index + 1] : "."
+    // An optional third argument names ONE surface to render.
+    let filter = index + 2 < arguments.count ? arguments[index + 2] : nil
+    exit(MainActor.assumeIsolated { SurfaceSnapshots.render(directory: directory, filter: filter) })
+}
+
 // --pet-snapshots DIR: the real IslandView's pet layer in each dock shape (headless).
 if let index = arguments.firstIndex(of: "--pet-snapshots") {
     let directory = index + 1 < arguments.count ? arguments[index + 1] : "."

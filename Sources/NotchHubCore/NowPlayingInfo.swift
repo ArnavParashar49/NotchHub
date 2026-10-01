@@ -80,3 +80,72 @@ public struct NowPlayingInfo: Equatable {
 private extension String {
     var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
 }
+
+// MARK: - Browser tabs
+
+/// Turns a browser tab's title into a track, and decides when a track has
+/// really stopped.
+///
+/// This is the "last resort" source: a media tab open in a browser. It is the
+/// one the island gets wrong most easily, because a tab title is not a track —
+/// it is a string the page rewrites whenever it likes.
+public enum BrowserMedia {
+
+    /// The site suffixes a tab title carries.
+    static let siteSuffixes = [" - YouTube", " - Spotify", " - SoundCloud", " - Apple Music"]
+
+    /// Strips the decoration a page puts around its title, leaving the part
+    /// that actually names what is playing.
+    ///
+    /// YouTube prefixes the tab title with its unread count — "(3) Some Song -
+    /// YouTube" — and rewrites it whenever that count changes. Taken at face
+    /// value each rewrite reads as a DIFFERENT track, so the island tore the
+    /// surface down and sprang a new one open every time a notification
+    /// arrived, which is what the flicker was.
+    public static func normalizeTitle(_ raw: String) -> String {
+        var title = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // "(3) ", "(12) " — an unread badge, not part of the name.
+        while let range = title.range(of: #"^\(\d+\)\s*"#, options: .regularExpression) {
+            title.removeSubrange(range)
+            title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        // A leading "▶" some players add while playing.
+        if let first = title.first, first == "▶" || first == "\u{25B6}" {
+            title = String(title.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        for suffix in siteSuffixes where title.hasSuffix(suffix) {
+            title = String(title.dropLast(suffix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            break
+        }
+        return title
+    }
+
+    /// What a poll of the browsers found.
+    ///
+    /// "No media tab" and "the query failed" are deliberately NOT the same
+    /// answer. A tab that is gone is a fact the island should act on at once;
+    /// a script that could not run (the browser busy, Automation not yet
+    /// granted) says nothing at all and must not clear a playing track. Folding
+    /// the two together is why a closed tab took ten polls to disappear.
+    public enum Probe: Equatable, Sendable {
+        /// A media tab is open, with this title and URL.
+        case playing(title: String, url: String)
+        /// The browsers answered, and none of them has a media tab.
+        case none
+        /// No browser could be asked.
+        case failed
+    }
+
+    /// How many consecutive "no media tab" answers end a track.
+    ///
+    /// Two, not one: a browser mid-navigation can answer "none" for a single
+    /// poll between one video and the next, and dropping the island on that
+    /// would flicker. Two answers at the poll interval is fast enough to feel
+    /// immediate and slow enough to ride out a page load.
+    public static let stopAfterEmptyPolls = 2
+
+    /// How many consecutive FAILED queries end a track. Much more forgiving:
+    /// a failure is an absence of information, not evidence of silence.
+    public static let stopAfterFailedPolls = 10
+}

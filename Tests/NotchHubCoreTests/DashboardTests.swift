@@ -100,7 +100,24 @@ struct DashboardTests {
         #expect(!actions(.event(joinable: false)).contains(.join))
         #expect(actions(.nowPlaying).contains(.openPlayer))
         #expect(!actions(.nothing).contains(.openPlayer))
-        #expect(actions(.nothing) == [.settings, .timer, .dictation, .tray])
+        // With nothing to focus on, only the settings control and the quick
+        // actions are there. Order-independent — what matters visually is the
+        // left-to-right placement, which `quickActionOrder` checks.
+        #expect(Set(actions(.nothing)) == [.settings, .timer, .teleprompter, .camera, .tray])
+    }
+
+    @Test("the quick actions read left to right, with the Tray anchored at the trailing inset")
+    func quickActionOrder() {
+        let placed = DashboardLayout.actions(in: frame, notchInset: inset, focus: .nothing)
+        let bar: [DashboardAction] = [.timer, .teleprompter, .camera, .tray]
+        let rects = bar.map { action in placed.first { $0.action == action }!.rect }
+        for (index, rect) in rects.enumerated().dropFirst() {
+            #expect(rect.minX > rects[index - 1].minX, "\(bar[index]) is out of order")
+            #expect(rect.minX >= rects[index - 1].maxX, "\(bar[index]) overlaps the chip before it")
+        }
+        // The Tray stays where it has always been, however many chips join it.
+        #expect(rects.last!.maxX == frame.maxX - DashboardLayout.horizontalInset)
+        #expect(rects.allSatisfy { frame.contains($0) })
     }
 
     @Test("settings sits in the notch strip; quick actions along the bottom; no overlaps")

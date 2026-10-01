@@ -31,8 +31,10 @@ struct IslandView: View {
     /// How much room the content needs, used to size the wings/compact bar.
     var contentSize: IslandContentSize = .default
     /// A surface that replaces the queue-driven content: the dashboard, the
-    /// Tray, dictation, a call's controls, or an app skin. `nil` renders the activity instead.
+    /// Tray, a call's controls, or an app skin. `nil` renders the activity instead.
     var panelContent: AnyView? = nil
+    /// The drawn control the cursor is resting on, so the wings can light it.
+    var hoveredControl: IslandControl? = nil
     /// Whether the now-playing surface may drive the player. False when the
     /// media framework is unavailable, so the controls render inert rather
     /// than inviting a click that does nothing.
@@ -86,7 +88,8 @@ struct IslandView: View {
                     notchWidth: notchWidth,
                     notchHeight: notchInset,
                     trailingReserve: petBarReserve,
-                    leadWidth: contentSize.wingLead
+                    leadWidth: contentSize.wingLead,
+                    hovered: hoveredControl
                 )
                 .id("wings")
                 .transition(.islandContent)
@@ -152,12 +155,30 @@ struct IslandView: View {
 
     /// The bottom-corner radius for the current (target) shape. One animatable
     /// value, so corners morph continuously alongside the size.
+    ///
+    /// A PANEL takes the design system's own `radiusPanel`, which is what that
+    /// token was written for and had never actually been wired up. The island's
+    /// radius scales with height — sensible while it is a bar growing into a
+    /// pill, but every panel is far taller than the notch, so they all pinned to
+    /// the same maximum regardless of how WIDE they were. On a narrow panel that
+    /// put a third of the bottom edge inside its own corners, which is the
+    /// over-curved look; on a wide one the same number passed unnoticed.
     private var surfaceRadius: CGFloat {
+        if Self.panelStates.contains(state) { return DesignTokens.radiusPanel }
         let base = state == .wings ? DesignTokens.radiusWingBottom : DesignTokens.radiusIslandBottom
         guard notchInset > 0 else { return base }
         let scale = (state == .interactive || state == .appPanel) ? 1.5 : min(2, max(1, localFrame.height / notchInset))
         return base * scale
     }
+
+    /// The surfaces that hang from the notch as a panel rather than growing out
+    /// of it as a bar. The dashboard and an app panel are deliberately absent:
+    /// they carry the notch strip's own controls and keep the island radius so
+    /// they still read as the island, opened up.
+    private static let panelStates: Set<IslandState> = [
+        .tray, .settings, .fileDrop, .meeting, .skin,
+        .teleprompter, .teleprompterCompose, .camera, .cameraExpanded,
+    ]
 
     /// Whether this surface is exactly notch-height, so its content should sit
     /// at the notch line rather than below the cutout.

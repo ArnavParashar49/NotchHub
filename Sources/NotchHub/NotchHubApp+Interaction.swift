@@ -126,6 +126,25 @@ extension NotchHubApp {
         if menu.items.isEmpty {
             menu.addItem(withTitle: "Return to Idle", action: #selector(returnToIdleAction), keyEquivalent: "")
         }
+
+        // The two surfaces with nothing on the island to right-click when they
+        // are closed. Named for what the click will DO, so the menu reads the
+        // same way whether they are open or not.
+        menu.addItem(.separator())
+        if featureSettings.isEnabled(.teleprompter) {
+            let title = panel == .teleprompter ? "Close Teleprompter" : "Teleprompter…"
+            menu.addItem(withTitle: title, action: #selector(toggleTeleprompterAction), keyEquivalent: "")
+        }
+        if featureSettings.isEnabled(.camera) {
+            let title = panel == .camera ? "Close Camera" : "Camera"
+            menu.addItem(withTitle: title, action: #selector(toggleCameraAction), keyEquivalent: "")
+        }
+        // A tick rather than a verb: this one is a STATE people check ("am I
+        // hidden right now?"), usually with a call already running.
+        let ghost = menu.addItem(withTitle: "Ghost Mode", action: #selector(toggleGhostModeAction), keyEquivalent: "")
+        ghost.state = ghostModeEnabled ? .on : .off
+        ghost.toolTip = "Hide NotchHub from screen sharing and recordings"
+
         // With no menu-bar item, these keep Settings and Quit one click away
         // even if another app holds the ⌥⌘, hotkey.
         menu.addItem(.separator())
@@ -137,6 +156,18 @@ extension NotchHubApp {
 
     @objc func openSettingsAction() {
         toggleSettings()
+    }
+
+    @objc func toggleTeleprompterAction() {
+        toggleTeleprompter()
+    }
+
+    @objc func toggleCameraAction() {
+        toggleCamera()
+    }
+
+    @objc func toggleGhostModeAction() {
+        toggleGhostMode()
     }
 
     @objc func quitAction() {

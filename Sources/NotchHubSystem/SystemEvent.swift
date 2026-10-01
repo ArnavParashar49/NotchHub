@@ -28,8 +28,6 @@ public struct SystemEvent: Equatable {
         case frontmostApp
         /// A call started, changed, or ended.
         case meeting
-        /// Dictation started, heard something, or stopped.
-        case dictation
         /// Do Not Disturb / Focus toggled.
         case focus
         /// Wi-Fi joined or left.
@@ -95,10 +93,6 @@ public struct SystemEvent: Equatable {
         case meetingStarted(Meeting)
         case meetingUpdated(Meeting)
         case meetingEnded
-
-        // MARK: - Dictation
-
-        case dictation(DictationSession)
 
         // MARK: - Focus & network
 

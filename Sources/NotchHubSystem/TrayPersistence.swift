@@ -6,6 +6,9 @@ import NotchHubCore
 /// The Tray is the user's clipboard history; losing 60 clips on every restart
 /// would make it useless. Pinned clips persist indefinitely. Because it is
 /// clipboard content, it is written readable by the owner only.
+///
+/// TEXT ONLY: the file holds the strings that were copied and nothing else.
+/// There is no image directory and nothing is written outside this one file.
 public enum TrayPersistence {
 
     /// `~/Library/Application Support/NotchHub`.
@@ -20,55 +23,66 @@ public enum TrayPersistence {
         baseDirectory().appendingPathComponent("tray.json")
     }
 
-    /// Where copied images are kept. NOT the temp directory: macOS purges that,
-    /// which silently dropped every image from the history.
-    public static func imageDirectory() -> URL {
+    /// Where copied images USED to be kept, before the Tray became text-only.
+    /// Retained solely so `load` can delete it.
+    private static func legacyImageDirectory() -> URL {
         baseDirectory().appendingPathComponent("TrayImages", isDirectory: true)
     }
 
-    /// Writes the store, creating its directory if needed, and deletes image
-    /// files no clip references any more (evicted or deleted clips).
+    /// The format this build writes. A file written by any other version is not
+    /// migrated — it is discarded (see `load`).
+    static let schemaVersion = 2
+
+    /// The stored file: a version, and the clips.
+    private struct Stored: Codable {
+        var version: Int
+        var clips: [TrayClip]
+    }
+
+    /// Writes the store, creating its directory if needed.
     public static func save(_ store: TrayStore) {
         let url = fileURL()
         do {
             try ensureDirectory(url.deletingLastPathComponent())
-            let data = try JSONEncoder().encode(store.clips)
+            let data = try JSONEncoder().encode(Stored(version: schemaVersion, clips: store.clips))
             try data.write(to: url, options: .atomic)
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         } catch {
             // Persistence is a convenience: a failure must never break the app.
         }
-        pruneImages(keeping: store)
     }
 
     /// Reads the store back, or an empty one if nothing valid is on disk.
+    ///
+    /// A file from before the Tray became text-only is DISCARDED rather than
+    /// converted: it is mostly references to images that no longer have a home,
+    /// and salvaging the text out of it would leave a history half of whose
+    /// entries had silently vanished. The old image directory goes with it, so
+    /// nothing is left behind on disk from a feature that no longer exists.
     public static func load() -> TrayStore {
         let url = fileURL()
-        guard let data = try? Data(contentsOf: url),
-              let clips = try? JSONDecoder().decode([TrayClip].self, from: data) else {
+        guard let data = try? Data(contentsOf: url) else {
+            discardLegacyImages()
             return TrayStore()
         }
-        // Drop image clips whose file no longer exists, so the Tray never
-        // shows a broken thumbnail.
-        let live = clips.filter { clip in
-            guard let path = clip.imagePath else { return true }
-            return FileManager.default.fileExists(atPath: path)
+        guard let stored = try? JSONDecoder().decode(Stored.self, from: data),
+              stored.version == schemaVersion else {
+            discardLegacy(at: url)
+            return TrayStore()
         }
-        return TrayStore(clips: live)
+        return TrayStore(clips: stored.clips)
     }
 
-    /// Writes image bytes into the Tray's image directory and returns the path.
-    public static func saveImage(_ data: Data) -> String? {
-        let directory = imageDirectory()
-        do {
-            try ensureDirectory(directory)
-            let url = directory.appendingPathComponent(UUID().uuidString + ".png")
-            try data.write(to: url, options: .atomic)
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-            return url.path
-        } catch {
-            return nil
-        }
+    /// Removes a Tray written by an older build, and everything it referenced.
+    private static func discardLegacy(at url: URL) {
+        try? FileManager.default.removeItem(at: url)
+        discardLegacyImages()
+    }
+
+    private static func discardLegacyImages() {
+        let directory = legacyImageDirectory()
+        guard FileManager.default.fileExists(atPath: directory.path) else { return }
+        try? FileManager.default.removeItem(at: directory)
     }
 
     private static func ensureDirectory(_ url: URL) throws {
@@ -79,14 +93,4 @@ public enum TrayPersistence {
         )
     }
 
-    private static func pruneImages(keeping store: TrayStore) {
-        let directory = imageDirectory()
-        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
-            return
-        }
-        let referenced = Set(store.clips.compactMap { $0.imagePath.map { URL(fileURLWithPath: $0).standardizedFileURL.path } })
-        for file in files where !referenced.contains(file.standardizedFileURL.path) {
-            try? FileManager.default.removeItem(at: file)
-        }
-    }
 }

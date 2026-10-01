@@ -6,9 +6,6 @@ import SwiftUI
 /// `PetPanelLayout`, which the window hit-tests.
 struct PetPanelView: View {
     let presentation: PetPresentation
-    /// The side of the notch the panel hangs from; its content sits under the
-    /// pet there (`PetPanelLayout.contentMinX`).
-    var side: PetSide? = nil
     var look: PetLook = .fox
     var hat: PetHat? = nil
     var hatChoice: PetHatChoice = .seasonal
@@ -18,26 +15,19 @@ struct PetPanelView: View {
     /// Focus can start (the Timers feature is on, or a session is running).
     var focusEnabled = true
     /// Where the content starts from the panel's left edge
-    /// (`PetPanelLayout.contentMinX`); `nil` lays it out from the pet's side.
+    /// (`PetPanelLayout.contentMinX`); `nil` simply centres it.
     var contentLeading: CGFloat? = nil
 
+    /// Centred, matching `PetPanelLayout` — which is what the window hit-tests
+    /// against, so a chip can never draw in one place and be clicked in another.
     var body: some View {
         if let contentLeading {
             content
                 .padding(.leading, contentLeading)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         } else {
-            HStack(spacing: 0) {
-                if side == .right {
-                    Spacer(minLength: 0)
-                }
-                content
-                if side != .right {
-                    Spacer(minLength: 0)
-                }
-            }
-            .padding(side == .right ? .trailing : .leading, PetPanelLayout.horizontalInset)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 

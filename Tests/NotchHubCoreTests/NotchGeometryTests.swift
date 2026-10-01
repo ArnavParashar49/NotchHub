@@ -81,7 +81,14 @@ struct NotchGeometryTests {
         #expect(g.frame(for: .expanded) == g.expandedFrame)
         #expect(g.frame(for: .interactive) == g.interactiveFrame)
         #expect(g.frame(for: .tray) == g.trayFrame)
-        #expect(g.frame(for: .dictation) == g.dictationFrame)
+        #expect(g.frame(for: .teleprompter) == g.teleprompterFrame)
+        // The Tray opens as the hover strip, growing down out of it, so the two
+        // share an outline rather than stepping to some unrelated width. It is
+        // matched to the strip CARRYING CONTENT, which is the one on screen
+        // nearly every time — so it is never narrower than the bare strip.
+        #expect(g.trayFrame.width == g.wingsBar(sideWidth: NotchGeometry.wingContentWidth).width)
+        #expect(g.trayFrame.width >= g.wingsFrame.width)
+        #expect(g.envelopeFrame.contains(g.trayFrame))
         #expect(g.frame(for: .meeting) == g.meetingFrame)
         #expect(g.frame(for: .skin) == g.skinFrame)
         #expect(g.frame(for: .settings) == g.settingsFrame)

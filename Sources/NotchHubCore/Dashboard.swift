@@ -145,7 +145,8 @@ public enum DashboardAction: String, CaseIterable, Sendable {
     case join
     case openPlayer
     case timer
-    case dictation
+    case teleprompter
+    case camera
     case tray
 }
 
@@ -175,7 +176,8 @@ public enum DashboardLayout {
     public static let barHeight: CGFloat = 24
     public static let chipSpacing: CGFloat = 10
     public static let timerChipWidth: CGFloat = 76
-    public static let dictationChipWidth: CGFloat = 28
+    /// The glyph-only chips: the teleprompter and the camera.
+    public static let glyphChipWidth: CGFloat = 28
     public static let trayChipWidth: CGFloat = 56
 
     /// The "···" settings control, in the notch strip beside the cutout.
@@ -217,13 +219,19 @@ public enum DashboardLayout {
             break
         }
 
+        // The quick actions run right to left from the trailing inset, so the
+        // Tray stays put as chips are added beside it.
         let barY = frame.minY + bottomInset
-        let tray = CGRect(x: frame.maxX - horizontalInset - trayChipWidth, y: barY, width: trayChipWidth, height: barHeight)
-        let dictation = CGRect(x: tray.minX - chipSpacing - dictationChipWidth, y: barY, width: dictationChipWidth, height: barHeight)
-        let timer = CGRect(x: dictation.minX - chipSpacing - timerChipWidth, y: barY, width: timerChipWidth, height: barHeight)
-        result.append((.timer, timer))
-        result.append((.dictation, dictation))
-        result.append((.tray, tray))
+        var x = frame.maxX - horizontalInset
+        func chip(_ action: DashboardAction, _ width: CGFloat) {
+            x -= width
+            result.append((action, CGRect(x: x, y: barY, width: width, height: barHeight)))
+            x -= chipSpacing
+        }
+        chip(.tray, trayChipWidth)
+        chip(.camera, glyphChipWidth)
+        chip(.teleprompter, glyphChipWidth)
+        chip(.timer, timerChipWidth)
         return result
     }
 

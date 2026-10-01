@@ -22,11 +22,16 @@ import NotchHubCore
 public final class DownloadListener: SystemListener {
 
     private let emit: (SystemEvent) -> Void
-    private var source: DispatchSourceFileSystemObject?
-    private var fileDescriptor: CInt = -1
-    private var rescanTimer: Timer?
-    private var known: Set<String> = []
     private let directory: String
+
+    /// Every file-system read and all of the state below live on this queue,
+    /// never on the main thread. On a Mac that hasn't granted NotchHub access
+    /// to Downloads, the first listing waits for the user to answer the privacy
+    /// prompt — on the main thread that froze the whole app at launch.
+    private let queue = DispatchQueue(label: "notchhub.downloads", qos: .utility)
+    private var source: DispatchSourceFileSystemObject?
+    private var rescanTimer: DispatchSourceTimer?
+    private var known: Set<String> = []
 
     /// Downloads currently in flight, keyed by the FINAL file name, carrying the
     /// last observed byte count so progress only fires on real growth.
@@ -37,13 +42,23 @@ public final class DownloadListener: SystemListener {
     /// Suffixes that mark a file as still downloading.
     private static let partialSuffixes = [".download", ".crdownload", ".part", ".tmp"]
 
-    public init(emit: @escaping (SystemEvent) -> Void) {
+    /// `directory` defaults to `~/Downloads` (tests pass a scratch folder).
+    public init(directory: String? = nil, emit: @escaping (SystemEvent) -> Void) {
         self.emit = emit
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        self.directory = (home as NSString).appendingPathComponent("Downloads")
+        self.directory = directory
+            ?? (FileManager.default.homeDirectoryForCurrentUser.path as NSString).appendingPathComponent("Downloads")
     }
 
+    /// Returns at once; the folder is read on the listener's own queue.
     public func start() {
+        queue.async { self.startWatching() }
+    }
+
+    public func stop() {
+        queue.async { self.stopWatching() }
+    }
+
+    private func startWatching() {
         guard source == nil else { return }
         guard FileManager.default.fileExists(atPath: directory) else { return }
 
@@ -55,18 +70,17 @@ public final class DownloadListener: SystemListener {
 
         let descriptor = open(directory, O_EVTONLY)
         guard descriptor >= 0 else { return }
-        fileDescriptor = descriptor
 
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: descriptor,
             eventMask: [.write],
-            queue: .main
+            queue: queue
         )
         source.setEventHandler { [weak self] in
             self?.scan()
         }
-        // Close the descriptor this source owns — never `self.fileDescriptor`,
-        // which a restart may already have replaced by the time this runs.
+        // Close the descriptor this source owns, so a restart never closes the
+        // next one.
         source.setCancelHandler {
             close(descriptor)
         }
@@ -75,11 +89,10 @@ public final class DownloadListener: SystemListener {
         updateRescanTimer()
     }
 
-    public func stop() {
+    private func stopWatching() {
         source?.cancel()
         source = nil
-        fileDescriptor = -1
-        rescanTimer?.invalidate()
+        rescanTimer?.cancel()
         rescanTimer = nil
         active.removeAll()
         pendingFinish.removeAll()
@@ -150,13 +163,15 @@ public final class DownloadListener: SystemListener {
     private func updateRescanTimer() {
         let busy = !active.isEmpty || !pendingFinish.isEmpty
         if busy, rescanTimer == nil {
-            let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(100))
+            timer.setEventHandler { [weak self] in
                 self?.scan()
             }
-            RunLoop.main.add(timer, forMode: .common)
+            timer.resume()
             rescanTimer = timer
         } else if !busy {
-            rescanTimer?.invalidate()
+            rescanTimer?.cancel()
             rescanTimer = nil
         }
     }

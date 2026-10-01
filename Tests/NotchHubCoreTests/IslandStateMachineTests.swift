@@ -67,7 +67,7 @@ struct IslandStateMachineTests {
         }
     }
 
-    @Test("only music, meeting and dictation may expand")
+    @Test("only music and a meeting may expand")
     func onlyInteractiveKindsExpand() {
         #expect(Activity.music(title: "A", artist: "B").canExpand)
         #expect(!Activity.timer(elapsed: 1).canExpand)

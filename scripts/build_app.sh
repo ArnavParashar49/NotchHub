@@ -50,10 +50,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
     <string>13.0</string>
     <key>LSUIElement</key>
     <true/>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>NotchHub listens to your microphone only while you dictate.</string>
-    <key>NSSpeechRecognitionUsageDescription</key>
-    <string>NotchHub turns your speech into text on this Mac while you dictate.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>NotchHub shows a live camera preview in the notch while you have it open.</string>
     <key>NSCalendarsFullAccessUsageDescription</key>
     <string>NotchHub shows your next calendar event and its join link in the notch.</string>
     <key>NSCalendarsUsageDescription</key>

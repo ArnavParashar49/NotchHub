@@ -116,11 +116,13 @@ extension NotchHubApp {
                 notchInset: window.notchHeight,
                 appName: skin.name,
                 iconData: skin.iconData,
-                browser: browser
+                browser: browser,
+                hovered: hoveredControl
             ))
         case let .agent(session):
             return AnyView(AgentPanelView(
                 notchInset: window.notchHeight,
+                hovered: hoveredControl,
                 iconData: skin.iconData,
                 session: session
             ))
@@ -129,16 +131,85 @@ extension NotchHubApp {
         }
     }
 
+    /// The tab rows an app panel is showing, when it is a browser's.
+    func appPanelBrowserTabs() -> [BrowserTab]? {
+        guard case let .browser(browser)? = currentAppContext?.context else { return nil }
+        return browser.nearbyTabs(limit: AppPanelLayout.maxTabRows)
+    }
+
+    /// The drawn control the cursor is resting on, resolved against exactly the
+    /// layouts `onControlHit` hit-tests with — so a control highlights if and
+    /// only if clicking there would act on it.
+    ///
+    /// Cheap on purpose: this runs for every mouse move anywhere on screen, so
+    /// it is a couple of rectangle tests behind a state check and nothing else.
+    func resolveHoveredControl(at point: NSPoint) -> IslandControl? {
+        switch currentIslandState() {
+        case .wings:
+            guard case .browserControls? = appStrip()?.trailing else { return nil }
+            let frame = window.localFrame(for: .wings, content: islandModel.contentSize)
+            return WingControlLayout.browserAction(
+                at: point,
+                in: frame,
+                notchWidth: window.notchWidth,
+                inset: DesignTokens.wingInset,
+                trailingReserve: petBarReserve,
+                lead: islandModel.contentSize.wingLead
+            ).map { .wingBrowser($0) }
+        case .appPanel:
+            let frame = window.localFrame(for: .appPanel, content: islandModel.contentSize)
+            return AppPanelLayout.action(
+                at: point,
+                in: frame,
+                notchInset: window.notchHeight,
+                browserTabs: appPanelBrowserTabs()
+            ).map { .appPanel($0) }
+        default:
+            return nil
+        }
+    }
+
+    /// Notices the cursor arriving on or leaving a drawn control.
+    ///
+    /// It publishes straight into the model rather than going through
+    /// `renderIsland`: a hover changes no shape, so re-rendering the island
+    /// would re-derive every frame and re-run the motion decision for nothing.
+    func updateHoveredControl(at point: NSPoint) {
+        let resolved = resolveHoveredControl(at: point)
+        guard resolved != hoveredControl else { return }
+        hoveredControl = resolved
+        islandModel.hoveredControl = resolved
+        // An app panel's content is a snapshot, so it has to be rebuilt to see
+        // the new hover; the wings read the model directly.
+        if currentIslandState() == .appPanel {
+            islandModel.panelContent = panelContent()
+        }
+    }
+
+    /// The island changed shape under a still cursor: a highlight it no longer
+    /// has. Only ever clears — a hover starts with a real mouse event, and the
+    /// model is only touched when something actually changed, so this costs
+    /// nothing on the overwhelming majority of renders.
+    func clearStaleControlHover() {
+        guard hoveredControl != nil else { return }
+        let mouse = NSEvent.mouseLocation
+        let point = NSPoint(x: mouse.x - window.frame.minX, y: mouse.y - window.frame.minY)
+        guard resolveHoveredControl(at: point) != hoveredControl else { return }
+        hoveredControl = nil
+        islandModel.hoveredControl = nil
+    }
+
     /// Handles a click on an app panel's controls. A miss falls through to
     /// the island click, which closes the panel.
     func appPanelControlHit(at point: NSPoint) -> Bool {
         guard currentIslandState() == .appPanel else { return false }
         let frame = window.localFrame(for: .appPanel, content: islandModel.contentSize)
-        var tabs: [BrowserTab]?
-        if case let .browser(browser)? = currentAppContext?.context {
-            tabs = browser.nearbyTabs(limit: AppPanelLayout.maxTabRows)
-        }
-        guard let action = AppPanelLayout.action(at: point, in: frame, notchInset: window.notchHeight, browserTabs: tabs) else {
+        guard let action = AppPanelLayout.action(
+            at: point,
+            in: frame,
+            notchInset: window.notchHeight,
+            browserTabs: appPanelBrowserTabs()
+        ) else {
             return false
         }
         log("appPanel: \(action)")

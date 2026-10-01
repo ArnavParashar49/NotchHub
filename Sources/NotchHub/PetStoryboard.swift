@@ -296,9 +296,10 @@ enum PetStoryboard {
     }
 
     /// `--pet-panel-snapshots DIR`: the real island showing the pet's panel —
-    /// for a few anchors, looks, hats and poses — with every hit target from
+    /// for a few looks, hats and poses — with every hit target from
     /// `PetPanelLayout` outlined in green on top, so the drawing and the click
-    /// targets can be checked against each other.
+    /// targets can be checked against each other. The panel is always centred
+    /// on the notch, so the rows differ only in what the pet is wearing/doing.
     static func panelSnapshots(directory: String) -> Int32 {
         let geometry = NotchGeometry.detectMain()
         let notch = geometry.notchFrame
@@ -308,11 +309,11 @@ enum PetStoryboard {
         let height: CGFloat = 110
         let scale: CGFloat = 3
         let now = Date()
-        let cases: [(name: String, anchor: PetPanelAnchor?, look: PetLook, hat: PetHatChoice, focusing: Bool, animation: PetAnimationID)] = [
-            ("dock right, fox, seasonal", PetPanelAnchor(edge: notch.maxX + PetLayout.idleDock, side: .right), .fox, .seasonal, false, .hiWave),
-            ("dock left, arctic, party, leaning", PetPanelAnchor(edge: notch.minX - PetLayout.idleDock, side: .left), .arctic, .party, false, .leanLeft),
-            ("wide bar right, silver, witch, focusing, stroked", PetPanelAnchor(edge: notch.maxX + 250, side: .right), .silver, .witch, true, .stroke),
-            ("centred, sand, santa", nil, .sand, .santa, false, .happy),
+        let cases: [(name: String, look: PetLook, hat: PetHatChoice, focusing: Bool, animation: PetAnimationID)] = [
+            ("fox, seasonal, waving", .fox, .seasonal, false, .hiWave),
+            ("arctic, party, leaning", .arctic, .party, false, .leanLeft),
+            ("silver, witch, focusing, stroked", .silver, .witch, true, .stroke),
+            ("sand, santa, happy", .sand, .santa, false, .happy),
         ]
         let rowHeight = Int(height * scale) + 6
         let width = Int(regionWidth * scale)
@@ -322,14 +323,13 @@ enum PetStoryboard {
         context.setFillColor(CGColor(srgbRed: 0.1, green: 0.1, blue: 0.11, alpha: 1))
         context.fill(CGRect(x: 0, y: 0, width: width, height: rowHeight * cases.count))
 
+        let content = IslandContentSize.default
         for (index, item) in cases.enumerated() {
-            var content = IslandContentSize.default
-            content.panelAnchor = item.anchor
             let frame = geometry.frame(for: .skin, content: content)
             let local = CGRect(x: frame.minX - regionMinX, y: regionTop - frame.maxY, width: frame.width, height: frame.height)
             let presentation = PetPresentation(mood: .interaction, animation: item.animation, startedAt: now.addingTimeInterval(-0.2))
-            let contentLeading = PetPanelLayout.contentMinX(in: frame, side: item.anchor?.side, notch: notch) - frame.minX
-            let panel = PetPanelView(presentation: presentation, side: item.anchor?.side, look: item.look,
+            let contentLeading = PetPanelLayout.contentMinX(in: frame) - frame.minX
+            let panel = PetPanelView(presentation: presentation, look: item.look,
                                      hat: item.hat.hat(on: now), hatChoice: item.hat, isFocusing: item.focusing,
                                      contentLeading: contentLeading)
             let view = IslandView(
@@ -349,7 +349,7 @@ enum PetStoryboard {
             context.draw(image, in: CGRect(x: 0, y: rowBottom, width: CGFloat(image.width), height: CGFloat(image.height)))
 
             // Hit targets, converted from screen (AppKit) to this row.
-            let layout = PetPanelLayout.layout(in: frame, notchInset: notch.height, side: item.anchor?.side, notch: notch)
+            let layout = PetPanelLayout.layout(in: frame, notchInset: notch.height)
             // The hardware notch, translucent, over the island.
             let hardware = CGRect(x: (notch.minX - regionMinX) * scale, y: rowBottom + CGFloat(image.height) - notch.height * scale,
                                   width: notch.width * scale, height: notch.height * scale)
@@ -412,10 +412,16 @@ enum PetStoryboard {
         plainContent.wingLead = plainSides.lead
         let plainFrame = geometry.frame(for: .wings, content: plainContent)
         let panelFrame = geometry.frame(for: .appPanel, content: .default)
-        let rows: [(state: IslandState, frame: CGRect, content: IslandContentSize, height: CGFloat, status: WingStatus)] = [
-            (.wings, plainFrame, plainContent, 60, plainStatus),
-            (.wings, wingsFrame, wingsContent, 60, status),
-            (.appPanel, panelFrame, .default, panelFrame.height + 20, status),
+        // The hovered rows show the travelling highlight resting on a segment,
+        // so the drawn hover state can be checked against the hit geometry.
+        let rows: [(state: IslandState, frame: CGRect, content: IslandContentSize, height: CGFloat, status: WingStatus, hovered: IslandControl?)] = [
+            (.wings, plainFrame, plainContent, 60, plainStatus, nil),
+            (.wings, wingsFrame, wingsContent, 60, status, nil),
+            (.wings, wingsFrame, wingsContent, 60, status, .wingBrowser(.back)),
+            (.wings, wingsFrame, wingsContent, 60, status, .wingBrowser(.newTab)),
+            (.appPanel, panelFrame, .default, panelFrame.height + 20, status, nil),
+            (.appPanel, panelFrame, .default, panelFrame.height + 20, status, .appPanel(.browser(.reload))),
+            (.appPanel, panelFrame, .default, panelFrame.height + 20, status, .appPanel(.browser(.selectTab(5)))),
         ]
         let rowHeights = rows.map { Int($0.height * scale) + 6 }
         let width = Int(regionWidth * scale)
@@ -430,12 +436,13 @@ enum PetStoryboard {
         for row in rows {
             let local = CGRect(x: row.frame.minX - regionMinX, y: regionTop - row.frame.maxY, width: row.frame.width, height: row.frame.height)
             let panel: AnyView? = row.state == .appPanel
-                ? AnyView(BrowserPanelView(notchInset: notch.height, appName: appName, iconData: icon, browser: browser))
+                ? AnyView(BrowserPanelView(notchInset: notch.height, appName: appName, iconData: icon,
+                                           browser: browser, hovered: row.hovered))
                 : nil
             let view = IslandView(
                 current: nil, stackCount: 0, state: row.state, localFrame: local, cornerRadius: 10,
                 notchInset: notch.height, isIdle: false, wingStatus: row.status, notchWidth: notch.width, contentSize: row.content,
-                panelContent: panel, surfaceVisible: true, pet: pet, hasNotch: true
+                panelContent: panel, hoveredControl: row.hovered, surfaceVisible: true, pet: pet, hasNotch: true
             )
             .frame(width: regionWidth, height: row.height)
             .background(Color(.sRGB, red: 0.42, green: 0.42, blue: 0.45))

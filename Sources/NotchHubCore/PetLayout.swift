@@ -92,7 +92,7 @@ public enum PetLayout {
     }
 
     /// The pet's placement for an island shape, or `nil` where the pet steps
-    /// aside (utility panels: the Tray, settings, dictation, file drop).
+    /// aside (utility panels: the Tray, settings, the file drop).
     ///
     /// Idle places the pet beside the notch on the dock's side, measured from
     /// the NOTCH edge, so it stays put while its dock grows and shrinks around
@@ -125,7 +125,10 @@ public enum PetLayout {
             return Placement(origin: CGPoint(x: x, y: stripY), scale: 1)
         case .meeting:
             return Placement(origin: CGPoint(x: islandSize.width - MeetingControlLayout.contentInset - artSize, y: stripY), scale: 1)
-        case .tray, .dictation, .settings, .fileDrop, .skin:
+        // Utility surfaces the pet steps aside for: a teleprompter with a fox
+        // in it is a fox in the way, and the camera's picture is the content.
+        case .tray, .settings, .fileDrop, .skin,
+             .teleprompter, .teleprompterCompose, .camera, .cameraExpanded:
             return nil
         }
     }

@@ -4,42 +4,31 @@ import Foundation
 ///
 /// Classified once at capture time so the Tray can filter and search without
 /// re-inspecting a payload it may no longer be able to read.
+///
+/// All three are TEXT. The Tray is clipboard storage and nothing else: it does
+/// not capture images, screenshots or files, so it writes nothing to disk but
+/// the strings you copied and never has a payload it cannot render.
 public enum ClipKind: String, CaseIterable, Codable, Equatable {
     case text
     case link
     case color
-    case image
-    case screenshot
-    case file
 
     public var symbol: String {
         switch self {
         case .text: return "text.alignleft"
         case .link: return "link"
         case .color: return "paintpalette.fill"
-        case .image: return "photo.fill"
-        case .screenshot: return "camera.viewfinder"
-        case .file: return "doc.fill"
         }
     }
 }
 
-/// One entry in the Tray.
-///
-/// Image payloads live on disk and are referenced by path — the Tray holds
-/// sixty of these, so bytes never sit in memory.
+/// One entry in the Tray: a string you copied, and where it came from.
 public struct TrayClip: Identifiable, Equatable, Codable {
     public let id: UUID
     public var kind: ClipKind
     /// The text payload: the string itself for `.text`, the URL for `.link`,
     /// the hex value for `.color`.
     public var text: String?
-    /// On-disk path for `.image` / `.screenshot` payloads.
-    public var imagePath: String?
-    /// Paths for `.file` clips.
-    public var filePaths: [String]
-    /// Text recovered from an image by OCR, when OCR ran.
-    public var ocrText: String?
     /// Pinned clips are never evicted.
     public var pinned: Bool
     public let createdAt: Date
@@ -52,9 +41,6 @@ public struct TrayClip: Identifiable, Equatable, Codable {
         id: UUID = UUID(),
         kind: ClipKind,
         text: String? = nil,
-        imagePath: String? = nil,
-        filePaths: [String] = [],
-        ocrText: String? = nil,
         pinned: Bool = false,
         createdAt: Date = Date(),
         byteSize: Int? = nil,
@@ -63,32 +49,18 @@ public struct TrayClip: Identifiable, Equatable, Codable {
         self.id = id
         self.kind = kind
         self.text = text
-        self.imagePath = imagePath
-        self.filePaths = filePaths
-        self.ocrText = ocrText
         self.pinned = pinned
         self.createdAt = createdAt
         self.byteSize = byteSize
         self.sourceApp = sourceApp
     }
 
-    /// The line the Tray shows. OCR text stands in for images so a screenshot
-    /// is recognisable without being rendered.
+    /// The line the Tray shows.
     public var displayTitle: String {
         switch kind {
-        case .text:
-            return Self.summarize(text) ?? "Text"
-        case .link:
-            return text ?? "Link"
-        case .color:
-            return text ?? "Color"
-        case .image, .screenshot:
-            if let ocr = Self.summarize(ocrText) { return ocr }
-            return kind == .screenshot ? "Screenshot" : "Image"
-        case .file:
-            let names = filePaths.map { ($0 as NSString).lastPathComponent }
-            if names.isEmpty { return "File" }
-            return names.joined(separator: ", ")
+        case .text: return Self.summarize(text) ?? "Text"
+        case .link: return text ?? "Link"
+        case .color: return text ?? "Color"
         }
     }
 
@@ -100,19 +72,14 @@ public struct TrayClip: Identifiable, Equatable, Codable {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    /// Whether this clip's content (or its OCR text) contains `query`.
+    /// Whether this clip's content contains `query`.
     ///
     /// Case- and diacritic-insensitive so "cafe" finds "Café".
     public func matches(_ query: String) -> Bool {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !needle.isEmpty else { return true }
-        let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
-        if let text, text.range(of: needle, options: options) != nil { return true }
-        if let ocrText, ocrText.range(of: needle, options: options) != nil { return true }
-        for path in filePaths where (path as NSString).lastPathComponent.range(of: needle, options: options) != nil {
-            return true
-        }
-        return false
+        guard let text else { return false }
+        return text.range(of: needle, options: [.caseInsensitive, .diacriticInsensitive]) != nil
     }
 
     /// First meaningful line of a blob, collapsed to one line and clipped.
@@ -141,20 +108,14 @@ public enum TrayFilter: String, CaseIterable, Equatable {
     case all
     case texts
     case links
-    case images
-    case screenshots
     case colors
-    case files
 
     public var label: String {
         switch self {
         case .all: return "All"
         case .texts: return "Texts"
         case .links: return "Links"
-        case .images: return "Images"
-        case .screenshots: return "Screenshots"
         case .colors: return "Colors"
-        case .files: return "Files"
         }
     }
 
@@ -163,10 +124,7 @@ public enum TrayFilter: String, CaseIterable, Equatable {
         case .all: return true
         case .texts: return clip.kind == .text
         case .links: return clip.kind == .link
-        case .images: return clip.kind == .image
-        case .screenshots: return clip.kind == .screenshot
         case .colors: return clip.kind == .color
-        case .files: return clip.kind == .file
         }
     }
 }
@@ -202,11 +160,6 @@ public final class TrayStore {
     public func setPinned(id: UUID, pinned: Bool) {
         guard let index = clips.firstIndex(where: { $0.id == id }) else { return }
         clips[index].pinned = pinned
-    }
-
-    public func setOCRText(id: UUID, text: String) {
-        guard let index = clips.firstIndex(where: { $0.id == id }) else { return }
-        clips[index].ocrText = text
     }
 
     public func remove(id: UUID) {
@@ -246,14 +199,7 @@ public final class TrayStore {
 
     private func sameCopy(_ lhs: TrayClip, _ rhs: TrayClip) -> Bool {
         guard lhs.kind == rhs.kind else { return false }
-        switch rhs.kind {
-        case .image, .screenshot:
-            return lhs.imagePath != nil && lhs.imagePath == rhs.imagePath
-        case .file:
-            return !rhs.filePaths.isEmpty && lhs.filePaths == rhs.filePaths
-        default:
-            return lhs.text != nil && lhs.text == rhs.text
-        }
+        return lhs.text != nil && lhs.text == rhs.text
     }
 
     /// Drops the oldest unpinned clips past `capacity`. Pinned clips are free.

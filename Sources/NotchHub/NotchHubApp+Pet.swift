@@ -330,8 +330,7 @@ extension NotchHubApp {
     /// purrs while the cursor strokes it back and forth.
     func panelPetMouseMoved(_ point: NSPoint) {
         let frame = window.localFrame(for: .skin, content: islandModel.contentSize)
-        let notch = window.localFrame(for: .idle, content: .default)
-        let rect = PetPanelLayout.layout(in: frame, notchInset: window.notchHeight, side: petPanelAnchor?.side, notch: notch).pet
+        let rect = PetPanelLayout.layout(in: frame, notchInset: window.notchHeight).pet
         let over = rect.insetBy(dx: -3, dy: -3).contains(point)
         let side: PetContext.Side? = over ? (point.x < rect.midX ? .left : .right) : nil
         let now = Date()
@@ -358,8 +357,7 @@ extension NotchHubApp {
         guard petVisible else { return false }
         if panel == .pet {
             let frame = window.localFrame(for: .skin, content: islandModel.contentSize)
-            let notch = window.localFrame(for: .idle, content: .default)
-            guard let hit = PetPanelLayout.hit(at: point, in: frame, notchInset: window.notchHeight, side: petPanelAnchor?.side, notch: notch) else {
+            guard let hit = PetPanelLayout.hit(at: point, in: frame, notchInset: window.notchHeight) else {
                 return false
             }
             switch hit {
@@ -388,14 +386,13 @@ extension NotchHubApp {
     }
 
     func openPetPanel() {
-        // Hang the panel from the island edge beside the pet, so the cursor
-        // starts inside it — on whichever side of the notch the pet is. The
-        // machine is left alone: the panel outranks it, and on close the island
-        // returns to exactly the shape it had.
+        // The panel is centred on the notch, like every other panel, so it
+        // grows symmetrically out of whatever shape the island was in rather
+        // than lurching toward the pet's side. The machine is left alone: the
+        // panel outranks it, and on close the island returns to exactly the
+        // shape it had.
         let state = currentIslandState()
-        let island = window.localFrame(for: state, content: islandModel.contentSize)
-        let side: PetSide = state == .idle ? (islandModel.contentSize.petDock ?? .home).side : .right
-        petPanelAnchor = PetPanelAnchor(edge: window.frame.minX + (side == .right ? island.maxX : island.minX), side: side)
+        releaseCurrentPanel(except: .pet)
         panel = .pet
         petBrain.handle(.petClicked, context: petContext(), now: Date())
         renderIsland()
@@ -409,7 +406,6 @@ extension NotchHubApp {
     func closePetPanel() {
         guard panel == .pet else { return }
         panel = .none
-        petPanelAnchor = nil
         petStroke.reset()
         renderIsland()
     }

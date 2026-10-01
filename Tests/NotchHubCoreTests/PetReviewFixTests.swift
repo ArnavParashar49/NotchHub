@@ -112,27 +112,46 @@ struct PetReviewFixTests {
         #expect(buttons.last!.rect.maxX <= frame.maxX - 16 - PetLayout.barSlot)
     }
 
-    @Test("the pet panel hangs from the pet's edge and stays joined to the notch")
-    func anchoredPanel() {
+    @Test("the pet panel is centred on the notch, whichever side the pet was clicked on")
+    func centredPanel() {
         let g = NotchGeometry.make(
             screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982),
             safeAreaInsets: NSEdgeInsets(top: 32, left: 0, bottom: 0, right: 0),
             auxiliaryLeft: CGRect(x: 0, y: 950, width: 663.5, height: 32),
             auxiliaryRight: CGRect(x: 848.5, y: 950, width: 663.5, height: 32)
         )
-        #expect(g.petPanelFrame(anchor: nil) == g.skinFrame)
-        for edge in [g.notchFrame.maxX + PetLayout.idleDock, g.notchFrame.maxX + 250] {
-            let panel = g.petPanelFrame(anchor: PetPanelAnchor(edge: edge, side: .right))
-            #expect(panel.maxX == edge)
-            #expect(panel.minX <= g.notchFrame.minX)
-            #expect(panel.width >= g.skinFrame.width)
-            #expect(g.envelopeFrame.contains(panel))
+        let panel = g.petPanelFrame
+        #expect(panel == g.skinFrame)
+        // Centred on the notch, and hung from it — so opening it out of a
+        // compact bar (which is also centred on the notch) is a symmetric
+        // stretch rather than a sideways lurch.
+        #expect(abs(panel.midX - g.notchFrame.midX) < 0.5)
+        #expect(panel.maxY == g.notchFrame.maxY)
+        #expect(panel.minX <= g.notchFrame.minX)
+        #expect(panel.maxX >= g.notchFrame.maxX)
+        #expect(g.envelopeFrame.contains(panel))
+        // The big pet still clears the cutout, so its hat is never cut off.
+        let layout = PetPanelLayout.layout(in: panel, notchInset: 32)
+        #expect(layout.pet.maxX <= g.notchFrame.minX)
+    }
+
+    @Test("every panel is centred on the notch even when the display is not at the origin")
+    func panelsFollowTheNotchOffOrigin() {
+        // A MacBook driven to the RIGHT of an external primary display: its
+        // frame starts at x = 1920, so a panel centred on the screen's own
+        // width would land on the other display entirely.
+        let screen = CGRect(x: 1920, y: 0, width: 1512, height: 982)
+        let g = NotchGeometry.make(
+            screenFrame: screen,
+            safeAreaInsets: NSEdgeInsets(top: 32, left: 0, bottom: 0, right: 0),
+            auxiliaryLeft: CGRect(x: screen.minX, y: 950, width: 663.5, height: 32),
+            auxiliaryRight: CGRect(x: screen.minX + 848.5, y: 950, width: 663.5, height: 32)
+        )
+        for frame in [g.trayFrame, g.skinFrame, g.settingsFrame, g.teleprompterFrame,
+                      g.meetingFrame, g.fileDropFrame, g.appPanelFrame, g.petPanelFrame] {
+            #expect(abs(frame.midX - g.notchFrame.midX) < 0.5)
+            #expect(frame.maxY == g.notchFrame.maxY)
+            #expect(g.envelopeFrame.contains(frame))
         }
-        let left = g.petPanelFrame(anchor: PetPanelAnchor(edge: g.notchFrame.minX - PetLayout.idleDock, side: .left))
-        #expect(left.minX <= g.notchFrame.minX - PetLayout.idleDock)
-        #expect(left.minX + PetPanelLayout.horizontalInset + PetPanelLayout.petSize <= g.notchFrame.minX)
-        #expect(left.maxX >= g.notchFrame.maxX)
-        #expect(left.width >= g.skinFrame.width)
-        #expect(g.envelopeFrame.contains(left))
     }
 }

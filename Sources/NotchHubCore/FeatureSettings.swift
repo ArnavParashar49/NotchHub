@@ -20,12 +20,17 @@ public enum Feature: String, CaseIterable, Codable {
     case focus
     case weather
     case clipboard
-    case dictation
     case fileSharing
     case privacy
     case codingAgent
     /// Details about the frontmost app: browser tabs, agent sessions, window titles.
     case appDetails
+    /// A script that scrolls itself past the notch while you read.
+    case teleprompter
+    /// A live camera preview in the notch.
+    case camera
+    /// Hide the island from screen sharing and recordings.
+    case ghostMode
 }
 
 /// Which features are currently enabled, persisted to `UserDefaults`.
@@ -37,9 +42,11 @@ public struct FeatureSettings: Codable, Equatable {
         self.enabled = enabled
     }
 
-    /// Everything on except weather, which needs a configured city and network.
+    /// Everything on except weather, which needs a configured city and network,
+    /// and Ghost Mode, which HIDES things — a feature that makes the island
+    /// invisible has to be asked for, never arrive switched on.
     public static var defaultEnabled: Set<Feature> {
-        Set(Feature.allCases).subtracting([.weather])
+        Set(Feature.allCases).subtracting([.weather, .ghostMode])
     }
 
     public func isEnabled(_ feature: Feature) -> Bool {
@@ -64,12 +71,27 @@ public struct FeatureSettings: Codable, Equatable {
     /// Features that existed before settings recorded which features they
     /// knew about. A feature added since is switched on by default for an
     /// existing install, instead of reading as "turned off".
-    static let originalFeatures: Set<Feature> = Set(Feature.allCases).subtracting([.appDetails])
+    static let originalFeatures: Set<Feature> = Set(Feature.allCases)
+        .subtracting([.appDetails, .teleprompter, .camera, .ghostMode])
 
+    /// Decoded through RAW STRINGS, dropping any name this build no longer has.
+    ///
+    /// Decoding straight into `Set<Feature>` throws on the first unrecognised
+    /// name, and `load()` answers a throw by falling back to the defaults — so
+    /// removing a single feature from the app would silently reset every
+    /// setting the user had ever chosen, on their next launch, with no way to
+    /// get them back. A name this build does not know is simply not a feature
+    /// any more; it is dropped and everything else is kept.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        var enabled = try container.decode(Set<Feature>.self, forKey: .enabled)
-        let known = try container.decodeIfPresent(Set<Feature>.self, forKey: .known) ?? Self.originalFeatures
+        let storedEnabled = try container.decode(Set<String>.self, forKey: .enabled)
+        var enabled = Set(storedEnabled.compactMap(Feature.init(rawValue:)))
+
+        let storedKnown = try container.decodeIfPresent(Set<String>.self, forKey: .known)
+        let known = storedKnown.map { Set($0.compactMap(Feature.init(rawValue:))) } ?? Self.originalFeatures
+
+        // A feature added since these settings were written is switched on by
+        // default rather than reading as "turned off".
         for feature in Feature.allCases where !known.contains(feature) && Self.defaultEnabled.contains(feature) {
             enabled.insert(feature)
         }

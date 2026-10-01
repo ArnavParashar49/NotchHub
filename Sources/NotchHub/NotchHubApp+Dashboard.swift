@@ -33,8 +33,10 @@ extension NotchHubApp {
                 isCameraActive: isCameraActive,
                 timerElapsed: timerService.isStopwatchRunning ? timerElapsed : nil,
                 timerEnabled: featureSettings.isEnabled(.timers),
-                isDictating: dictationSession.isActive,
-                dictationEnabled: featureSettings.isEnabled(.dictation),
+                isTeleprompting: panel == .teleprompter,
+                teleprompterEnabled: featureSettings.isEnabled(.teleprompter),
+                isCameraPreviewing: panel == .camera,
+                cameraEnabled: featureSettings.isEnabled(.camera),
                 trayCount: trayStore.clips.count
             )
         )
@@ -72,9 +74,12 @@ extension NotchHubApp {
         case .tray:
             closeDashboard()
             toggleTray()
-        case .dictation:
+        case .teleprompter:
             closeDashboard()
-            toggleDictation()
+            toggleTeleprompter()
+        case .camera:
+            closeDashboard()
+            toggleCamera()
         case .join:
             closeDashboard()
             if let url = nextEvent?.joinURL {

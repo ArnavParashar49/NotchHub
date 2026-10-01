@@ -21,6 +21,18 @@ struct WingView: View {
     var trailingReserve: CGFloat = 0
     /// The left wing's width; `nil` splits the bar evenly.
     var leadWidth: CGFloat? = nil
+    /// The control the cursor is resting on, resolved by the coordinator against
+    /// `WingControlLayout` — the same geometry the window hit-tests with.
+    var hovered: IslandControl? = nil
+
+    /// The browser button under the cursor, if the cursor is on one.
+    private var hoveredBrowserAction: BrowserAction? {
+        guard case let .wingBrowser(action)? = hovered else { return nil }
+        return action
+    }
+
+    /// The namespace the travelling hover highlight lives in.
+    @Namespace private var hoverHighlight
 
     var body: some View {
         HStack(spacing: 0) {
@@ -89,21 +101,57 @@ struct WingView: View {
 
     /// Back, forward, new tab — one capsule at the trailing edge, where
     /// `WingControlLayout` hit-tests each segment.
+    ///
+    /// The cluster is deliberately quiet until the cursor is in it. Then a
+    /// single highlight TRAVELS to the segment under the pointer (one
+    /// `matchedGeometryEffect`, so it slides between segments instead of two
+    /// pills cross-fading), that segment's glyph lifts from secondary to full
+    /// white and grows a little, and the cluster's hairline brightens. That is
+    /// the same thing a macOS segmented control does, and it is what makes the
+    /// buttons read as pressable rather than as decoration.
     private var browserControls: some View {
         HStack(spacing: 0) {
             Spacer(minLength: 0)
             HStack(spacing: WingControlLayout.spacing) {
                 ForEach(Array(WingControlLayout.controls.enumerated()), id: \.offset) { _, action in
-                    Image(systemName: Self.symbol(for: action))
-                        .font(.system(size: 9.5, weight: .bold))
-                        .foregroundStyle(DesignTokens.textPrimary)
-                        .frame(width: WingControlLayout.buttonSize, height: WingControlLayout.buttonSize)
+                    browserButton(action)
                 }
             }
             .background(Capsule().fill(DesignTokens.controlClusterFill))
-            .overlay(Capsule().strokeBorder(DesignTokens.controlClusterStroke, lineWidth: 0.5))
+            .overlay(
+                Capsule().strokeBorder(
+                    hoveredBrowserAction == nil
+                        ? DesignTokens.controlClusterStroke
+                        : DesignTokens.controlClusterStrokeActive,
+                    lineWidth: 0.5
+                )
+            )
+            // ONE animation for the whole cluster: the highlight's matched
+            // geometry only interpolates when the insertion and the removal
+            // happen in the same animated transaction, which a per-segment
+            // animation cannot give it.
+            .animation(DesignTokens.springHover, value: hoveredBrowserAction)
         }
         .padding(.trailing, DesignTokens.wingInset + trailingReserve)
+    }
+
+    private func browserButton(_ action: BrowserAction) -> some View {
+        let isHovered = hoveredBrowserAction == action
+        return Image(systemName: Self.symbol(for: action))
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(isHovered ? DesignTokens.textPrimary : DesignTokens.controlGlyphIdle)
+            .scaleEffect(isHovered ? DesignTokens.hoverScale : 1)
+            .frame(width: WingControlLayout.buttonSize, height: WingControlLayout.buttonSize)
+            .background {
+                // Exactly one segment carries the highlight at a time, so the
+                // matched geometry has a single source and the pill SLIDES from
+                // the segment being left to the one being entered.
+                if isHovered {
+                    Capsule()
+                        .fill(DesignTokens.hoverHighlight)
+                        .matchedGeometryEffect(id: "wing-browser-hover", in: hoverHighlight)
+                }
+            }
     }
 
     private func agentReadout(tokens: String, isWorking: Bool) -> some View {

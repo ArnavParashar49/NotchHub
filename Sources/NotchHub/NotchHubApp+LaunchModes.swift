@@ -7,11 +7,37 @@ import SwiftUI
 /// surface on screen at a time.
 extension NotchHubApp {
 
+    /// A script for `--teleprompter` with no `--script` of its own.
+    static let sampleScript = """
+    Good morning everyone, and thanks for making the time.
+
+    I want to walk through three things today: where the release stands, what \
+    changed since last week, and what we still need a decision on.
+
+    First, the release. We closed the last two blocking bugs on Tuesday, and \
+    the build has been green since.
+
+    Second, what changed. The hover strip now lights the control under your \
+    cursor, a closed media tab clears the island at once, and the pet's panel \
+    opens centred on the notch.
+
+    Third, the decision. We can ship on Thursday, or hold a week and take the \
+    camera work with it. I would like a view before we finish today.
+    """
+
     /// Reads the launch flags and starts the matching mode. A normal launch
     /// only starts the monitor: the island stays invisible until something
     /// real happens.
     func startLaunchMode() {
         let arguments = CommandLine.arguments
+
+        // `--no-ghost`: make the island visible to screen capture for this run
+        // only, so an inspection screenshot can actually see it. In memory and
+        // deliberately NOT saved — it must never change what the user chose.
+        if arguments.contains("--no-ghost") {
+            featureSettings.setEnabled(.ghostMode, enabled: false)
+            log("ghost: disabled for this run only (--no-ghost)")
+        }
 
         if let index = arguments.firstIndex(of: "--art"), index + 1 < arguments.count {
             let path = arguments[index + 1]
@@ -66,8 +92,48 @@ extension NotchHubApp {
         } else if arguments.contains("--timer") {
             startMonitor()
             after(0.6) { $0.toggleTimer() }
-        } else {
+        } else if arguments.contains("--teleprompter") {
+            // Opens the prompter for inspection. `--script PATH` loads a file;
+            // otherwise a sample is seeded so it has something to scroll.
             startMonitor()
+            let path = arguments.firstIndex(of: "--script").flatMap { index in
+                index + 1 < arguments.count ? arguments[index + 1] : nil
+            }
+            let play = arguments.contains("--play")
+            after(0.6) { app in
+                if let path {
+                    app.teleprompter.load(Self.readScript(at: URL(fileURLWithPath: path)) ?? "")
+                } else {
+                    app.teleprompter.load(Self.sampleScript)
+                }
+                app.toggleTeleprompter()
+                if play { app.startTeleprompter() }
+            }
+        } else if arguments.contains("--camera-cycle") {
+            // Opens the camera, then closes it again, printing the phase at each
+            // step. The point is the CLOSE: macOS's own green in-use indicator
+            // must go out, which is the only real proof the session was released
+            // rather than merely hidden.
+            startMonitor()
+            after(0.6) { app in
+                app.toggleCamera()
+                app.log("camera-cycle: opened")
+            }
+            after(4.0) { app in
+                app.log("camera-cycle: before close — phase=\(app.cameraState.phase) running=\(app.camera.isRunning)")
+                app.closeCamera()
+            }
+            after(7.0) { app in
+                app.log("camera-cycle: after close — phase=\(app.cameraState.phase) running=\(app.camera.isRunning) panel=\(app.panel == .none ? "none" : "open")")
+            }
+        } else if arguments.contains("--camera") {
+            startMonitor()
+            after(0.6) { $0.toggleCamera() }
+        } else {
+            // Once launch has finished, so the app is up and answering the
+            // system before any listener reaches for files, scripts or
+            // permissions.
+            after(0.2) { $0.startMonitor() }
         }
     }
 

@@ -29,6 +29,13 @@ wrapper). Three layers, strictly separated:
   - `IslandStateMachine` — idle / wings / compact / expanded / interactive
   - `MeetingDetector` · `MeetingControlLayout` — call detection and the
     call-control hit layout
+  - `TeleprompterState` · `TeleprompterLayout` — clock-derived scrolling and
+    the reading controls
+  - `CameraState` · `CameraLayout` — the preview's state machine and controls
+  - `GhostMode` — which surfaces are hidden from screen capture, and why
+  - `BrowserMedia` — normalising a media tab's title, and telling "no media
+    tab" apart from "could not ask"
+  - `TrayClip` / `TrayStore` — the clipboard history (text only)
   - `ClipboardPrivacy` — which copies never enter the Tray
   - `Spring` / `SpringAnimator` — damped spring physics + presets
   - `DesignTokens` — the design system
@@ -38,6 +45,9 @@ wrapper). Three layers, strictly separated:
   - Listeners for battery, volume, brightness, now-playing, downloads,
     clipboard, meetings, privacy, Bluetooth, calendar, weather, focus,
     notifications, coding agents, Wi-Fi and the frontmost app
+  - `CameraController` — the camera. `@MainActor`, and its own `phase` is the
+    only truth about whether the hardware is on, so nothing can infer it from
+    a panel being open
   - `ActivityBridge` — the **only** place events become island instructions
     (present, transient, update in place, remove, refresh)
 - **NotchHub** — the app (reads activity state only):
@@ -64,13 +74,48 @@ Use `scripts/test.sh` rather than a bare `swift test`: with only the Command
 Line Tools installed, SwiftPM does not find swift-testing on its own, and the
 script passes the framework paths it needs.
 
+## The Tray
+
+Clipboard storage and nothing else. It keeps the last 60 things you copied **as
+text** — plain text, links and colours — with search, pinning and delete. ⌥⌘V,
+or the dashboard's tray chip.
+
+It does not capture images, screenshots or files. Nothing is written to disk but
+the strings themselves (`~/Library/Application Support/NotchHub/tray.json`, mode
+`0600`), so the Tray can never leave an orphaned file behind or show an entry
+whose payload has gone. Copies marked concealed by a password manager are never
+recorded at all.
+
+## Ghost Mode
+
+**⌥⌘G**, the right-click menu, or the Settings tile. It sets the island's window
+to `NSWindow.sharingType = .none`, which takes it out of **every** capture path
+macOS has — screen sharing in a call, QuickTime and Screenshot recordings,
+⇧⌘3/4/5, and anything built on ScreenCaptureKit — while leaving it on the
+physical display. The OS does the hiding, so there is no frame in which the
+island can leak into a recording. Note that this also applies to screenshots
+*you* take.
+
+It is off by default: a feature that makes the app invisible has to be asked
+for. While it is on, the hover strip shows a small "Hidden" glyph — itself
+hidden from capture, so it reminds you without appearing in the share.
+
+**The teleprompter and the camera preview are hidden whether or not Ghost Mode
+is on.** A script the room can read is not a teleprompter, and a picture of your
+own face inside the screen you are sharing is never what you meant — neither
+should depend on having remembered to arm anything before the call started.
+Every other surface follows the setting.
+
 ## Permissions
 
 - **Automation** — reading the track from Spotify, and the page and tabs of
   the frontmost browser.
 - **Accessibility** — the call controls and browser back / forward / new tab
-  send the app's own keyboard shortcuts, and window titles are read through
-  it; macOS prompts the first time a control is used.
+  send the app's own keyboard shortcuts, and window titles are read through it;
+  macOS prompts the first time a control is used.
+- **Camera** — the preview only. The session carries a preview layer and no
+  frame output, so there is nothing in the path that could record, and closing
+  the preview tears the session down rather than pausing it.
 
 ## Run
 
@@ -87,16 +132,27 @@ script passes the framework paths it needs.
 
 The app is an accessory (`LSUIElement`) — no dock icon and no menu-bar item.
 Everything lives in the notch: ⌥⌘, opens Settings (which has **Quit NotchHub**),
-⌥⌘V the Tray, ⌥⌘M dictation and ⌥⌘T the timer.
+⌥⌘V the Tray, ⌥⌘T the timer, ⌥⌘P the teleprompter, ⌥⌘C the camera and ⌥⌘G
+Ghost Mode. The teleprompter and the camera are also in the right-click menu and on
+the dashboard's quick-action bar.
+
+Inspection modes that hold one surface open on screen: `--wings`, `--tray`,
+`--settings`, `--timer`, `--teleprompter [--script PATH] [--play]`, `--camera`.
+`--camera-cycle` walks the camera through open → close so macOS's own in-use
+indicator can be watched going out; `--ghost-cycle` and `--teleprompter-ghost`
+do the same for Ghost Mode, with a screen capture taken either side.
 
 ## Status
 
 Implemented: notch detection and the floating window; the spring-driven
 idle / wings / compact / expanded / interactive states; the activity model and
 multi-activity queue; and the system-listener layer feeding the island from
-native sources. On top of that: the clipboard Tray (with OCR and pinning),
-on-device dictation, live-call controls, file drop to AirDrop, weather, focus,
-a click dashboard (time, weather, next event with Join, quick actions), details
+native sources. On top of that: the clipboard Tray,
+live-call controls, file drop to AirDrop, weather, focus,
+a click dashboard (time, weather, next event with Join, quick actions), a
+teleprompter that scrolls a pasted or opened script past the notch at an
+adjustable pace, a mini camera preview for the moment before a call (hidden from screen
+sharing), Ghost Mode, details
 about the frontmost app (a browser's page and tabs with navigation, the focused
 window's title, and Claude Code / Codex / Foxora Studio session tracking —
 model, working state, tokens, turns, context and Codex plan limits), a pixel-art

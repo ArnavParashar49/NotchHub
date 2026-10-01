@@ -225,7 +225,7 @@ struct PetLayoutTests {
         #expect(p.scale == 2)
         #expect(p.origin.y >= 32)
         #expect(p.origin.y + p.size <= 88)
-        for state in [IslandState.tray, .settings, .dictation, .fileDrop] {
+        for state in [IslandState.tray, .settings, .teleprompter, .fileDrop] {
             #expect(PetLayout.placement(for: state, islandSize: CGSize(width: 400, height: 400), notchHeight: 32) == nil)
         }
     }
