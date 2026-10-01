@@ -110,6 +110,9 @@ extension NotchHubApp {
         guard panel == .neo, let host = neoWeb else { return }
         window.needsInteraction = true
         window.makeFirstResponder(host.webView)
+        // The page puts the keys in its input (`neo://show`: NEO's page
+        // expands as it does in its own window, without a wake).
+        host.emit("neo://show")
     }
 
     // MARK: - From the island

@@ -173,8 +173,9 @@ screen) on the island's black with no card of its own.
   the panel's strip close it at once; closed while NEO was busy it stays closed for the rest
   of that turn.
 - Clicks on the panel reach the page without the island being key; the first
-  click into it (or on the lane) makes the window key so typing lands in
-  NEO's input — NEO starting to talk never steals what you are typing.
+  click into it (or the click on the island that opened it) makes the window
+  key and tells the page (`neo://show`) so typing lands in NEO's input — NEO
+  starting to talk never steals what you are typing.
 - It is never shown to screen capture, as NEO's own window is not
   (`GhostMode.alwaysPrivate`), and Ghost Mode hides the lane with the rest.
 - Whenever it connects, NotchHub tells the core `ui_host: notch`, so NEO.app
