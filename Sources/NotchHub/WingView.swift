@@ -21,6 +21,9 @@ struct WingView: View {
     var trailingReserve: CGFloat = 0
     /// The left wing's width; `nil` splits the bar evenly.
     var leadWidth: CGFloat? = nil
+    /// Room at the outer end of the left wing that is not the wing's (NEO's
+    /// lane): its content starts past it.
+    var leadInset: CGFloat = 0
     /// The control the cursor is resting on, resolved by the coordinator against
     /// `WingControlLayout` — the same geometry the window hit-tests with.
     var hovered: IslandControl? = nil
@@ -69,7 +72,7 @@ struct WingView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.leading, DesignTokens.wingInset)
+        .padding(.leading, DesignTokens.wingInset + leadInset)
     }
 
     // MARK: - Right

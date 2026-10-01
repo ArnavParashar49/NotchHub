@@ -391,28 +391,56 @@ struct NeoLaneLayoutTests {
         #expect(g.frame(for: .interactive, content: content) == g.interactiveFrame)
     }
 
-    @Test("the notch's place is measured in the envelope the window is sized to, not the frame it is born with")
-    func notchLeadingX() {
+    @Test("the lane is the island's own left edge, in every shape: it rides the island's changes")
+    func laneRidesTheIsland() {
         let g = geometry()
-        // The window is created at the compact frame and sized once, later,
-        // to the envelope (with NotchWindow's 24 pt margin). The lane hangs
-        // from the notch's left edge in WINDOW coordinates, so the two give
-        // very different answers — and the first put the lane left of the
-        // island, where its mask hid it entirely.
-        let envelope = g.envelopeFrame.insetBy(dx: -24, dy: -24)
-        let inEnvelope = g.notchLeadingX(inWindow: envelope)
-        let inCompact = g.notchLeadingX(inWindow: g.compactFrame)
-        #expect(abs(inEnvelope - (g.notchFrame.minX - envelope.minX)) < 0.001)
-        #expect(inEnvelope > inCompact + 100)
-
+        let notchHeight = g.notchFrame.height
         var content = IslandContentSize.default
-        content.neoLead = NeoLaneLayout.width(notchHeight: g.notchFrame.height)
-        let islandMinX = g.frame(for: .idle, content: content).minX - envelope.minX
-        // Measured in the envelope, the lane ends at the notch and starts at
-        // the island's own left edge, which grew for it…
-        #expect(abs((inEnvelope - content.neoLead) - islandMinX) < 0.001)
-        // …measured against the compact frame it would lie wholly outside.
-        #expect(inCompact < islandMinX)
+        content.neoLead = NeoLaneLayout.width(notchHeight: notchHeight)
+        // Idle: the island is the notch plus the lane, so the lane ends at the
+        // notch's edge.
+        let idle = g.frame(for: .idle, content: content)
+        let idleLane = NeoLaneLayout.rect(in: idle, width: content.neoLead, notchHeight: notchHeight)
+        #expect(idleLane.minX == idle.minX && idleLane.maxX == g.notchFrame.minX)
+        #expect(idleLane.maxY == idle.maxY && idleLane.height == notchHeight)
+        // A bar growing for an activity carries the lane out with its left
+        // edge: the orb moves with the shape, and the content has the room
+        // between the orb and the notch.
+        content.compactLead = 90
+        let compact = g.frame(for: .compact, content: content)
+        let compactLane = NeoLaneLayout.rect(in: compact, width: content.neoLead, notchHeight: notchHeight)
+        #expect(compactLane.minX == compact.minX && compactLane.minX < idleLane.minX)
+        #expect(g.notchFrame.minX - compactLane.maxX == 90)
+        // The wings and the expanded island likewise: wherever the left edge
+        // goes, the lane is there, in the notch strip.
+        content.wingLead = 120
+        let wings = g.frame(for: .wings, content: content)
+        #expect(NeoLaneLayout.rect(in: wings, width: content.neoLead, notchHeight: notchHeight).minX == wings.minX)
+        let expanded = g.frame(for: .expanded, content: content)
+        let expandedLane = NeoLaneLayout.rect(in: expanded, width: content.neoLead, notchHeight: notchHeight)
+        #expect(expandedLane.minX == expanded.minX && expandedLane.maxY == expanded.maxY && expandedLane.minX < compactLane.minX)
+    }
+
+    @Test("with NEO active a click anywhere on the island opens the chat; tucked in, clicks are the island's")
+    func clicks() {
+        let lane = CGRect(x: 100, y: 500, width: 44, height: 32)
+        let onLane = CGPoint(x: 120, y: 510)
+        let elsewhere = CGPoint(x: 400, y: 510)
+        let below = CGPoint(x: 300, y: 200)
+        // NEO active, panel closed: anywhere opens.
+        for point in [onLane, elsewhere, below] {
+            #expect(NeoIslandClick.outcome(laneShown: true, panelOpen: false, otherPanel: false, point: point, laneRect: lane) == .open)
+        }
+        // NEO idle (no lane): the island keeps its own clicks.
+        for point in [onLane, elsewhere] {
+            #expect(NeoIslandClick.outcome(laneShown: false, panelOpen: false, otherPanel: false, point: point, laneRect: CGRect(x: 100, y: 500, width: 0, height: 32)) == .none)
+        }
+        // Another surface (settings, the Tray, the pet) keeps its controls.
+        #expect(NeoIslandClick.outcome(laneShown: true, panelOpen: false, otherPanel: true, point: elsewhere, laneRect: lane) == .none)
+        // Panel open: only the lane closes it; the rest is the page's.
+        #expect(NeoIslandClick.outcome(laneShown: true, panelOpen: true, otherPanel: false, point: onLane, laneRect: lane) == .close)
+        #expect(NeoIslandClick.outcome(laneShown: true, panelOpen: true, otherPanel: false, point: elsewhere, laneRect: lane) == .none)
+        #expect(NeoIslandClick.outcome(laneShown: false, panelOpen: true, otherPanel: false, point: below, laneRect: lane) == .none)
     }
 
     @Test("the lane's motion is the island's own: a peek out, a collapse back")

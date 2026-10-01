@@ -176,11 +176,15 @@ public struct NeoLaneModel: Equatable, Sendable {
 
 /// Where the orb goes, and how wide the lane is.
 ///
-/// The lane lives in the notch-height strip immediately LEFT of the notch:
-/// `[inset][orb][inset][notch]` — the orb and nothing else, no words. Its
-/// width is the orb plus a little padding on either side (the notch's height
-/// plus 12 pt), the same in every state and every island shape, so nothing
-/// else ever grows for it.
+/// The lane is the notch-height strip at the island's own LEFT EDGE:
+/// `[inset][orb][inset]`, then whatever the shape holds, then the notch —
+/// the orb and nothing else, no words. Its width is the orb plus a little
+/// padding on either side (the notch's height plus 12 pt), the same in every
+/// state and every island shape. The bars grow their left side by it, so
+/// their content sits between the orb and the notch; and because the orb is
+/// glued to the island's edge, it RIDES every change of shape — a volume
+/// readout growing the bar, the wings, the expanded song — on the island's
+/// own spring, instead of standing still while the island moves around it.
 public enum NeoLaneLayout {
     /// From the lane's outer edge to the orb.
     public static let outerInset: CGFloat = 8
@@ -200,6 +204,12 @@ public enum NeoLaneLayout {
         outerInset + orbSize(notchHeight: notchHeight) + innerInset
     }
 
+    /// The lane's rectangle on an island of `island` (AppKit coordinates,
+    /// origin bottom-left): the notch strip at the island's left edge.
+    public static func rect(in island: CGRect, width: CGFloat, notchHeight: CGFloat) -> CGRect {
+        CGRect(x: island.minX, y: island.maxY - notchHeight, width: width, height: notchHeight)
+    }
+
     /// The lane as it fits a FIXED surface (a panel, the expanded island),
     /// which does not grow for it: the room between the surface's left edge
     /// and the notch, less a hair. Every such surface is wider than the
@@ -208,5 +218,34 @@ public enum NeoLaneLayout {
     public static func fitted(width: CGFloat, surfaceWidth: CGFloat, notchWidth: CGFloat) -> CGFloat {
         let room = ((surfaceWidth - notchWidth) / 2 - 2).rounded(.down)
         return max(0, min(width, room))
+    }
+}
+
+/// What a click on the island does for NEO.
+///
+/// While NEO is active — its orb out of the notch — the island IS NEO's
+/// door: a click anywhere on it (not only on the orb) opens the chat. With
+/// NEO tucked in, clicks keep the island's own meaning (the dashboard, the
+/// song, the call controls). With the panel open, a click on the lane in
+/// its strip closes it; the rest of the panel is the page's.
+public enum NeoIslandClick {
+    public enum Outcome: Equatable, Sendable {
+        case open
+        case close
+        case none
+    }
+
+    /// - Parameters:
+    ///   - laneShown: whether NEO's orb is out (`IslandContentSize.neoLead > 0`).
+    ///   - panelOpen: whether NEO's panel has the island.
+    ///   - otherPanel: whether another surface (settings, the Tray, the pet…)
+    ///     has the island — its controls keep their clicks.
+    ///   - point: the click, in the same coordinates as `laneRect`.
+    public static func outcome(laneShown: Bool, panelOpen: Bool, otherPanel: Bool, point: CGPoint, laneRect: CGRect) -> Outcome {
+        if panelOpen {
+            return laneRect.contains(point) ? .close : .none
+        }
+        guard laneShown, !otherPanel else { return .none }
+        return .open
     }
 }

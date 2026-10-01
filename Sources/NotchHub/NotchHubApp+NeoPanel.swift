@@ -122,27 +122,36 @@ extension NotchHubApp {
         scheduleNeoWake(neoNextWake(at: now))
     }
 
-    /// A click on the lane (the orb and its line) toggles the panel; a click
-    /// on the open panel's notch strip beside it does the same. Returns
-    /// whether the click was the lane's.
-    func neoLaneControlHit(at point: NSPoint) -> Bool {
+    /// While NEO is active (its orb out of the notch) a click ANYWHERE on
+    /// the island opens NEO's chat — the island is NEO's door, not only the
+    /// orb; with NEO tucked in, clicks keep the island's own meaning. With
+    /// the panel open, a click on the lane in its strip closes it (the rest
+    /// of the panel is the page's). See `NeoIslandClick`. Returns whether
+    /// the click was NEO's.
+    func neoIslandClickHit(at point: NSPoint) -> Bool {
         guard featureSettings.isEnabled(.neo), hasNeoUI else { return false }
-        guard let rect = neoLaneRect(), rect.contains(point) else { return false }
-        let now = Date()
-        neoPanel.toggle(at: now)
-        applyNeoPanel()
-        if neoPanel.isOpen { neoEngageKeyboard() }
-        scheduleNeoWake(neoNextWake(at: now))
-        log("neo: lane clicked → \(neoPanel.isOpen ? "open" : "closed")")
-        return true
-    }
-
-    /// The lane's rectangle in window coordinates, while it shows.
-    func neoLaneRect() -> CGRect? {
         let content = islandModel.contentSize
-        guard content.neoLead > 0 else { return nil }
-        let notch = window.localFrame(for: .idle, content: .default)
-        return CGRect(x: notch.minX - content.neoLead, y: notch.minY, width: content.neoLead, height: notch.height)
+        let island = window.localFrame(for: currentIslandState(), content: content)
+        let lane = NeoLaneLayout.rect(in: island, width: content.neoLead, notchHeight: window.notchHeight)
+        let outcome = NeoIslandClick.outcome(
+            laneShown: content.neoLead > 0, panelOpen: panel == .neo, otherPanel: panel != .none && panel != .neo,
+            point: point, laneRect: lane
+        )
+        let now = Date()
+        switch outcome {
+        case .none:
+            return false
+        case .open:
+            neoPanel.show(at: now)
+            applyNeoPanel()
+            neoEngageKeyboard()
+        case .close:
+            neoPanel.close(at: now)
+            applyNeoPanel()
+        }
+        scheduleNeoWake(neoNextWake(at: now))
+        log("neo: island clicked → \(neoPanel.isOpen ? "open" : "closed")")
+        return true
     }
 
     /// Esc with the panel open and the island itself first responder.

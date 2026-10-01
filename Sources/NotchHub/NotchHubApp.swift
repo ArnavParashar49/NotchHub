@@ -192,7 +192,7 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         window.onClick = { [weak self] in self?.islandClicked() }
         window.onControlHit = { [weak self] point in
             guard let self else { return false }
-            return self.neoLaneControlHit(at: point)
+            return self.neoIslandClickHit(at: point)
                 || self.petControlHit(at: point)
                 || self.teleprompterControlHit(at: point)
                 || self.cameraControlHit(at: point)
@@ -218,12 +218,11 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         hostingView = NSHostingView(rootView: IslandRootView(model: islandModel))
         window.installContent(hostingView)
         // Sizes the window to its envelope. Nothing is measured against the
-        // window before this: `localFrame` and the notch's place are taken
-        // from the envelope, never from the compact frame the window is born
-        // with (their origins are hundreds of points apart).
+        // window before this: `localFrame` is taken from the envelope, never
+        // from the compact frame the window is born with (their origins are
+        // hundreds of points apart).
         window.apply(state: .idle)
         islandModel.localFrame = window.swiftUIFrame(for: .idle)
-        islandModel.notchLeadingX = window.notchLeadingX
         window.orderFrontRegardless()
 
         registerHotKeys()
@@ -513,16 +512,13 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             model.state = state
             model.contentSize = contentSize
             model.localFrame = frame
-            // Where the notch is in the window right now: the lane hangs
-            // from it, and a stale value (one measured before the window was
-            // sized to its envelope) put the lane outside the island.
-            model.notchLeadingX = window.notchLeadingX
             model.isIdle = isIdle
             model.wingStatus = status
             model.panelContent = panel
             model.meeting = meeting
             // NEO's lane slides out (and back in) on the same spring as the
-            // surface that makes room for it.
+            // surface that makes room for it — and, glued to the island's
+            // left edge, rides every change of shape on that spring too.
             model.neo = neo
             // In the same transaction as the shape, so the pet's move from where
             // it was drawn rides the island's spring.

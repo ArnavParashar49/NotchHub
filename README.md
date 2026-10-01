@@ -163,14 +163,14 @@ screen) on the island's black with no card of its own.
   answer is the orb's alone, animating in the notch. It opens only when NEO
   needs you — "Needs your OK", a card opening (the browser, the camera, a
   song), NEO's page asking to be seen (a login page, a question) — or when
-  you ask: a click on the lane, or NEO summoned by hand (⌘⇧Space, its
-  menu-bar item: the core's `woke` event, which the wake word never sends).
-  The lane keeps showing beside the notch either way.
+  you ask: a click anywhere on the island while the orb is out, or NEO
+  summoned by hand (⌘⇧Space, its menu-bar item: the core's `woke` event,
+  which the wake word never sends). The lane keeps showing either way.
 - Once open it folds back to the lane **5 s after NEO is quiet** (idle or
   merely listening) — unless the mouse is in it, a card is open, it is
   pinned, or it was opened by hand and NEO has not answered since; it never
-  folds mid-reply. Esc, the page's collapse button, or a click on the lane
-  close it at once; closed while NEO was busy it stays closed for the rest
+  folds mid-reply. Esc, the page's collapse button, or a click on the orb in
+  the panel's strip close it at once; closed while NEO was busy it stays closed for the rest
   of that turn.
 - Clicks on the panel reach the page without the island being key; the first
   click into it (or on the lane) makes the window key so typing lands in

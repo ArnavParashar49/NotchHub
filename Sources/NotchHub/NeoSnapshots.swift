@@ -100,7 +100,7 @@ enum NeoSnapshots {
                 current: row.activity, stackCount: 0, state: row.state, localFrame: local, cornerRadius: 10,
                 notchInset: notchHeight, isIdle: row.state == .idle, wingStatus: row.wings ?? WingStatus(),
                 notchWidth: notch.width, contentSize: content, panelContent: placeholder, surfaceVisible: true, pet: petModel, hasNotch: true,
-                neo: row.neo, notchLeadingX: notch.minX - regionMinX
+                neo: row.neo
             )
             .frame(width: regionWidth, height: rowHeightPoints)
             .background(Color(.sRGB, red: 0.42, green: 0.42, blue: 0.45))

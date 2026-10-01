@@ -52,11 +52,8 @@ struct IslandView: View {
     /// Without a notch there is no idle dock, so no idle pet either.
     var hasNotch: Bool = true
     /// NEO's lane, while NEO is out of the notch. It lives in its own layer
-    /// left of the notch, in every shape, and is never an activity.
+    /// at the island's left edge, in every shape, and is never an activity.
     var neo: NeoLaneContent? = nil
-    /// The notch's left edge in the hosting coordinates, which the lane hangs
-    /// from. `nil` assumes the notch is centred in the island.
-    var notchLeadingX: CGFloat? = nil
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -96,12 +93,12 @@ struct IslandView: View {
                     notchWidth: notchWidth,
                     notchHeight: notchInset,
                     trailingReserve: petBarReserve,
-                    // NEO's lane sits between the left wing's content and the
-                    // notch: the wing region widens by it, its content stays
-                    // at the outer end.
+                    // NEO's lane is the outer end of the left wing: the wing
+                    // region widens by it, and its content moves in past it.
                     leadWidth: contentSize.neoLead > 0
                         ? (contentSize.wingLead ?? contentSize.wingSide) + contentSize.neoLead
                         : contentSize.wingLead,
+                    leadInset: contentSize.neoLead,
                     hovered: hoveredControl
                 )
                 .id("wings")
@@ -152,21 +149,23 @@ struct IslandView: View {
         }
     }
 
-    /// NEO's lane: the orb and its line in the notch-height strip immediately
-    /// left of the notch. It slides out from under the notch and back under
-    /// it, riding the same spring as the surface, and is masked to the
-    /// surface like everything else. The bars make room for it
-    /// (`IslandContentSize.neoLead`); the fixed surfaces have it in their
-    /// strip, where nothing else is drawn left of the notch.
+    /// NEO's lane: the orb in the notch-height strip at the island's LEFT
+    /// EDGE, whatever the shape. Pinned to that edge (not to the notch), it
+    /// rides every change of shape on the island's own spring — the bar
+    /// growing for a volume readout, the wings, the expanded song — rather
+    /// than standing still while the island moves around it. It slides out
+    /// from under the notch (the idle island is the notch plus the lane) and
+    /// back under it, and is masked to the surface like everything else. The
+    /// bars make room for it (`IslandContentSize.neoLead`) and lay their
+    /// content out past it; the fixed surfaces have it in their strip, where
+    /// nothing else is drawn.
     @ViewBuilder
     private var neoLayer: some View {
         if let neo, contentSize.neoLead > 0 {
             let lane = contentSize.neoLead
-            let notchX = notchLeadingX.map { $0 - localFrame.minX } ?? (localFrame.width - notchWidth) / 2
             NeoLaneView(content: neo, notchHeight: notchInset, width: lane)
                 .frame(width: lane, height: notchInset, alignment: .leading)
                 .transition(.move(edge: .trailing).combined(with: .opacity))
-                .offset(x: notchX - lane)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .mask(surfaceShape)
                 .allowsHitTesting(false)
@@ -321,8 +320,9 @@ struct IslandView: View {
                 }
             }
             .padding(.leading, DesignTokens.compactInset)
-            // NEO's lane sits between the glyph and the notch: the wing
-            // widens by it, the glyph stays at the outer end.
+            // NEO's lane is the outer end of the wing: the wing widens by it,
+            // the glyph moves in past the orb.
+            .padding(.leading, contentSize.neoLead)
             .frame(width: contentSize.compactLead + contentSize.neoLead, alignment: .leading)
 
             // Notch
