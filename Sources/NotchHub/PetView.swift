@@ -18,9 +18,6 @@ struct PetRenderModel: Equatable {
     var glow: UInt32? = nil
     /// What it is called, for assistive technology.
     var name: String = PetIdentity.name
-
-    /// The palette to draw with.
-    var colors: PetPalette { palette ?? .look(look) }
 }
 
 /// Draws the pixel pet.
