@@ -51,9 +51,11 @@ public struct NeoShellStatus: Equatable, Sendable {
 
 /// One of NEO.app's menu actions, as a host asks the core for it:
 /// `{"cmd":"shell","action":…}`. The core takes it only from a host (a
-/// native client that said `role=host`), hands it to NEO.app's own page, and
-/// NEO.app runs what its menu item ran. `eraseMemory` erases nothing by
-/// itself: NEO.app asks first, in its own dialog.
+/// native client that said `role=host`), hands it to NEO.app's shell — over
+/// the socket NEO.app shares with the core it starts, not through NEO.app's
+/// page, which macOS suspends while its window is hidden — and NEO.app runs
+/// what its menu item ran. `eraseMemory` erases nothing by itself: NEO.app
+/// asks first, in its own dialog.
 public enum NeoShellAction: Equatable, Sendable {
     case show
     case settings
