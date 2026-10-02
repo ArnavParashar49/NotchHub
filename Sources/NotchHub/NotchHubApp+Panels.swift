@@ -55,7 +55,8 @@ extension NotchHubApp {
                     onChange: {},
                     onClose: { [weak self] in self?.closeSettings() },
                     neo: neoSettings,
-                    onNeo: { [weak self] in self?.neoSettingsIntent($0) }
+                    onNeo: { [weak self] in self?.neoSettingsIntent($0) },
+                    page: settingsStartPage
                 )
             )
 
@@ -76,8 +77,11 @@ extension NotchHubApp {
                 look: petSettings.look,
                 hat: petSettings.hat.hat(on: Date(), holiday: todaysHoliday()),
                 hatChoice: petSettings.hat,
+                palette: petSettings.usesCustomFur ? petPalette : nil,
+                accessory: petSettings.accessory.accessory,
+                name: petSettings.displayName,
                 isFocusing: timerService.isCountingDown,
-                greeting: todaysHoliday()?.greeting ?? PetIdentity.hello,
+                greeting: todaysHoliday()?.greeting ?? PetIdentity.hello(name: petSettings.displayName),
                 focusEnabled: featureSettings.isEnabled(.timers) || timerService.isCountingDown,
                 contentLeading: petPanelContentLeading()
             ))
@@ -259,6 +263,7 @@ extension NotchHubApp {
     /// Dismisses the settings panel and hands focus back to the user's app.
     func closeSettings() {
         guard panel == .settings else { return }
+        settingsStartPage = .features
         closePanel()
         log("settings: closed")
     }

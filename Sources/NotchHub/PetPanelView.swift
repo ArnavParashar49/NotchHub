@@ -2,13 +2,21 @@ import NotchHubCore
 import SwiftUI
 
 /// Neo's own little panel, opened by clicking the pet: a larger pet; a hello
-/// with the look swatches and the hat button; and the actions. Placed by
-/// `PetPanelLayout`, which the window hit-tests.
+/// with "more…" (the pet's page in Settings), the look swatches and the hat
+/// button; and the actions. Placed by `PetPanelLayout`, which the window
+/// hit-tests.
 struct PetPanelView: View {
     let presentation: PetPresentation
     var look: PetLook = .fox
     var hat: PetHat? = nil
     var hatChoice: PetHatChoice = .seasonal
+    /// Its colours when they are not `look`'s: a custom fur colour (then no
+    /// swatch is ringed).
+    var palette: PetPalette? = nil
+    /// What it wears besides its hat.
+    var accessory: PetAccessory? = nil
+    /// What it is called.
+    var name: String = PetIdentity.name
     var isFocusing = false
     /// "Hi, I'm Neo!", or today's holiday greeting.
     var greeting = PetIdentity.hello
@@ -33,7 +41,8 @@ struct PetPanelView: View {
 
     private var content: some View {
         HStack(spacing: PetPanelLayout.spacing) {
-            PetView(presentation: presentation, scale: PetPanelLayout.petScale, look: look, hat: hat)
+            PetView(presentation: presentation, scale: PetPanelLayout.petScale, look: look, hat: hat,
+                    palette: palette, accessory: accessory, name: name)
             VStack(alignment: .leading, spacing: PetPanelLayout.rowGap) {
                 HStack(spacing: 0) {
                     Text(greeting)
@@ -41,8 +50,9 @@ struct PetPanelView: View {
                         .foregroundStyle(DesignTokens.textPrimary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
-                    Spacer(minLength: 0)
+                    Spacer(minLength: 6)
                     HStack(spacing: PetPanelLayout.swatchSpacing) {
+                        moreButton
                         ForEach(PetLook.allCases, id: \.self) { swatch($0) }
                     }
                     Color.clear.frame(width: PetPanelLayout.swatchToHatGap)
@@ -74,13 +84,26 @@ struct PetPanelView: View {
     }
 
     private func swatch(_ option: PetLook) -> some View {
-        Circle()
+        // With a custom fur colour no preset is the current one.
+        let current = option == look && palette == nil
+        return Circle()
             .fill(PetCanvas.color(option.swatch))
             .frame(width: PetPanelLayout.swatchSize, height: PetPanelLayout.swatchSize)
             .overlay(
-                Circle().strokeBorder(Color.white.opacity(option == look ? 0.95 : 0.18), lineWidth: option == look ? 1.5 : 0.5)
+                Circle().strokeBorder(Color.white.opacity(current ? 0.95 : 0.18), lineWidth: current ? 1.5 : 0.5)
             )
             .accessibilityLabel(Text("\(option.title) look"))
+    }
+
+    /// "More…": the pet's page in Settings — a custom colour, what it wears,
+    /// its size and side, its temperament and its name.
+    private var moreButton: some View {
+        Image(systemName: "ellipsis")
+            .font(.system(size: 7, weight: .heavy))
+            .foregroundStyle(DesignTokens.textPrimary)
+            .frame(width: PetPanelLayout.moreSize, height: PetPanelLayout.moreSize)
+            .background(Circle().fill(Color.white.opacity(0.12)))
+            .accessibilityLabel(Text("More: customise \(name)"))
     }
 
     private var hatButton: some View {

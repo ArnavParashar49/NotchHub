@@ -32,6 +32,9 @@ struct NeoListeningGlowView: View {
     let mark: NeoListeningMark?
     /// The pet's size in points (16 in the notch strip, 32 expanded).
     let petSize: CGFloat
+    /// The light's colour: the design token's teal, or the one the user chose
+    /// for their pet (`PetSettings.glow`).
+    var tint: Color = DesignTokens.listeningGlow
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// When the last pulse began, so a pulse cut short keeps its place on the
@@ -68,7 +71,6 @@ struct NeoListeningGlowView: View {
     /// halo's edge, then blurred so no edge is left at all.
     private func halo(opacity: Double, scale: CGFloat) -> some View {
         let diameter = NeoListeningLayout.glowDiameter(petSize: petSize)
-        let tint = DesignTokens.listeningGlow
         return Circle()
             .fill(RadialGradient(
                 stops: [

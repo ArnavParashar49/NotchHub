@@ -1,8 +1,14 @@
 import CoreGraphics
 import Foundation
 
-/// The pixel pet's few settings. Deliberately minimal: the pet is a companion,
-/// not a virtual-pet game.
+/// The pixel pet's settings: whether it shows and what it does, and how it is
+/// made one's own — its colours, what it wears, its size and side of the
+/// notch, its temperament and its name. Deliberately not a virtual-pet game:
+/// nothing here needs looking after.
+///
+/// Every value has a default that is the pet as it always was, so settings
+/// saved by an older build decode unchanged, and a value a newer build saved
+/// that this one does not know falls back to its default.
 public struct PetSettings: Codable, Equatable, Sendable {
     public var showPet = true
     public var reactions = true
@@ -11,18 +17,44 @@ public struct PetSettings: Codable, Equatable, Sendable {
     /// The pet gets up to mischief on its idle dock: hiding in the notch,
     /// peeking out, dashing to the other side, pouncing. Needs Idle Animations.
     public var mischief = true
-    /// The fox's colours.
+    /// The fox's colours: a preset look…
     public var look: PetLook = .fox
+    /// …or, when on, a fur colour of the user's own (`customFur`).
+    public var usesCustomFur = false
+    /// The picked fur colour. What is drawn is derived from it within
+    /// legibility bounds (`PetPalette.custom`).
+    public var customFur = PetFurColor.default
+    /// The colour of NEO's listening glow behind the pet.
+    public var glow: PetGlowColor = .teal
     /// What it wears on its head.
     public var hat: PetHatChoice = .seasonal
+    /// What else it wears: one accessory, with any hat.
+    public var accessory: PetAccessoryChoice = .none
     /// It marks major holidays: a greeting, and a holiday hat when its hat is
     /// seasonal.
     public var holidays = true
+    /// How big it is in the notch strip.
+    public var size: PetSize = .normal
+    /// Which side of the notch it lives on.
+    public var home: PetHome = .right
+    /// How lively it is: how often it fidgets and plays, how soon it dozes.
+    public var energy: PetEnergy = .normal
+    /// It sleeps through the night (`nightStart` to `nightEnd`), unless NEO
+    /// is doing something or the user is with it.
+    public var sleepsAtNight = false
+    /// The hour (0–23) its night begins.
+    public var nightStart = 22
+    /// The hour (0–23) its night ends. A night may run past midnight.
+    public var nightEnd = 7
+    /// What it is called, as typed. Shown as `displayName`.
+    public var name = PetIdentity.name
 
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
         case showPet, reactions, idleAnimations, interaction, mischief, look, hat, holidays
+        case usesCustomFur, customFur, glow, accessory, size, home, energy
+        case sleepsAtNight, nightStart, nightEnd, name
     }
 
     /// Settings saved before a key existed keep every value they do have.
@@ -38,6 +70,45 @@ public struct PetSettings: Codable, Equatable, Sendable {
         look = (try? container.decodeIfPresent(PetLook.self, forKey: .look)) ?? defaults.look
         hat = (try? container.decodeIfPresent(PetHatChoice.self, forKey: .hat)) ?? defaults.hat
         holidays = try container.decodeIfPresent(Bool.self, forKey: .holidays) ?? defaults.holidays
+        // The customisation keys: missing, of another type, or a value this
+        // build does not know — each falls back on its own.
+        usesCustomFur = (try? container.decodeIfPresent(Bool.self, forKey: .usesCustomFur)) ?? defaults.usesCustomFur
+        customFur = (try? container.decodeIfPresent(PetFurColor.self, forKey: .customFur)) ?? defaults.customFur
+        glow = (try? container.decodeIfPresent(PetGlowColor.self, forKey: .glow)) ?? defaults.glow
+        accessory = (try? container.decodeIfPresent(PetAccessoryChoice.self, forKey: .accessory)) ?? defaults.accessory
+        size = (try? container.decodeIfPresent(PetSize.self, forKey: .size)) ?? defaults.size
+        home = (try? container.decodeIfPresent(PetHome.self, forKey: .home)) ?? defaults.home
+        energy = (try? container.decodeIfPresent(PetEnergy.self, forKey: .energy)) ?? defaults.energy
+        sleepsAtNight = (try? container.decodeIfPresent(Bool.self, forKey: .sleepsAtNight)) ?? defaults.sleepsAtNight
+        nightStart = PetNight.hour((try? container.decodeIfPresent(Int.self, forKey: .nightStart)) ?? defaults.nightStart)
+        nightEnd = PetNight.hour((try? container.decodeIfPresent(Int.self, forKey: .nightEnd)) ?? defaults.nightEnd)
+        name = PetIdentity.validName((try? container.decodeIfPresent(String.self, forKey: .name)) ?? defaults.name)
+    }
+
+    /// The name to show: `name` trimmed, at most 16 characters, "Neo" if empty.
+    public var displayName: String { PetIdentity.validName(name) }
+
+    /// The colours the fox is drawn in. Derive it when the settings change and
+    /// keep it — not per frame.
+    public var palette: PetPalette {
+        usesCustomFur ? .custom(customFur) : .look(look)
+    }
+
+    /// The listening glow's colour; `nil` is the design token's teal.
+    public var glowColor: UInt32? { glow.rgb(palette: palette) }
+
+    /// Its night, when it sleeps through one.
+    public var night: PetNight? {
+        sleepsAtNight ? PetNight(startHour: nightStart, endHour: nightEnd) : nil
+    }
+
+    /// These settings as they are stored: the name valid, the hours in range.
+    public var normalized: PetSettings {
+        var copy = self
+        copy.name = displayName
+        copy.nightStart = PetNight.hour(nightStart)
+        copy.nightEnd = PetNight.hour(nightEnd)
+        return copy
     }
 
     private static let defaultsKey = "NotchHub.petSettings"
@@ -51,7 +122,7 @@ public struct PetSettings: Codable, Equatable, Sendable {
     }
 
     public func save() {
-        guard let data = try? JSONEncoder().encode(self) else { return }
+        guard let data = try? JSONEncoder().encode(normalized) else { return }
         UserDefaults.standard.set(data, forKey: Self.defaultsKey)
     }
 }
@@ -75,6 +146,9 @@ public enum PetPanelLayout {
     public static let swatchSpacing: CGFloat = 5
     public static let swatchToHatGap: CGFloat = 8
     public static let hatButtonSize = CGSize(width: 22, height: 18)
+    /// The "more…" dot left of the swatches (it opens Settings → the pet's
+    /// page): a swatch's size, a swatch's spacing away.
+    public static var moreSize: CGFloat { swatchSize }
 
     /// The big pet's side.
     public static var petSize: CGFloat { PetLayout.artSize * petScale }
@@ -110,6 +184,8 @@ public enum PetPanelLayout {
         public var actions: [(action: PetInteraction, rect: CGRect)]
         public var looks: [(look: PetLook, rect: CGRect)]
         public var hat: CGRect
+        /// "More…": opens the pet's page in Settings.
+        public var more: CGRect
     }
 
     /// The panel's targets for a frame; content sits below the notch strip.
@@ -137,7 +213,16 @@ public enum PetPanelLayout {
             (look, CGRect(x: swatchesMinX + CGFloat(index) * (swatchSize + swatchSpacing), y: titleMinY + (titleHeight - swatchSize) / 2,
                           width: swatchSize, height: swatchSize))
         }
-        return Layout(pet: pet, actions: actions, looks: looks, hat: hat)
+        let more = CGRect(x: swatchesMinX - swatchSpacing - moreSize, y: titleMinY + (titleHeight - moreSize) / 2,
+                          width: moreSize, height: moreSize)
+        return Layout(pet: pet, actions: actions, looks: looks, hat: hat, more: more)
+    }
+
+    /// The room the title row leaves the greeting, left of "more…".
+    public static var greetingWidth: CGFloat {
+        let count = CGFloat(PetLook.allCases.count)
+        let controls = hatButtonSize.width + swatchToHatGap + swatchSize * count + swatchSpacing * (count - 1) + swatchSpacing + moreSize
+        return chipsWidth - controls - 6
     }
 
     /// What a click in the panel lands on.
@@ -146,6 +231,8 @@ public enum PetPanelLayout {
         case look(PetLook)
         case hat
         case pet
+        /// "More…": the pet's page in Settings.
+        case more
     }
 
     public static func hit(at point: CGPoint, in frame: CGRect, notchInset: CGFloat) -> Hit? {
@@ -158,6 +245,9 @@ public enum PetPanelLayout {
         }
         if layout.hat.insetBy(dx: -2, dy: -2).contains(point) {
             return .hat
+        }
+        if layout.more.insetBy(dx: -2, dy: -3).contains(point) {
+            return .more
         }
         if layout.pet.insetBy(dx: -3, dy: -3).contains(point) {
             return .pet

@@ -46,6 +46,19 @@ public enum PetEvent: Equatable, Sendable {
     case holiday
 }
 
+extension PetEvent {
+    /// The user doing something with the pet or its island (as opposed to the
+    /// Mac: a song, a download, a notification).
+    var isUsers: Bool {
+        switch self {
+        case .hoverEntered, .petHovered, .petClicked, .interaction, .bigPetStroked, .bigPetClicked:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
 /// The pet's games on its idle dock.
 public enum PetMischief: String, CaseIterable, Sendable {
     /// Sneak into the notch and hide; maybe wag the tail out of it; peek out —
@@ -55,7 +68,7 @@ public enum PetMischief: String, CaseIterable, Sendable {
     case crossOver
     /// There and back again, flat out, then pant.
     case zoomies
-    /// Back to the right of the notch after a visit to the left.
+    /// Back home after a visit to the other side of the notch.
     case returnHome
     /// Spotted mid-game: pops out, busted.
     case caught
@@ -106,8 +119,19 @@ public struct PetContext: Equatable, Sendable {
     /// IS NEO, so this is its pose while NEO is busy. `nil` while NEO is
     /// off or away; `.idle` is NEO ready, which is the pet's own life.
     public var neoState: NeoState?
+    /// How lively the pet is (`PetSettings.energy`): scales how often it
+    /// fidgets and plays, and how soon it dozes.
+    public var energy: PetEnergy = .normal
+    /// The hours it sleeps through (`PetSettings.night`), or `nil`.
+    public var night: PetNight?
 
     public init() {}
+
+    /// The user is with the pet, or NEO is doing something: what keeps it up
+    /// at night.
+    var isAttended: Bool {
+        isHovering || isPetHovered || interactionOpen || isNeoBusy
+    }
 
     /// NEO is doing something: the pet shows it.
     public var isNeoBusy: Bool { (neoState ?? .idle) != .idle }
@@ -162,9 +186,16 @@ public struct PetPresentation: Equatable, Sendable {
 /// 2. a reaction to an event (celebrate, notice a notification, wake up…) —
 ///    which never cuts a pet mid-dash or mid-leap: it waits for the landing
 /// 3. an occasional flourish within the current mood (blink, look around…)
-/// 4. the mood's base pose: interaction › meeting › put to sleep › pet hovered
-///    › island hovered › coding › timer › download › music › fell asleep ›
-///    low battery › charging › idle
+/// 4. the mood's base pose: interaction › meeting › NEO › put to sleep ›
+///    asleep for the night › pet hovered › island hovered › coding › timer ›
+///    download › music › fell asleep › low battery › charging › idle
+///
+/// Its HOME is the side of the notch it lives on (`setHome`): the right by
+/// default, the left, or — "auto" — wherever its games last left it. Mischief
+/// starts from home, a visit to the other side ends with the trip back, and
+/// anything that needs the pet sends it home the quick way. Its ENERGY
+/// (`PetContext.energy`) scales how often flourishes and mischief come and how
+/// soon it dozes; at the normal energy every delay is exactly what it was.
 ///
 /// Mischief only plays while the island rests with the dock beside a real
 /// notch (`PetContext.canRoam`), the pet is idle or charging, and Mischief and
@@ -194,10 +225,24 @@ public struct PetBrain {
     static let requestWindow: TimeInterval = 20
     /// How long the pet keeps purring after the last stroke.
     static let strokeHold: TimeInterval = 1.2
+    /// At night: how long after the user (or NEO) leaves it alone before it
+    /// curls up again.
+    public static let nightSettle: TimeInterval = 20
 
     public private(set) var presentation: PetPresentation
     /// Where the idle dock is and how far it reaches. The island follows it.
+    /// Measured for the normal size (`PetMetrics.dock(_:)` scales it).
     public private(set) var dock = PetDock.home
+    /// Where the pet lives (`PetSettings.home`).
+    public private(set) var home: PetHome = .right
+    /// The side of the notch that is home right now: `home`'s, or with
+    /// `.auto` the side its last game left it on.
+    public private(set) var homeSide: PetSide = .right
+    /// The clock the night is read on.
+    public var calendar: Calendar = .current
+
+    /// A full dock on the home side: where the pet rests.
+    public var homeDock: PetDock { PetDock(side: homeSide, reach: PetLayout.idleDock) }
 
     struct Timed: Equatable {
         let animation: PetAnimationID
@@ -261,14 +306,37 @@ public struct PetBrain {
     private var forcedSleep = false
     private var lastWakeTriggers: [Bool] = []
     private var rng: SplitMix64
+    private var energy: PetEnergy = .normal
+    /// The last moment the user was with the pet or NEO was busy.
+    private var lastAttended: Date
+    private var wasAttended = false
 
     public init(now: Date = Date(), seed: UInt64 = 0x5EED_F0C5) {
         rng = SplitMix64(state: seed)
         presentation = PetPresentation(mood: .idle, animation: .sit, startedAt: now)
         lastEngagement = now
+        lastAttended = now
         nextFlourishAt = now
         nextMischiefAt = now
         nextFlourishAt = now.addingTimeInterval(randomDelay(Self.calmFlourishDelay))
+    }
+
+    /// Moves the pet's home. A game in progress is dropped and the pet stands
+    /// at its new home at once (the island's spring carries the dock there).
+    /// `.auto` keeps the pet on the side it is on.
+    public mutating func setHome(_ newHome: PetHome, now: Date = Date()) {
+        guard newHome != home else { return }
+        home = newHome
+        let side = newHome == .auto ? dock.side : newHome.side
+        guard side != homeSide || routine != nil || dock != homeDock else { return }
+        homeSide = side
+        routine = nil
+        flourish = nil
+        awayUntil = nil
+        awayRequested = false
+        requestedMischief = nil
+        dock = homeDock
+        apply(presentation.mood, presentation.animation, now: now)
     }
 
     /// The mischief being played, if any.
@@ -285,6 +353,16 @@ public struct PetBrain {
     /// Re-evaluates the pet for the current context.
     @discardableResult
     public mutating func update(_ context: PetContext, now: Date) -> PetPresentation {
+        if context.energy != energy {
+            // A change of temperament re-deals what was waiting on the old one.
+            energy = context.energy
+            nextFlourishAt = now.addingTimeInterval(randomDelay(Self.calmFlourishDelay) * energy.flourishPace)
+            nextMischiefAt = now.addingTimeInterval(randomDelay(Self.settleMischiefDelay) * energy.mischiefPace)
+        }
+        if context.isAttended || wasAttended {
+            lastAttended = now
+        }
+        wasAttended = context.isAttended
         let triggers = context.wakeTriggers
         let previous = lastWakeTriggers.count == triggers.count ? lastWakeTriggers : Array(repeating: false, count: triggers.count)
         if zip(triggers, previous).contains(where: { $0 && !$1 }) {
@@ -328,7 +406,7 @@ public struct PetBrain {
                 routine = nil
                 awayUntil = nil
                 awayRequested = false
-                dock = .home
+                dock = homeDock
             }
             startReaction(pending.animation, pending.mood, hold: pending.hold, now: now)
         }
@@ -344,12 +422,14 @@ public struct PetBrain {
         }
 
         if flourish == nil, now >= nextFlourishAt {
+            // Energy paces the calm moods' flourishes; an activity keeps its own beat.
+            let pace = base.calm ? energy.flourishPace : 1
             if flourishes.isEmpty {
-                nextFlourishAt = now.addingTimeInterval(randomDelay(base.delay))
+                nextFlourishAt = now.addingTimeInterval(randomDelay(base.delay) * pace)
             } else {
                 let pick = flourishes[rng.index(flourishes.count)]
                 flourish = Timed(animation: pick, mood: base.mood, until: now.addingTimeInterval(pick.animation.duration))
-                nextFlourishAt = now.addingTimeInterval(pick.animation.duration + randomDelay(base.delay))
+                nextFlourishAt = now.addingTimeInterval(pick.animation.duration + randomDelay(base.delay) * pace)
             }
         }
 
@@ -369,7 +449,7 @@ public struct PetBrain {
 
         switch event {
         case .hoverEntered:
-            if context.mischief || routine?.requested == true || awayRequested, !asleep, routine != nil || dock != .home {
+            if context.mischief || routine?.requested == true || awayRequested, !asleep, routine != nil || dock != homeDock {
                 // Caught in the act — but never over a celebration or an alert.
                 if reactUnlessBusy(.caught, .curious, now: now) {
                     lastHoverReaction = now
@@ -493,6 +573,10 @@ public struct PetBrain {
             if event != .interaction(.sleep), event != .petHovered {
                 forcedSleep = false
             }
+            if event.isUsers, event != .interaction(.sleep) {
+                // The user is with it: at night, that keeps it up a while.
+                lastAttended = now
+            }
         }
         return update(context, now: now)
     }
@@ -518,8 +602,9 @@ public struct PetBrain {
             dates.append(nextFlourishAt)
         }
         if !busy, context.canRoam {
-            let allowed = awayRequested && dock.side == .left ? mayPlayOnRequest(context, base: base) : mayRoam(context, base: base)
-            if dock.side == .left {
+            let away = dock.side != homeSide
+            let allowed = awayRequested && away ? mayPlayOnRequest(context, base: base) : mayRoam(context, base: base)
+            if away {
                 if allowed {
                     dates.append(awayUntil ?? now)
                 } else if !context.isPetHovered {
@@ -530,7 +615,18 @@ public struct PetBrain {
             }
         }
         if [.idle, .lowBattery, .charging].contains(base.mood) {
-            dates.append(lastEngagement.addingTimeInterval(Self.sleepAfter))
+            dates.append(lastEngagement.addingTimeInterval(context.energy.sleepAfter))
+        }
+        if let night = context.night {
+            // The night beginning or ending, and — inside it — curling up
+            // again once it has been left alone.
+            if let change = night.nextChange(after: now, calendar: calendar) {
+                dates.append(change)
+            }
+            let settle = lastAttended.addingTimeInterval(Self.nightSettle)
+            if night.contains(now, calendar: calendar), base.mood != .sleeping, settle > now {
+                dates.append(settle)
+            }
         }
         guard let soonest = dates.min() else { return nil }
         return max(soonest, now.addingTimeInterval(0.05))
@@ -564,6 +660,11 @@ public struct PetBrain {
         if forcedSleep {
             return base(.sleeping, .sleep, [.sleepZzz], delay: 14...28, calm: true)
         }
+        if asleepForTheNight(c, now: now) {
+            // Its night: curled up whatever the Mac is doing, until the user
+            // comes by (a meeting, its panel and NEO are already above).
+            return base(.sleeping, .sleep, [.sleepZzz], delay: 14...28, calm: true)
+        }
         if c.isPetHovered {
             return base(.curious, .happy, [.blink], calm: true)
         }
@@ -593,7 +694,7 @@ public struct PetBrain {
         if c.isMusicPlaying {
             return base(.music, .music, [.musicExcited], delay: 12...30)
         }
-        if now.timeIntervalSince(lastEngagement) >= Self.sleepAfter {
+        if now.timeIntervalSince(lastEngagement) >= c.energy.sleepAfter {
             return base(.sleeping, .sleep, [.sleepZzz], delay: 14...28, calm: true)
         }
         if c.isLowBattery {
@@ -602,12 +703,25 @@ public struct PetBrain {
         if c.isCharging {
             return base(.charging, .sit, [.charging, .blink, .tailWag], calm: true)
         }
+        if c.energy == .calm {
+            // Mostly sits and breathes: no hops, no pounces, no faces.
+            return base(.idle, .sit, [.blink, .blink, .breathe, .breathe, .breathe, .tailWag, .yawn], calm: true)
+        }
         var idle: [PetAnimationID] = [.blink, .blink, .blink, .lookLeft, .lookRight, .tailWag, .breathe, .yawn, .stretch]
         if c.mischief {
             idle += [.blep, .hop, .snicker]
             if c.canRoam { idle += [.pounce, .pounce] }
         }
         return base(.idle, .sit, idle, calm: true)
+    }
+
+    /// Whether the pet sleeps because it is its night: inside the night's
+    /// hours, nobody with it (no cursor on the island, NEO idle), and left
+    /// alone for `nightSettle`.
+    private func asleepForTheNight(_ c: PetContext, now: Date) -> Bool {
+        guard let night = c.night, night.contains(now, calendar: calendar) else { return false }
+        guard !c.isAttended else { return false }
+        return now.timeIntervalSince(lastAttended) >= Self.nightSettle
     }
 
     /// The pose for what NEO is doing. Listening is attentive (ears up, a slow
@@ -664,24 +778,24 @@ public struct PetBrain {
     /// the dock as it is drawn (`shown`). Without a game: when it stands still.
     /// During one: standing still on a full dock, or wholly hidden inside the
     /// notch where cutting home reveals it only as a CLOSED dock opens around it —
-    /// the right dock closed, or the pet on the left (home is on the right, whose
-    /// dock is closed while the pet is away).
+    /// the home dock closed, or the pet on the other side (the home side's dock
+    /// is closed while the pet is away).
     private func canCut(at now: Date, shown: PetDock? = nil) -> Bool {
         let offset = drawnOffset(at: now)
         guard routine != nil else { return offset == .zero }
         let shown = shown ?? dock
-        // Standing still counts only on the right: cutting a standing pet on the
-        // left home would swap the dock's side with the pet in view. There, a
-        // moment waits for the quick way home.
-        if offset == .zero { return shown.reach >= PetLayout.idleDock && shown.side == .right }
-        return offset.dx <= PetLayout.hiddenOffset + 3 && (shown.reach == 0 || shown.side == .left)
+        // Standing still counts only at home: cutting a standing pet on the
+        // other side home would swap the dock's side with the pet in view.
+        // There, a moment waits for the quick way home.
+        if offset == .zero { return shown.reach >= PetLayout.idleDock && shown.side == homeSide }
+        return offset.dx <= PetLayout.hiddenOffset + 3 && (shown.reach == 0 || shown.side != homeSide)
     }
 
     private mutating func setReaction(_ animation: PetAnimationID, mood: PetMood, until: Date, now: Date) {
         reaction = Timed(animation: animation, mood: mood, until: until)
         flourish = nil
         // No flourish the instant a reaction ends.
-        nextFlourishAt = max(nextFlourishAt, until.addingTimeInterval(randomDelay(Self.calmFlourishDelay)))
+        nextFlourishAt = max(nextFlourishAt, until.addingTimeInterval(randomDelay(Self.calmFlourishDelay) * energy.flourishPace))
     }
 
     /// A minor reaction never cuts off a celebration or an alert in progress.
@@ -733,7 +847,7 @@ public struct PetBrain {
             routine = nil
             awayUntil = nil
             awayRequested = false
-            dock = .home
+            dock = homeDock
             mischiefWasAllowed = false
             return
         }
@@ -742,7 +856,7 @@ public struct PetBrain {
         }
         let allowed = mayRoam(c, base: base)
         if allowed, !mischiefWasAllowed {
-            nextMischiefAt = max(nextMischiefAt, now.addingTimeInterval(randomDelay(Self.settleMischiefDelay)))
+            nextMischiefAt = max(nextMischiefAt, now.addingTimeInterval(randomDelay(Self.settleMischiefDelay) * energy.mischiefPace))
         }
         mischiefWasAllowed = allowed
 
@@ -753,7 +867,7 @@ public struct PetBrain {
                 routine = nil
                 awayUntil = nil
                 awayRequested = false
-                dock = .home
+                dock = homeDock
                 return
             }
             let stillAllowed = current.requested ? mayPlayOnRequest(c, base: base) : allowed
@@ -781,19 +895,19 @@ public struct PetBrain {
             begin(request.kind, plan(request.kind, from: dock.side), now: now, requested: true)
             return
         }
-        if dock.side == .left {
+        if dock.side != homeSide {
             // A visit that came from a request stays whatever the Mischief setting says.
             let wasRequested = awayRequested
-            let leftAllowed = wasRequested ? mayPlayOnRequest(c, base: base) : allowed
-            if !leftAllowed {
+            let awayAllowed = wasRequested ? mayPlayOnRequest(c, base: base) : allowed
+            if !awayAllowed {
                 // Something needs the pet: the quick way home, as soon as it can
                 // be cut (a leap in progress lands first).
                 if !c.isPetHovered, canCut(at: now) {
-                    begin(.returnHome, crossing(from: .left), now: now, windingUp: true)
+                    begin(.returnHome, crossing(from: dock.side), now: now, windingUp: true)
                 }
             } else if flourish == nil, awayUntil.map({ now >= $0 }) ?? true {
                 // The visit is over: home, playfully.
-                begin(.returnHome, plan(.returnHome, from: .left), now: now, requested: wasRequested)
+                begin(.returnHome, plan(.returnHome, from: dock.side), now: now, requested: wasRequested)
             }
             return
         }
@@ -801,7 +915,7 @@ public struct PetBrain {
         if allowed, now >= nextMischiefAt {
             let roll = rng.unit()
             let kind: PetMischief = roll < 0.45 ? .hideAndSeek : (roll < 0.8 ? .crossOver : .zoomies)
-            begin(kind, plan(kind, from: .right), now: now)
+            begin(kind, plan(kind, from: homeSide), now: now)
         }
     }
 
@@ -859,9 +973,14 @@ public struct PetBrain {
     private mutating func finish(_ last: PetMischiefStep, requested: Bool = false, now: Date) {
         routine = nil
         dock = PetDock(side: last.dock.side, reach: PetLayout.idleDock)
-        awayUntil = last.dock.side == .left ? now.addingTimeInterval(randomDelay(Self.awayStay)) : nil
-        awayRequested = requested && last.dock.side == .left
-        nextMischiefAt = now.addingTimeInterval(randomDelay(Self.mischiefDelay))
+        if home == .auto {
+            // No fixed home: where the game ended is where it lives now.
+            homeSide = last.dock.side
+        }
+        let away = last.dock.side != homeSide
+        awayUntil = away ? now.addingTimeInterval(randomDelay(Self.awayStay)) : nil
+        awayRequested = requested && away
+        nextMischiefAt = now.addingTimeInterval(randomDelay(Self.mischiefDelay) * energy.mischiefPace)
         nextFlourishAt = max(nextFlourishAt, now.addingTimeInterval(randomDelay(3...8)))
     }
 
@@ -878,8 +997,8 @@ public struct PetBrain {
         case .zoomies:
             return crossing(from: side) + crossing(from: side.opposite) + [beat(.pant, side)]
         case .returnHome:
-            guard side == .left else { return [] }
-            return rng.unit() < 0.35 ? hideAndSeek(from: .left, peekingFrom: .right) : crossing(from: .left)
+            guard side != homeSide else { return [] }
+            return rng.unit() < 0.35 ? hideAndSeek(from: side, peekingFrom: homeSide) : crossing(from: side)
         case .caught:
             return []
         }
@@ -922,45 +1041,46 @@ public struct PetBrain {
         return steps
     }
 
-    /// The quickest way home to the right of the notch from where `last` left
-    /// the pet.
+    /// The quickest way home from where `last` left the pet.
     private func homeSteps(after last: PetMischiefStep) -> [PetMischiefStep] {
         let side = last.dock.side
+        let home = homeSide
+        let away = homeSide.opposite
         switch last.animation.mischiefPose {
         case .home:
-            return side == .right ? [] : crossing(from: .left)
+            return side == home ? [] : crossing(from: away)
         case .hidden:
             var steps: [PetMischiefStep] = []
-            if side == .left {
+            if side == away {
                 if last.dock.reach > 0 {
-                    steps.append(beat(.hidden, .left, reach: 0, duration: Self.retractTime))
+                    steps.append(beat(.hidden, away, reach: 0, duration: Self.retractTime))
                 }
-                steps.append(beat(.hidden, .right, reach: 0, duration: Self.switchTime))
+                steps.append(beat(.hidden, home, reach: 0, duration: Self.switchTime))
             }
-            if side == .left || last.dock.reach < PetLayout.idleDock {
-                steps.append(beat(.hidden, .right, duration: Self.growTime))
+            if side == away || last.dock.reach < PetLayout.idleDock {
+                steps.append(beat(.hidden, home, duration: Self.growTime))
             }
-            steps.append(beat(.dashOut, .right))
+            steps.append(beat(.dashOut, home))
             return steps
         case .peeking:
             if last.animation == .tailPeek {
                 // A tail goes back the way it came; the pet comes out the front.
                 var steps = [beat(.duckTail, side, reach: last.dock.reach)]
-                if side == .left {
-                    steps.append(beat(.hidden, .left, reach: 0, duration: Self.retractTime))
-                    steps.append(beat(.hidden, .right, reach: 0, duration: Self.switchTime))
+                if side == away {
+                    steps.append(beat(.hidden, away, reach: 0, duration: Self.retractTime))
+                    steps.append(beat(.hidden, home, reach: 0, duration: Self.switchTime))
                 }
-                return steps + [beat(.hidden, .right, duration: Self.growTime), beat(.dashOut, .right)]
+                return steps + [beat(.hidden, home, duration: Self.growTime), beat(.dashOut, home)]
             }
-            if side == .right {
-                return [beat(.popOut, .right)]
+            if side == home {
+                return [beat(.popOut, home)]
             }
             return [
-                beat(.duck, .left, reach: last.dock.reach),
-                beat(.hidden, .left, reach: 0, duration: Self.retractTime),
-                beat(.hidden, .right, reach: 0, duration: Self.switchTime),
-                beat(.hidden, .right, duration: Self.growTime),
-                beat(.dashOut, .right),
+                beat(.duck, away, reach: last.dock.reach),
+                beat(.hidden, away, reach: 0, duration: Self.retractTime),
+                beat(.hidden, home, reach: 0, duration: Self.switchTime),
+                beat(.hidden, home, duration: Self.growTime),
+                beat(.dashOut, home),
             ]
         }
     }

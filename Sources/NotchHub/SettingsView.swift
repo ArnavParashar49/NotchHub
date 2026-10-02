@@ -28,40 +28,41 @@ struct IslandSettings {
     var camera: Bool = true
     var ghostMode: Bool = false
     var neo: Bool = true
-    var showPet: Bool = true
-    var petReactions: Bool = true
-    var petIdleAnimations: Bool = true
-    var petInteraction: Bool = true
-    var petMischief: Bool = true
-    /// Chosen in the pet's panel; carried through so saving settings keeps them.
-    var petLook: PetLook = .fox
-    var petHat: PetHatChoice = .seasonal
-    var petHolidays: Bool = true
+    /// The pixel pet's settings (stored separately from the feature gates):
+    /// its switches on the features page, and everything on its own page —
+    /// whatever was chosen in the pet's panel is carried here too, so saving
+    /// from Settings never writes back an older look or hat.
+    var pet = PetSettings()
 
-    /// The pixel pet's settings (stored separately from the feature gates).
     var petSettings: PetSettings {
-        get {
-            var pet = PetSettings()
-            pet.showPet = showPet
-            pet.reactions = petReactions
-            pet.idleAnimations = petIdleAnimations
-            pet.interaction = petInteraction
-            pet.mischief = petMischief
-            pet.look = petLook
-            pet.hat = petHat
-            pet.holidays = petHolidays
-            return pet
-        }
-        set {
-            showPet = newValue.showPet
-            petReactions = newValue.reactions
-            petIdleAnimations = newValue.idleAnimations
-            petInteraction = newValue.interaction
-            petMischief = newValue.mischief
-            petLook = newValue.look
-            petHat = newValue.hat
-            petHolidays = newValue.holidays
-        }
+        get { pet }
+        set { pet = newValue }
+    }
+
+    // The pet's switches, as the features page's tiles address them.
+    var showPet: Bool {
+        get { pet.showPet }
+        set { pet.showPet = newValue }
+    }
+    var petReactions: Bool {
+        get { pet.reactions }
+        set { pet.reactions = newValue }
+    }
+    var petIdleAnimations: Bool {
+        get { pet.idleAnimations }
+        set { pet.idleAnimations = newValue }
+    }
+    var petInteraction: Bool {
+        get { pet.interaction }
+        set { pet.interaction = newValue }
+    }
+    var petMischief: Bool {
+        get { pet.mischief }
+        set { pet.mischief = newValue }
+    }
+    var petHolidays: Bool {
+        get { pet.holidays }
+        set { pet.holidays = newValue }
     }
 
     var weatherCity: String = ""
@@ -135,12 +136,17 @@ extension IslandSettings {
 ///
 /// One tile is a door instead of a switch: NEO's opens the NEO section
 /// (`NeoSettingsSection`) — the feature's own switch, and NEO.app's menu,
-/// which lives here while the notch hosts NEO.
+/// which lives here while the notch hosts NEO. And the pet's group has a door
+/// beside its caption: "Customise" opens the pet's page
+/// (`PetSettingsSection`) — its look, what it wears, its size and side, its
+/// personality and its name.
 struct SettingsView: View {
     /// Which page of the panel shows.
     enum Page: Equatable {
         case features
         case neo
+        /// Making the pet one's own.
+        case pet
     }
 
     @Binding var settings: IslandSettings
@@ -190,6 +196,8 @@ struct SettingsView: View {
         let title: String
         let tint: Color
         let items: [Item]
+        /// A page the group's caption opens, with the button's title.
+        var door: (title: String, page: Page)? = nil
         var id: String { title }
     }
 
@@ -224,14 +232,14 @@ struct SettingsView: View {
                 Item(title: "NEO", symbol: "waveform.circle.fill", key: \.neo,
                      detail: "Its chat, keys and permissions", opens: .neo),
             ]),
-            Group(title: PetIdentity.name, tint: SettingsMetrics.ink, items: [
-                Item(title: "Show \(PetIdentity.name)", symbol: "pawprint.fill", key: \.showPet),
+            Group(title: settings.pet.displayName, tint: SettingsMetrics.ink, items: [
+                Item(title: "Show \(settings.pet.displayName)", symbol: "pawprint.fill", key: \.showPet),
                 Item(title: "Reactions", symbol: "sparkles", key: \.petReactions),
                 Item(title: "Idle Animations", symbol: "wind", key: \.petIdleAnimations),
                 Item(title: "Interaction", symbol: "hand.tap.fill", key: \.petInteraction),
                 Item(title: "Mischief", symbol: "hare.fill", key: \.petMischief),
                 Item(title: "Holidays", symbol: "gift.fill", key: \.petHolidays),
-            ]),
+            ], door: ("Customise", .pet)),
         ]
     }
 
@@ -288,6 +296,14 @@ struct SettingsView: View {
                     },
                     onIntent: onNeo
                 )
+            case .pet:
+                PetSettingsSection(pet: Binding(
+                    get: { settings.pet },
+                    set: {
+                        settings.pet = $0
+                        onChange()
+                    }
+                ), headless: !scrolls)
             }
         }
         .padding(.horizontal, SettingsMetrics.inset)
@@ -312,10 +328,10 @@ struct SettingsView: View {
                 .accessibilityLabel("Back to Settings")
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(page == .neo ? "NEO" : "Settings")
+                Text(pageTitle)
                     .font(.system(size: 17, weight: .bold, design: .rounded))
                     .foregroundStyle(DesignTokens.textPrimary)
-                Text(page == .neo ? neo.subtitle : "\(enabledCount) of \(totalCount) features on")
+                Text(pageSubtitle)
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(DesignTokens.textTertiary)
                     .monospacedDigit()
@@ -332,6 +348,22 @@ struct SettingsView: View {
                     .contentShape(Capsule())
             }
             .buttonStyle(PressStyle())
+        }
+    }
+
+    private var pageTitle: String {
+        switch page {
+        case .features: return "Settings"
+        case .neo: return "NEO"
+        case .pet: return "Pet"
+        }
+    }
+
+    private var pageSubtitle: String {
+        switch page {
+        case .features: return "\(enabledCount) of \(totalCount) features on"
+        case .neo: return neo.subtitle
+        case .pet: return "\(settings.pet.displayName) the fox — look, wear, size, personality"
         }
     }
 
@@ -366,7 +398,17 @@ struct SettingsView: View {
 
     private func groupView(_ group: Group) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionLabel(group.title)
+            if let door = group.door {
+                // The caption stays where it is; the door hangs off its row's
+                // trailing end without taking any room.
+                sectionLabel(group.title)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay(alignment: .trailing) {
+                        SectionDoor(title: door.title) { page = door.page }
+                    }
+            } else {
+                sectionLabel(group.title)
+            }
             LazyVGrid(columns: Self.columns, spacing: SettingsMetrics.tileSpacing) {
                 ForEach(group.items) { item in
                     FeatureTile(
@@ -466,6 +508,34 @@ struct SettingsSectionLabel: View {
             .tracking(0.8)
             .foregroundStyle(DesignTokens.textTertiary)
             .padding(.leading, 4)
+    }
+}
+
+/// A small door at the end of a group's caption row: opens the group's page.
+private struct SectionDoor: View {
+    let title: String
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 7, weight: .heavy))
+            }
+            .foregroundStyle(DesignTokens.textPrimary)
+            .padding(.horizontal, 9)
+            .frame(height: 20)
+            .background(Capsule().fill(Color.white.opacity(isHovered ? SettingsMetrics.onFillHovered : SettingsMetrics.onFill)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(PressStyle())
+        .onHover { isHovered = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovered)
+        .accessibilityLabel("\(title): look, wear, size and personality")
     }
 }
 

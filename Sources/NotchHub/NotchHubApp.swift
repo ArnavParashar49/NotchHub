@@ -73,6 +73,12 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     // The pixel pet.
     var petBrain = PetBrain()
     var petSettings = PetSettings.load()
+    /// The fox's colours and its glow's, derived from the settings when they
+    /// change (`applyPetSettings`) — never while drawing.
+    lazy var petPalette: PetPalette = petSettings.palette
+    lazy var petGlow: UInt32? = petSettings.glowColor
+    /// The page Settings opens on (the pet's, from its panel's "more…").
+    var settingsStartPage: SettingsView.Page = .features
     var petHovered = false
     var petCursorSide: PetContext.Side?
     var petWakeTask: Task<Void, Never>?
@@ -206,6 +212,8 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let geometry = NotchGeometry.detectMain()
+        // The pet starts on the side of the notch it lives on.
+        petBrain.setHome(petSettings.home)
 
         window = NotchWindow(geometry: geometry)
         window.onHoverEnter = { [weak self] in self?.islandHoverEntered() }

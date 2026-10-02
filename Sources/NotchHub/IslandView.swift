@@ -131,12 +131,14 @@ struct IslandView: View {
     @ViewBuilder
     private var petLayer: some View {
         if let pet, state != .idle || hasNotch,
-           let placement = PetLayout.placement(for: state, islandSize: localFrame.size, notchHeight: notchInset, dock: contentSize.petDock ?? .home) {
+           let placement = PetLayout.placement(for: state, islandSize: localFrame.size, notchHeight: notchInset,
+                                               dock: contentSize.petDock ?? .home, size: pet.size) {
             let leading = placement.anchor == .leading
             // Measured from its own edge, so even while fading in or out it
             // travels with that edge.
             let x = leading ? placement.origin.x : placement.origin.x + placement.size - localFrame.width
-            PetView(presentation: pet.presentation, scale: placement.scale, look: pet.look, hat: pet.hat)
+            PetView(presentation: pet.presentation, scale: placement.scale, look: pet.look, hat: pet.hat,
+                    palette: pet.palette, accessory: pet.accessory, name: pet.name)
                 .id("pet-\(Int(placement.scale))")
                 .transition(.opacity.animation(.easeOut(duration: 0.16)))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: leading ? .topLeading : .topTrailing)
@@ -157,11 +159,13 @@ struct IslandView: View {
     /// with the pet's edge (see `NeoListeningGlowView`).
     @ViewBuilder
     private var listeningGlowLayer: some View {
-        if pet != nil, state != .idle || hasNotch,
-           let placement = PetLayout.placement(for: state, islandSize: localFrame.size, notchHeight: notchInset, dock: contentSize.petDock ?? .home) {
+        if let pet, state != .idle || hasNotch,
+           let placement = PetLayout.placement(for: state, islandSize: localFrame.size, notchHeight: notchInset,
+                                               dock: contentSize.petDock ?? .home, size: pet.size) {
             let leading = placement.anchor == .leading
             let frame = NeoListeningLayout.glowFrame(behind: placement)
-            NeoListeningGlowView(mark: listening, petSize: placement.size)
+            NeoListeningGlowView(mark: listening, petSize: placement.size,
+                                 tint: pet.glow.map(PetCanvas.color) ?? DesignTokens.listeningGlow)
                 // Like the pet, a change of pixel scale crossfades.
                 .id("glow-\(Int(placement.scale))")
                 .transition(.opacity.animation(.easeOut(duration: 0.16)))
@@ -173,10 +177,10 @@ struct IslandView: View {
     }
 
     /// Room kept free for the pet at the right of notch-height bars.
-    private var petBarReserve: CGFloat { pet == nil ? 0 : PetLayout.barSlot }
+    private var petBarReserve: CGFloat { pet.map { PetMetrics($0.size).barSlot } ?? 0 }
 
     /// Room kept free for the larger pet at the right of the expanded island.
-    private var petExpandedReserve: CGFloat { pet == nil ? 0 : PetLayout.expandedReserve }
+    private var petExpandedReserve: CGFloat { pet.map { PetMetrics($0.size).expandedReserve } ?? 0 }
 
     /// The island's silhouette for the current (target) shape: flared at the
     /// top like the notch, and in the pet's idle dock a continuation of the

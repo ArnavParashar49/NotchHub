@@ -25,11 +25,15 @@ extension NotchHubApp {
     /// display with a notch: elsewhere idle stays fully transparent.
     var petDocked: Bool { petVisible && window.hasNotch }
 
-    /// Room the pet takes at the right of notch-height bars.
-    var petBarReserve: CGFloat { petVisible ? PetLayout.barSlot : 0 }
+    /// The pet's measurements at the size the user chose.
+    var petMetrics: PetMetrics { PetMetrics(petSettings.size) }
 
-    /// The idle island's dock for the pet, where the brain has it.
-    var petIdleDock: PetDock? { petDocked ? petBrain.dock : nil }
+    /// Room the pet takes at the right of notch-height bars.
+    var petBarReserve: CGFloat { petVisible ? petMetrics.barSlot : 0 }
+
+    /// The idle island's dock for the pet, where the brain has it — as far
+    /// out as a pet of this size needs.
+    var petIdleDock: PetDock? { petDocked ? petMetrics.dock(petBrain.dock) : nil }
 
     // MARK: - Context
 
@@ -68,6 +72,8 @@ extension NotchHubApp {
         // an OK the pose is its "!" — whatever state the core reports (a tool
         // the voice model called itself leaves it "speaking", then "listening").
         context.neoState = neoPresent ? (neoConfirm.card != nil ? .confirming : neoPresence.state) : nil
+        context.energy = petSettings.energy
+        context.night = petSettings.night
         return context
     }
 
@@ -113,7 +119,12 @@ extension NotchHubApp {
         return .shown(PetRenderModel(
             presentation: petBrain.presentation,
             look: petSettings.look,
-            hat: petSettings.hat.hat(on: now, holiday: todaysHoliday(now: now))
+            hat: petSettings.hat.hat(on: now, holiday: todaysHoliday(now: now)),
+            palette: petSettings.usesCustomFur ? petPalette : nil,
+            accessory: petSettings.accessory.accessory,
+            size: petSettings.size,
+            glow: petGlow,
+            name: petSettings.displayName
         ))
     }
 
@@ -272,7 +283,8 @@ extension NotchHubApp {
         let content = islandModel.contentSize
         let dock = content.petDock ?? .home
         let frame = window.localFrame(for: state, content: content)
-        guard let placement = PetLayout.placement(for: state, islandSize: frame.size, notchHeight: window.notchHeight, dock: dock) else {
+        guard let placement = PetLayout.placement(for: state, islandSize: frame.size, notchHeight: window.notchHeight, dock: dock,
+                                                  size: petSettings.size) else {
             return nil
         }
         var rect = CGRect(
@@ -286,8 +298,8 @@ extension NotchHubApp {
             if live {
                 let presentation = petBrain.presentation
                 let offset = presentation.animation.animation.offset(at: Date().timeIntervalSince(presentation.startedAt))
-                rect.origin.x += CGFloat(presentation.mirrored ? -offset.dx : offset.dx)
-                rect.origin.y -= CGFloat(offset.dy)
+                rect.origin.x += PetMetrics.points(presentation.mirrored ? -offset.dx : offset.dx, scale: placement.scale)
+                rect.origin.y -= PetMetrics.points(offset.dy, scale: placement.scale)
                 let notch = window.localFrame(for: .idle, content: .default)
                 let beside = dock.side == .right
                     ? CGRect(x: notch.maxX, y: frame.minY, width: dock.reach, height: frame.height)
@@ -300,7 +312,7 @@ extension NotchHubApp {
                 return nil
             case .peeking:
                 let half = placement.size / 2
-                let offset = CGFloat(PetLayout.peekOffset)
+                let offset = PetMetrics.points(PetLayout.peekOffset, scale: placement.scale)
                 rect.origin.x += dock.side == .right ? offset + half : -offset
                 rect.size.width = half
             case .home:
@@ -376,11 +388,15 @@ extension NotchHubApp {
             case let .look(look):
                 var settings = petSettings
                 settings.look = look
+                // A swatch is a preset: it takes over from a custom colour.
+                settings.usesCustomFur = false
                 applyPetSettings(settings)
             case .hat:
                 var settings = petSettings
                 settings.hat = settings.hat.next
                 applyPetSettings(settings)
+            case .more:
+                openPetSettings()
             case .pet:
                 petBrain.handle(.bigPetClicked, context: petContext(), now: Date())
                 refreshPet()
@@ -456,10 +472,24 @@ extension NotchHubApp {
 
     // MARK: - Settings
 
+    /// "More…" in the pet's panel: Settings, opened on the pet's own page.
+    func openPetSettings() {
+        closePetPanel()
+        settingsStartPage = .pet
+        if panel != .settings {
+            toggleSettings()
+        }
+        log("pet: settings")
+    }
+
     func applyPetSettings(_ settings: PetSettings) {
         guard settings != petSettings else { return }
         let holidaysTurnedOn = settings.holidays && !petSettings.holidays
         petSettings = settings
+        // Derived once per change, never per frame.
+        petPalette = settings.palette
+        petGlow = settings.glowColor
+        petBrain.setHome(settings.home)
         // Keep the Settings panel's snapshot current, so saving any setting there
         // never writes back an older look or hat chosen in the pet's panel.
         settingsModel.petSettings = settings

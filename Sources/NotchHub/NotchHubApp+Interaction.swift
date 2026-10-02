@@ -93,7 +93,7 @@ extension NotchHubApp {
         return MediaControlLayout.placement(
             in: window.localFrame(for: state, content: islandModel.contentSize),
             notchInset: window.notchHeight,
-            trailingReserve: petVisible ? PetLayout.expandedReserve : 0
+            trailingReserve: petVisible ? petMetrics.expandedReserve : 0
         )
     }
 
