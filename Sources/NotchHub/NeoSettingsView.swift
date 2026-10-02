@@ -93,7 +93,7 @@ struct NeoSettingsSection: View {
                 Text("NEO in the notch")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundStyle(DesignTokens.textPrimary)
-                Text("Its orb and chat in the notch")
+                Text("Neo the fox and its chat in the notch")
                     .font(.system(size: 10, weight: .medium, design: .rounded))
                     .foregroundStyle(DesignTokens.textTertiary)
                     .lineLimit(1)
