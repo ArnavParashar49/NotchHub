@@ -31,9 +31,9 @@ wrapper). Three layers, strictly separated:
   - `NeoState` · `NeoStateHold` · `NeoPresenceModel` · `NeoPanelModel` —
     NEO's state, the dwell that keeps the fox from strobing, whether NEO is
     here and busy, and whether its chat is open
-  - `NeoListeningIndicator` · `NeoListeningLayout` — the glow behind the fox
-    while NEO listens: when it shows, how it breathes, how long the word
-    "Listening" stands beside it, and the room that word takes
+  - `NeoListeningIndicator` · `NeoListeningLayout` — the glow that pulses
+    once behind the fox each time NEO starts to listen: the pulse's window,
+    its curve, and where it shows (it takes no room)
   - `Activity` / `ActivityKind` — the activity model
   - `ActivityQueue` — primary + stack, priority ordering, transients, auto-dismiss
   - `IslandStateMachine` — idle / wings / compact / expanded / interactive
@@ -127,39 +127,43 @@ NEO is busy its pose is what NEO is doing. With NEO ready the fox lives its
 own life — the idle island is exactly the pre-NEO one, mischief and all —
 and with NEO active the fox simply animates, in whatever shape the island is
 in (idle, the hover wings, the compact bar, the expanded island). One thing
-is added, and only while NEO is **listening** (its microphone is live): a
-soft glow behind the fox.
+is added, each time NEO starts **listening** (its microphone is live): a
+soft glow pulses once behind the fox.
 
-**The listening glow** (`NeoListeningIndicator`, `NeoListeningGlowView`): a
-halo breathes behind the fox, as if it were lit up and paying attention — a
-blurred radial glow the fox's size + 6 pt (22 pt around the 16-pt fox of the
-notch strip, 38 pt around the expanded island's), in a cool cyan-teal
-(`DesignTokens.listeningGlow`: the complement of the fox's orange, and
-neither the now-playing visualizer's green nor the system's mic and camera
-dots). Its opacity goes 0.35 ↔ 0.75 and its scale 0.92 ↔ 1.06 on a 1.6 s
-sine. It takes **no room**: the island does not grow for it, and it is
-clipped to the island's black shape. It comes up on a soft spring when NEO's
-state becomes listening and fades the moment it leaves. For the first 1.5 s
-of each stretch of listening the word "Listening" stands beside the fox, on
-its inner side — toward the notch, never under it — and the fox's side of
-the island makes 56 pt of room for it (the idle dock, the wings and the
-compact bar grow; the expanded island's content gives the room up), on the
-same spring and in the same transaction as the island; then the word fades
-and the island is exactly as wide as it is without NEO. In a panel's notch
-strip (the dashboard, an app panel, a call's controls) there is the glow
-only, never the word. On the idle dock the glow waits for the fox to stand
-at its spot (a game comes home first). NEO's core reports THAT it is
-listening, not how loud the room is, so the glow keeps its own slow rhythm
-and claims no level; with Reduce Motion it is steady. It never takes a
-click, is hidden from capture with the rest of the island in Ghost Mode, and
-reads "Neo is listening" to assistive technology. It is the design system's
-one gradient: it is light, not a surface.
+**The listening glow** (`NeoListeningIndicator`, `NeoListeningGlowView`):
+when NEO's state becomes listening a halo swells in behind the fox, peaks
+and fades fully out — ONE pulse, as if the fox pricked up and lit for a
+moment — and then nothing is drawn for the rest of that stretch of
+listening, however long it lasts. A new stretch (the state left listening
+and came back) pulses again. It is a blurred radial glow the fox's size +
+6 pt (22 pt around the 16-pt fox of the notch strip, 38 pt around the
+expanded island's), in a cool cyan-teal (`DesignTokens.listeningGlow`: the
+complement of the fox's orange, and neither the now-playing visualizer's
+green nor the system's mic and camera dots). The pulse lasts 1.4 s
+(`NeoListeningLayout.pulse`, 0 → 1 → 0): an eased rise to its peak at
+0.45 s — opacity 0.8, scale 1.06 — then a slower eased fall to nothing at
+1.4 s (opacity 0 → 0.8 → 0, scale 0.88 → 1.06 → 0.88; each half a
+half-cosine). If listening ends mid-pulse, what is lit fades on a quick
+ease-out (0.3 s). It takes **no room**, and there is no word beside it: the
+island never changes width for listening — idle, wings, compact and
+expanded have exactly the frames they have without NEO — and the glow is
+clipped to the island's black shape. It shows wherever the fox rides,
+including a panel's notch strip (the dashboard, an app panel, a call's
+controls), and nowhere the fox steps aside. On the idle dock the pulse
+waits for the fox to stand at its spot (a game comes home first), and then
+runs whole. NEO's core reports THAT it is listening, not how loud the room
+is, so the pulse has its own shape and claims no level; with Reduce Motion
+it is a single soft fade in and out (to opacity 0.6) at a fixed scale. It
+never takes a click, is hidden from capture with the rest of the island in
+Ghost Mode, and reads "Neo is listening" to assistive technology while the
+pulse shows. It is the design system's one gradient: it is light, not a
+surface.
 
 The poses, from the fox's own frames (`PetBrain.neoAnimation`):
 
 - **connecting** → waking: a stretch, then standing alert
-- **listening** → attentive: ears up, eyes on you, a slow breath — in the
-  listening glow
+- **listening** → attentive: ears up, eyes on you, a slow breath — lit
+  once by the listening glow as it starts
 - **thinking** → the thought bubble, scratching its head
 - **working** → pacing toward the notch and back
 - **searching** → the magnifier, then a sniff along the ground
@@ -181,9 +185,10 @@ and reconnects every 1.5 s while NEO is off. The toggle is **NEO** in
 Settings. `--neo-demo` runs a scripted turn through the fox without a core
 (the panel stays closed through the answer and opens at the OK);
 `--neo-snapshots DIR` renders each pose offscreen in each island shape
-(`--neo-snapshots DIR listening` only the listening rows: 0.5 s and 3 s into
-listening, in every shape); `--neo-glow-zoom DIR` renders the fox and its
-glow enlarged, at the top and the bottom of a breath.
+(`--neo-snapshots DIR listening` only the listening rows: 0.45 s — the
+pulse at its peak — 1.0 s — fading — and 3 s — nothing — into listening, in
+every shape); `--neo-glow-zoom DIR` renders the fox and its glow enlarged:
+NEO idle, the pulse at its peak, and the pulse fading.
 `NOTCHHUB_NEO_DIST=<folder>` serves that build of NEO's page (a `ui/dist`)
 instead of the installed one, for a debug run or the built-page tests.
 `NOTCHHUB_NEO_SNAPSHOTS=<dir>` makes `kill -USR1 <pid>` write NEO's page as it

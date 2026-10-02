@@ -154,26 +154,42 @@ func runSelfTest() -> Int32 {
     check(ActivityBridge.activity(for: SystemEvent(source: .nowPlaying, payload: .nowPlayingStopped)) == nil,
           "playback-stopped maps to nil (handled by the queue)")
 
-    // --- NEO's listening mark ---
-    // Shown only while NEO listens: a glow behind the pet, with the word
-    // beside it for 1.5 s; after that it takes no room at all, and nothing —
-    // no glow, no room — the rest of the time.
+    // --- NEO's listening pulse ---
+    // Each time NEO starts to listen a glow pulses ONCE behind the pet —
+    // 1.4 s, dark to dark — and then nothing shows for the rest of that
+    // stretch. It never takes any room.
     let heard = Date(timeIntervalSinceReferenceDate: 0)
     var listening = NeoListeningIndicator()
-    check(listening.mark(for: .idle, at: heard, labelWidth: 50) == nil, "no listening mark while NEO is not listening")
+    check(listening.mark(for: .idle, at: heard) == nil, "no listening mark while NEO is not listening")
     listening.update(listening: true, at: heard)
-    let early = listening.mark(for: .idle, at: heard.addingTimeInterval(0.5), labelWidth: 50)
-    check(early?.showsLabel == true && early?.slot == NeoListeningLayout.maxSlot, "listening: the glow and the word for the first 1.5 s (56 pt on the pet's side)")
-    let settledMark = listening.mark(for: .idle, at: heard.addingTimeInterval(3), labelWidth: 50)
-    check(settledMark != nil && settledMark?.showsLabel == false && settledMark?.slot == 0, "listening: then the glow alone — no extra width")
-    check(listening.mark(for: .interactive, at: heard.addingTimeInterval(0.5), labelWidth: 50) == NeoListeningMark(showsLabel: false, labelWidth: 0, slot: 0, since: heard),
-          "a fixed strip shows the glow only: no word, no room")
-    check(NeoListeningLayout.glowDiameter(petSize: PetLayout.artSize) * NeoListeningLayout.glowScaleRange.upperBound <= 32,
-          "the glow (the fox + 6 pt) stays inside the 32-pt notch strip at the top of a breath")
-    check(NeoListeningLayout.glowOpacity(breath: 0) == 0.35 && NeoListeningLayout.glowOpacity(breath: 1) == 0.75 && NeoListeningLayout.breathPeriod == 1.6,
-          "the glow breathes 0.35–0.75 on a 1.6 s cycle")
+    check(NeoListeningIndicator.pulseDuration == 1.4 && listening.nextWake(at: heard) == heard.addingTimeInterval(1.4),
+          "listening: one pulse of 1.4 s, and the model says when it ends")
+    check(listening.mark(for: .idle, at: heard.addingTimeInterval(0.45)) == NeoListeningMark(pulseStart: heard)
+            && listening.mark(for: .interactive, at: heard.addingTimeInterval(0.45)) == NeoListeningMark(pulseStart: heard),
+          "listening: the glow shows during the pulse — on the idle dock and in a fixed strip alike")
+    check(listening.mark(for: .idle, at: heard.addingTimeInterval(1.4)) == nil && listening.mark(for: .idle, at: heard.addingTimeInterval(3)) == nil
+            && listening.nextWake(at: heard.addingTimeInterval(1.4)) == nil,
+          "listening: nothing once the pulse is over, however long NEO listens")
+    listening.update(listening: true, at: heard.addingTimeInterval(3))
+    check(listening.mark(for: .idle, at: heard.addingTimeInterval(3.1)) == nil, "still listening: the same stretch never pulses twice")
+    check(NeoListeningLayout.pulse(at: 0) == 0 && abs(NeoListeningLayout.pulse(at: 0.45) - 1) < 1e-9 && NeoListeningLayout.pulse(at: 1.4) == 0
+            && abs(NeoListeningLayout.glowOpacity(pulse: 1) - 0.8) < 1e-9 && abs(NeoListeningLayout.glowScale(pulse: 1) - 1.06) < 1e-9,
+          "the pulse: dark at 0, its peak (opacity 0.8, scale 1.06) at 0.45 s, dark again at 1.4 s")
+    check(NeoListeningLayout.glowScale(pulse: 1, reduceMotion: true) == 1 && NeoListeningLayout.glowScale(pulse: 0, reduceMotion: true) == 1,
+          "Reduce Motion: the glow fades in and out at a fixed scale")
+    check(NeoListeningLayout.glowDiameter(petSize: PetLayout.artSize) * NeoListeningLayout.pulseScaleRange.upperBound <= 32,
+          "the glow (the fox + 6 pt) stays inside the 32-pt notch strip at the peak of the pulse")
+    var dockedContent = IslandContentSize.default
+    dockedContent.petDock = .home
+    let selftestGeometry = NotchGeometry.make(screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982), safeAreaInsets: NSEdgeInsets(top: 32, left: 0, bottom: 0, right: 0))
+    check(selftestGeometry.frame(for: .idle, content: dockedContent) == selftestGeometry.compactBar(lead: 0, trail: PetLayout.idleDock),
+          "listening takes no room: the idle dock is the pet's dock and nothing more")
     listening.update(listening: false, at: heard.addingTimeInterval(4))
-    check(listening.mark(for: .idle, at: heard.addingTimeInterval(4), labelWidth: 50) == nil, "the mark is gone the moment NEO stops listening")
+    listening.update(listening: true, at: heard.addingTimeInterval(5))
+    check(listening.mark(for: .idle, at: heard.addingTimeInterval(5.45)) == NeoListeningMark(pulseStart: heard.addingTimeInterval(5)),
+          "a new stretch of listening pulses again")
+    listening.update(listening: false, at: heard.addingTimeInterval(5.5))
+    check(listening.mark(for: .idle, at: heard.addingTimeInterval(5.5)) == nil, "the mark is gone the moment NEO stops listening, mid-pulse or not")
 
     print("")
     print(failures == 0 ? "SELF-TEST PASSED" : "SELF-TEST FAILED (\(failures) failures)")
@@ -278,12 +294,12 @@ if let index = arguments.firstIndex(of: "--surface-snapshots") {
 if let index = arguments.firstIndex(of: "--neo-snapshots") {
     let directory = index + 1 < arguments.count ? arguments[index + 1] : "."
     // An optional third argument keeps only the rows whose name contains it
-    // (`listening`: NEO's listening glow in every shape).
+    // (`listening`: NEO's listening pulse in every shape).
     let filter = index + 2 < arguments.count ? arguments[index + 2] : nil
     exit(MainActor.assumeIsolated { NeoSnapshots.render(directory: directory, filter: filter) })
 }
 
-// --neo-glow-zoom DIR: the fox and its listening glow, enlarged, at the top and bottom of a breath (headless).
+// --neo-glow-zoom DIR: the fox and its listening glow, enlarged — NEO idle, the pulse at its peak, the pulse fading (headless).
 if let index = arguments.firstIndex(of: "--neo-glow-zoom") {
     let directory = index + 1 < arguments.count ? arguments[index + 1] : "."
     exit(MainActor.assumeIsolated { NeoSnapshots.renderGlowZoom(directory: directory) })

@@ -45,8 +45,8 @@ final class IslandModel: ObservableObject {
     @Published var meeting: Meeting?
     /// The pixel pet, when shown.
     @Published var pet: PetRenderModel?
-    /// NEO's listening mark — the glow behind the pet, and at first the word
-    /// beside it — while NEO's microphone is live.
+    /// NEO's listening mark — the one pulse of light behind the pet when NEO
+    /// starts to listen; `nil` while no pulse shows.
     @Published var listening: NeoListeningMark?
     /// Whether this display has a notch (no idle dock or idle pet without one).
     @Published var hasNotch: Bool = true

@@ -1,135 +1,118 @@
 import CoreGraphics
 import Foundation
 
-/// The "NEO is listening" mark: whether it shows, and for how long it
-/// carries its word.
+/// The "NEO is listening" mark: one pulse of light behind the pet, each time
+/// NEO starts to listen.
 ///
-/// While NEO's held state is `listening` — its microphone is live — a soft
-/// halo breathes BEHIND the pet, as if it were lit up and paying attention.
-/// For the first `labelDuration` after listening starts the word "Listening"
-/// stands beside the pet, on its inner side (toward the notch); then the word
-/// leaves and only the glow remains — taking no room at all: the island is
-/// exactly as wide as it is without NEO. The moment the state leaves
-/// `listening` the glow fades. With NEO idle or away there is no mark at all,
-/// and the island is exactly what it was.
+/// When NEO's held state becomes `listening` — its microphone is live — a
+/// soft halo swells in BEHIND the pet, peaks, and fades fully out: ONE pulse,
+/// `pulseDuration` long, as if the fox pricked up and lit for a moment. Then
+/// nothing is drawn for the rest of that stretch of listening, however long
+/// it lasts. A new stretch (the state left `listening` and came back) pulses
+/// again. If listening ends mid-pulse the mark goes at once, and the view
+/// finishes the fade. It takes no room at all: the island is exactly what it
+/// is without NEO, always.
 ///
 /// Pure and clock-driven like `NeoPresenceModel`: the app feeds it NEO's held
-/// state, and `nextWake(at:)` says when the word will step aside, so nothing
-/// polls.
+/// state, and `nextWake(at:)` says when the pulse is over, so nothing polls.
 public struct NeoListeningIndicator: Equatable, Sendable {
 
-    public enum Phase: Equatable, Sendable {
-        /// NEO is not listening: nothing is drawn, nothing is reserved.
-        case hidden
-        /// Listening just started: the glow behind the pet, and the word
-        /// beside it.
-        case labelled
-        /// Still listening: the glow alone — no room taken.
-        case glow
-    }
-
-    /// How long the word stays after listening starts.
-    public static let labelDuration: TimeInterval = 1.5
-    /// The word itself.
-    public static let label = "Listening"
-    /// What assistive technology reads for the mark.
+    /// How long the one pulse lasts, from dark to dark.
+    public static let pulseDuration: TimeInterval = 1.4
+    /// What assistive technology reads for the mark, while the pulse shows.
     public static var accessibilityLabel: String { "\(PetIdentity.name) is listening" }
 
     /// When this stretch of listening began; `nil` while NEO is not listening.
     public private(set) var since: Date?
+    /// When this stretch's pulse began: with the stretch — or, on the idle
+    /// dock with the pet away from its spot, the moment the pet came home.
+    /// `nil` while NEO is not listening, and while the pulse still waits for
+    /// the pet. Set once per stretch: a stretch never pulses twice.
+    public private(set) var pulseStart: Date?
 
     public init() {}
 
     /// Takes whether NEO is listening right now (its held state, and its core
-    /// connected). Returns whether the mark appeared or disappeared. A stretch
-    /// that is still going keeps its start: only a NEW stretch shows the word
-    /// again.
+    /// connected), and whether the pet stands where the glow would light it
+    /// (`petInPlace`: always, except on the idle dock while it hides in the
+    /// notch, peeks or plays — the pulse waits for it to come home). Returns
+    /// whether anything changed: the stretch began or ended, or its pulse
+    /// began. A stretch that is still going keeps its start and its one
+    /// pulse: only a NEW stretch pulses again.
     @discardableResult
-    public mutating func update(listening: Bool, at now: Date) -> Bool {
-        if listening {
-            guard since == nil else { return false }
-            since = now
+    public mutating func update(listening: Bool, at now: Date, petInPlace: Bool = true) -> Bool {
+        guard listening else {
+            guard since != nil else { return false }
+            since = nil
+            pulseStart = nil
             return true
         }
-        guard since != nil else { return false }
-        since = nil
-        return true
+        var changed = false
+        if since == nil {
+            since = now
+            changed = true
+        }
+        if pulseStart == nil, petInPlace {
+            pulseStart = now
+            changed = true
+        }
+        return changed
     }
 
-    /// Takes NEO's presence: the mark shows only while its core is connected
-    /// and its held state is `listening`.
+    /// Takes NEO's presence: a stretch of listening runs only while its core
+    /// is connected and its held state is `listening`.
     @discardableResult
-    public mutating func update(presence: NeoPresenceModel, at now: Date) -> Bool {
-        update(listening: presence.isConnected && presence.state == .listening, at: now)
+    public mutating func update(presence: NeoPresenceModel, at now: Date, petInPlace: Bool = true) -> Bool {
+        update(listening: presence.isConnected && presence.state == .listening, at: now, petInPlace: petInPlace)
     }
 
-    public func phase(at now: Date) -> Phase {
-        guard let since else { return .hidden }
-        return now.timeIntervalSince(since) < Self.labelDuration ? .labelled : .glow
+    /// Whether the pulse is showing: begun, and not yet over.
+    public func isPulsing(at now: Date) -> Bool {
+        guard let pulseStart, let end = pulseEnd else { return false }
+        return now >= pulseStart && now < end
     }
 
-    /// When the word steps aside on its own; `nil` once it has, or while the
-    /// mark is hidden.
+    /// When the pulse is over: `pulseDuration` after it began.
+    public var pulseEnd: Date? {
+        pulseStart?.addingTimeInterval(Self.pulseDuration)
+    }
+
+    /// When the pulse ends on its own; `nil` once it has, before it has
+    /// begun, and while NEO is not listening. At that instant the mark is
+    /// already gone, so the app's wake-up there finds nothing left to draw.
     public func nextWake(at now: Date) -> Date? {
-        guard let since else { return nil }
-        let end = since.addingTimeInterval(Self.labelDuration)
+        guard let end = pulseEnd else { return nil }
         return end > now ? end : nil
     }
 
-    /// The mark as an island shape draws it, or `nil` where it does not show:
-    /// while hidden, on surfaces the pet steps aside for, and on the idle dock
-    /// while the pet is not standing at its spot (`petAtHome` — hiding in the
-    /// notch, peeking, mid-game), where there is no pet to light.
-    ///
-    /// `labelWidth` is the word's measured width in the compact font.
-    public func mark(for state: IslandState, at now: Date, labelWidth: CGFloat, petAtHome: Bool = true) -> NeoListeningMark? {
-        guard let since else { return nil }
-        guard let room = NeoListeningLayout.room(in: state) else { return nil }
+    /// The mark as an island shape draws it, or `nil` where nothing shows:
+    /// NEO not listening, the pulse over (or not begun), a surface the pet
+    /// steps aside for, and the idle dock while the pet is not standing at
+    /// its spot (`petAtHome` — hiding in the notch, peeking, mid-game), where
+    /// there is no pet to light.
+    public func mark(for state: IslandState, at now: Date, petAtHome: Bool = true) -> NeoListeningMark? {
+        guard let pulseStart, isPulsing(at: now) else { return nil }
+        guard NeoListeningLayout.shows(in: state) else { return nil }
         if state == .idle, !petAtHome { return nil }
-        let label = min(max(0, labelWidth), NeoListeningLayout.maxLabelWidth)
-        switch room {
-        case .grows:
-            let showsLabel = phase(at: now) == .labelled && label > 0
-            return NeoListeningMark(
-                showsLabel: showsLabel,
-                labelWidth: showsLabel ? label : 0,
-                slot: NeoListeningLayout.slot(showsLabel ? .labelled : .glow, labelWidth: label),
-                since: since
-            )
-        case .fits:
-            return NeoListeningMark(showsLabel: false, labelWidth: 0, slot: 0, since: since)
-        }
+        return NeoListeningMark(pulseStart: pulseStart)
     }
 }
 
-/// The listening mark in one island shape.
+/// The listening mark while its pulse shows. It is the same in every island
+/// shape, and takes no room in any of them.
 public struct NeoListeningMark: Equatable, Sendable {
-    /// Whether the word stands beside the pet.
-    public var showsLabel: Bool
-    /// The word's width (0 without it).
-    public var labelWidth: CGFloat
-    /// Room the mark takes on the pet's inner side: how far the idle dock,
-    /// the wings and the compact bar grow (on the pet's side only), and what
-    /// the expanded island's content gives up. Only the word takes room:
-    /// `0` once it has gone — the glow sits behind the pet — and on the
-    /// fixed-strip surfaces, which never show the word.
-    public var slot: CGFloat
-    /// When listening began — the glow's breathing runs from here.
-    public var since: Date
+    /// When the pulse began — the glow's curve runs from here
+    /// (`NeoListeningLayout.pulse(at:)`).
+    public var pulseStart: Date
 
-    public init(showsLabel: Bool, labelWidth: CGFloat, slot: CGFloat, since: Date) {
-        self.showsLabel = showsLabel
-        self.labelWidth = labelWidth
-        self.slot = slot
-        self.since = since
+    public init(pulseStart: Date) {
+        self.pulseStart = pulseStart
     }
 }
 
-/// The listening mark's measurements, where it sits, and how it breathes.
+/// The listening glow's measurements, where it sits, and its one pulse.
 ///
-/// `[ notch ][ inset ][ Listening ][ gap ][ pet ][ inset ]` — the glow is
-/// centred on the pet, behind it; the word stands on the notch's side of the
-/// pet, and when it leaves nothing else moves.
+/// The glow is centred on the pet, behind it, and nothing else moves for it.
 public enum NeoListeningLayout {
 
     // MARK: - The glow
@@ -148,40 +131,56 @@ public enum NeoListeningLayout {
     /// must read as light, not as a disc.
     public static let glowBlur: CGFloat = 2
 
-    /// One full breath: dim → bright → dim.
-    public static let breathPeriod: TimeInterval = 1.6
-    /// The halo's opacity at the bottom and the top of a breath.
-    public static let glowOpacityRange: ClosedRange<Double> = 0.35...0.75
-    /// The halo's scale at the bottom and the top of a breath.
-    public static let glowScaleRange: ClosedRange<CGFloat> = 0.92...1.06
-    /// With Reduce Motion: a steady glow, mid-breath, at its drawn size.
-    public static let steadyOpacity: Double = 0.55
-    public static let steadyScale: CGFloat = 1
+    // MARK: - The pulse
 
-    /// Where the breath is (0 = dimmest, 1 = brightest) `time` seconds into
-    /// listening: a sine, so it eases in and out of both ends. It starts
-    /// half-way and rising — the halo blooms to its brightest 0.4 s in, as it
-    /// finishes fading in — and is dimmest at 1.2 s, then every 1.6 s.
+    /// The whole pulse, dark to dark.
+    public static var pulseDuration: TimeInterval { NeoListeningIndicator.pulseDuration }
+    /// The swell: dark to the peak.
+    public static let pulseRise: TimeInterval = 0.45
+    /// The fade: the peak back to dark — slower than the swell.
+    public static var pulseFall: TimeInterval { pulseDuration - pulseRise }
+
+    /// The halo's opacity at the peak of the pulse.
+    public static let peakOpacity: Double = 0.8
+    /// The halo's scale at the two dark ends of the pulse and at its peak:
+    /// it swells as it brightens and draws back in as it fades.
+    public static let pulseScaleRange: ClosedRange<CGFloat> = 0.88...1.06
+    /// With Reduce Motion: a softer peak, and no swelling — the halo stays at
+    /// its drawn size and only fades in and out.
+    public static let reducedMotionPeakOpacity: Double = 0.6
+    public static let reducedMotionScale: CGFloat = 1
+
+    /// Where the pulse is (0 = dark, 1 = its peak) `time` seconds after it
+    /// began: an eased rise to 1 at `pulseRise` (0.45 s), then a slower eased
+    /// fall to 0 at `pulseDuration` (1.4 s). Each half is a half-cosine, so
+    /// the curve leaves the dark, crests and lands without a corner. Before
+    /// the pulse and after it: 0 — nothing is drawn.
     ///
     /// PROCEDURAL: NEO's core reports that it is listening, not how loud the
-    /// room is, so the glow keeps its own slow rhythm and claims nothing
-    /// about the microphone's level.
-    public static func breath(at time: TimeInterval) -> Double {
-        0.5 + 0.5 * sin(2 * .pi * time / breathPeriod)
+    /// room is, so the pulse has its own shape and claims nothing about the
+    /// microphone's level.
+    public static func pulse(at time: TimeInterval) -> Double {
+        guard time > 0, time < pulseDuration else { return 0 }
+        if time <= pulseRise {
+            return 0.5 - 0.5 * cos(.pi * time / pulseRise)
+        }
+        return 0.5 + 0.5 * cos(.pi * (time - pulseRise) / pulseFall)
     }
 
-    public static func glowOpacity(breath: Double) -> Double {
-        let b = min(1, max(0, breath))
-        return glowOpacityRange.lowerBound + (glowOpacityRange.upperBound - glowOpacityRange.lowerBound) * b
+    /// The halo's opacity at a point of the pulse.
+    public static func glowOpacity(pulse: Double, reduceMotion: Bool = false) -> Double {
+        (reduceMotion ? reducedMotionPeakOpacity : peakOpacity) * min(1, max(0, pulse))
     }
 
-    public static func glowScale(breath: Double) -> CGFloat {
-        let b = CGFloat(min(1, max(0, breath)))
-        return glowScaleRange.lowerBound + (glowScaleRange.upperBound - glowScaleRange.lowerBound) * b
+    /// The halo's scale at a point of the pulse.
+    public static func glowScale(pulse: Double, reduceMotion: Bool = false) -> CGFloat {
+        if reduceMotion { return reducedMotionScale }
+        let p = CGFloat(min(1, max(0, pulse)))
+        return pulseScaleRange.lowerBound + (pulseScaleRange.upperBound - pulseScaleRange.lowerBound) * p
     }
 
     /// The halo's square in the island's coordinates (top-left origin),
-    /// centred on the pet. At the top of a breath it is drawn `scale` times
+    /// centred on the pet. At the peak of the pulse it is drawn `scale` times
     /// this, about the same centre.
     public static func glowFrame(behind pet: PetLayout.Placement, scale: CGFloat = 1) -> CGRect {
         let side = glowDiameter(petSize: pet.size) * scale
@@ -189,74 +188,19 @@ public enum NeoListeningLayout {
         return CGRect(x: pet.origin.x + inset, y: pet.origin.y + inset, width: side, height: side)
     }
 
-    // MARK: - The word
+    // MARK: - Where it shows
 
-    /// Space between the word and the pet (the halo's own reach, and as much
-    /// again of clear black).
-    public static let labelGap: CGFloat = 6
-
-    /// The height of the word's row, centred on the pet.
-    public static let labelHeight: CGFloat = 12
-
-    /// The widest the word may be drawn; a longer one truncates.
-    public static let maxLabelWidth: CGFloat = 50
-
-    /// The most the mark ever adds: the word at its widest and its gap, 56 pt.
-    public static var maxSlot: CGFloat { labelGap + maxLabelWidth }
-
-    /// Room the mark needs on the pet's inner side in a phase: the word and
-    /// its gap while it shows, and NOTHING once it has gone.
-    public static func slot(_ phase: NeoListeningIndicator.Phase, labelWidth: CGFloat) -> CGFloat {
-        switch phase {
-        case .hidden, .glow: return 0
-        case .labelled:
-            let label = min(max(0, labelWidth), maxLabelWidth)
-            return label > 0 ? labelGap + label : 0
-        }
-    }
-
-    /// How a shape takes the mark.
-    public enum Room: Equatable, Sendable {
-        /// The shape gives the word its own room on the pet's side for its
-        /// 1.5 s: the idle dock, the wings and the compact bar grow by the
-        /// slot, the expanded island's content gives it up. Afterwards the
-        /// shape is exactly what it is without the mark.
-        case grows
-        /// A fixed strip (the notch strip of the dashboard, an app panel, a
-        /// call's controls): the glow only. Nothing grows, and there is no
-        /// word — beside the pet it would reach under the notch.
-        case fits
-    }
-
-    /// Where the mark rides: every shape the pet does. `nil` where the pet
-    /// steps aside.
-    public static func room(in state: IslandState) -> Room? {
+    /// Whether the glow shows in a shape: every shape the pet rides — the
+    /// idle dock, the wings, the compact bar, the expanded island, and the
+    /// notch strip of the dashboard, an app panel and a call's controls. Not
+    /// where the pet steps aside.
+    public static func shows(in state: IslandState) -> Bool {
         switch state {
-        case .idle, .wings, .compact, .expanded: return .grows
-        case .interactive, .appPanel, .meeting: return .fits
+        case .idle, .wings, .compact, .expanded, .interactive, .appPanel, .meeting:
+            return true
         case .tray, .settings, .fileDrop, .skin,
              .teleprompter, .teleprompterCompose, .camera, .cameraExpanded, .neoPanel:
-            return nil
+            return false
         }
-    }
-
-    /// The word's rectangle in the island's coordinates (top-left origin), on
-    /// the pet's inner side — toward the notch — and centred on the pet.
-    /// Empty (zero width) for a mark without its word.
-    public static func labelFrame(_ mark: NeoListeningMark, beside pet: PetLayout.Placement) -> CGRect {
-        let width = mark.showsLabel ? mark.labelWidth : 0
-        let edge = labelEdge(beside: pet)
-        let x = pet.anchor == .leading ? edge.x : edge.x - width
-        return CGRect(x: x, y: edge.y, width: width, height: labelHeight)
-    }
-
-    /// Where the word meets the pet: the x of its pet-facing side and its
-    /// top, in the island's coordinates. The word grows away from here toward
-    /// the notch.
-    public static func labelEdge(beside pet: PetLayout.Placement) -> CGPoint {
-        CGPoint(
-            x: pet.anchor == .leading ? pet.origin.x + pet.size + labelGap : pet.origin.x - labelGap,
-            y: pet.origin.y + ((pet.size - labelHeight) / 2).rounded(.down)
-        )
     }
 }

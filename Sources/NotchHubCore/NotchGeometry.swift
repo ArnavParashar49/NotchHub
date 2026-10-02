@@ -234,15 +234,7 @@ public struct NotchGeometry: Equatable {
             // The pet's dock beside the notch (see `PetDock`); without one — or
             // while the pet hides in the notch — idle is exactly the notch.
             guard let dock = content.petDock, dock.reach > 0 else { return notchFrame }
-            // For the first moment NEO listens the word "Listening" stands
-            // between the notch and the pet, so the dock reaches that much
-            // further out — on the pet's side only. (Afterwards the slot is
-            // 0: the glow behind the pet takes no room.)
-            let slot = max(0, content.listeningSlot)
-            return compactBar(
-                lead: dock.lead + (dock.side == .left ? slot : 0),
-                trail: dock.trail + (dock.side == .right ? slot : 0)
-            )
+            return compactBar(lead: dock.lead, trail: dock.trail)
         case .wings: return compactBar(lead: content.wingLead ?? content.wingSide, trail: content.wingSide)
         case .compact: return compactBar(lead: content.compactLead, trail: content.compactTrail)
         case .expanded: return expandedFrame

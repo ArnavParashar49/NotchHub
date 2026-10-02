@@ -126,10 +126,6 @@ enum IslandMetrics {
     /// Keeps the island proportional and prevents long titles from sprawling across the menu bar.
     static var maxCompactMusicTextWidth: CGFloat { 110 }
 
-    /// The word beside the pet while NEO starts listening, in the compact font — measured
-    /// once; the island makes exactly this much room for it.
-    static let listeningLabelWidth = textWidth(NeoListeningIndicator.label)
-
     /// Measures a string in the rounded system font, matching how the compact
     /// label renders, so the island sizes itself to the text it will draw.
     ///

@@ -49,8 +49,8 @@ public enum DesignTokens {
     public static let fieldFill = Color.white.opacity(0.06)
     /// Tint for a live call's "on air" state.
     public static let onAir = Color(red: 0.30, green: 0.85, blue: 0.46)
-    /// NEO's listening glow — the soft halo that breathes behind the pet
-    /// while NEO's microphone is live. A cool cyan-teal: it reads as "awake"
+    /// NEO's listening glow — the soft halo that pulses once behind the pet
+    /// when NEO starts to listen (its microphone is live). A cool cyan-teal: it reads as "awake"
     /// on black, it is the complement of the fox's orange (so the fox stands
     /// out against its own light rather than melting into it, as it does in a
     /// warm amber), and it is neither the now-playing visualizer's green nor
@@ -58,10 +58,9 @@ public enum DesignTokens {
     /// as a blurred radial falloff (`NeoListeningGlowView`) — the design
     /// system's one gradient, because it is light and not a surface.
     public static let listeningGlow = Color(red: 0.40, green: 0.88, blue: 0.96)
-    /// How the glow arrives when listening starts: a soft spring, like a lamp
-    /// coming up.
-    public static let listeningGlowIn = Animation.spring(response: 0.42, dampingFraction: 0.78, blendDuration: 0.12)
-    /// How it leaves when listening ends: a plain fade.
+    /// How a pulse cut short leaves, when listening ends before it is over:
+    /// a quick ease-out from wherever it was. (A whole pulse needs nothing:
+    /// its own curve — `NeoListeningLayout.pulse` — begins and ends dark.)
     public static let listeningGlowOut = Animation.easeOut(duration: 0.30)
 
     // MARK: - Panel geometry

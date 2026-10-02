@@ -9,14 +9,14 @@ import NotchHubSystem
 /// held state and whether its core is there — and, from that state and the
 /// card facts, `NeoPanelModel` (`+NeoPanel`). The pet takes NEO's state
 /// through `petContext` (`PetContext.neoState`) and poses as what NEO is
-/// doing. One thing is added, and only while NEO is LISTENING: a soft glow
-/// breathes behind the pet (`NeoListeningIndicator`). For the first 1.5 s
-/// the word "Listening" stands beside the pet and the pet's side of the
-/// island makes room for it; after that the island is exactly as wide as it
-/// is without NEO. The models are pure
-/// and clock-driven: they say when something will change on its own (a held
-/// state becoming due, the settle after idle, the panel folding, the word
-/// stepping aside), and `scheduleNeoWake` comes back exactly then. NEO's state lives here and in
+/// doing. One thing is added, each time NEO starts LISTENING: a soft glow
+/// pulses ONCE behind the pet (`NeoListeningIndicator`) — it swells in,
+/// peaks and fades out over 1.4 s, and then nothing is drawn for the rest of
+/// that stretch of listening. It takes no room: the island is exactly what
+/// it is without NEO, always. The models are pure and clock-driven: they say
+/// when something will change on its own (a held state becoming due, the
+/// settle after idle, the panel folding, the pulse ending), and
+/// `scheduleNeoWake` comes back exactly then. NEO's state lives here and in
 /// the models only — never in the activity queue or the state machine.
 extension NotchHubApp {
 
@@ -51,7 +51,6 @@ extension NotchHubApp {
         }
         // The panel takes NEO's state from the presence's hold: one truth.
         neoPanel.receive(state: neoPresence.state, at: now)
-        updateNeoListening(at: now)
         applyNeoPanel()
         if wasPresent != neoPresent {
             // NEO arriving puts the pet on screen (its dock is a change of
@@ -63,45 +62,57 @@ extension NotchHubApp {
         scheduleNeoWake(neoNextWake(at: now))
     }
 
-    // MARK: - The listening mark
+    // MARK: - The listening pulse
 
-    /// Feeds the listening mark NEO's held state: it shows only while NEO is
-    /// here and listening.
-    func updateNeoListening(at now: Date) {
-        neoListening.update(listening: neoPresent && neoPresence.state == .listening, at: now)
-    }
-
-    /// The word's width in the compact font.
-    static var listeningLabelWidth: CGFloat { IslandMetrics.listeningLabelWidth }
-
-    /// The listening mark for a shape right now, or `nil` where none shows:
-    /// NEO not listening (or away), a surface the pet steps aside for, or the
-    /// idle dock while the pet is not standing at its spot (hiding in the
-    /// notch, peeking, mid-game — it comes home first, as for any NEO pose).
-    func neoListeningMark(for state: IslandState, at now: Date = Date()) -> NeoListeningMark? {
-        guard neoPresent else { return nil }
-        let atHome = petDocked
+    /// Whether the pet stands at its spot on the idle dock — not hiding in
+    /// the notch, peeking, or mid-game (it comes home first, as for any NEO
+    /// pose).
+    var petAtHome: Bool {
+        petDocked
             && petBrain.dock.reach >= PetLayout.idleDock
             && petBrain.presentation.mood != .mischief
-        return neoListening.mark(for: state, at: now, labelWidth: Self.listeningLabelWidth, petAtHome: atHome)
     }
 
-    /// Whether the mark the island drew is no longer the one it should show
-    /// (listening began or ended, the word's moment passed, the pet came home).
-    var listeningNeedsRender: Bool {
-        neoListeningMark(for: currentIslandState()) != islandModel.listening
+    /// The listening mark for a shape right now, or `nil` where none shows:
+    /// NEO not listening (or away), its one pulse over, a surface the pet
+    /// steps aside for, or the idle dock while the pet is not standing at
+    /// its spot.
+    func neoListeningMark(for state: IslandState, at now: Date = Date()) -> NeoListeningMark? {
+        guard neoPresent else { return nil }
+        return neoListening.mark(for: state, at: now, petAtHome: petAtHome)
     }
 
-    /// Re-poses the pet for NEO — and re-renders the island when the
-    /// listening mark changed, so the word and the room it takes move on the
-    /// island's own spring, in one transaction.
-    func refreshNeoPet() {
-        let update = updatePet()
-        if listeningNeedsRender {
-            renderIsland()
-        } else {
-            publishPet(update)
+    /// Feeds the listening indicator NEO's held state — a stretch of
+    /// listening runs only while NEO is here and listening, and its one pulse
+    /// begins once the pet is where the glow would light it — and returns
+    /// the mark for `state`. A pulse that began just now ends on its own:
+    /// the wake-up is planned for then.
+    func updatedNeoListeningMark(for state: IslandState, at now: Date = Date()) -> NeoListeningMark? {
+        let begun = neoListening.pulseStart
+        neoListening.update(
+            listening: neoPresent && neoPresence.state == .listening,
+            at: now,
+            petInPlace: state != .idle || petAtHome
+        )
+        if neoListening.pulseStart != nil, neoListening.pulseStart != begun {
+            scheduleNeoWake(neoNextWake(at: now))
         }
+        return neoListeningMark(for: state, at: now)
+    }
+
+    /// Brings the listening mark up to date and hands it to the island. The
+    /// glow takes no room, so nothing about the island's shape moves for it.
+    func publishNeoListening(at now: Date = Date()) {
+        let mark = updatedNeoListeningMark(for: currentIslandState(), at: now)
+        if islandModel.listening != mark {
+            islandModel.listening = mark
+        }
+    }
+
+    /// Re-poses the pet for NEO, and brings the listening pulse up to date.
+    func refreshNeoPet() {
+        publishPet(updatePet())
+        publishNeoListening()
     }
 
     /// Advances the clocks and re-poses the pet if what NEO shows changed.
@@ -110,10 +121,12 @@ extension NotchHubApp {
         let changed = neoPresence.tick(at: now)
         neoPanel.receive(state: neoPresence.state, at: now)
         _ = neoPanel.tick(at: now)
-        updateNeoListening(at: now)
         applyNeoPanel()
-        if changed || listeningNeedsRender {
+        if changed {
             refreshNeoPet()
+        } else {
+            // The pulse ending is a wake-up of its own.
+            publishNeoListening(at: now)
         }
         scheduleNeoWake(neoNextWake(at: now))
     }
@@ -143,9 +156,10 @@ extension NotchHubApp {
     /// without a core — connect, wake (connecting), listen, think, search,
     /// speak, ask for an OK, go idle — repeating, so the pet can be watched
     /// posing as NEO through a turn and settling back into its own life. The
-    /// island's shape changes only for the word "Listening" (2.6–4.1 s; the
-    /// glow behind the pet stays until 5.6 s and takes no room); the panel stays closed
-    /// through the answer and opens at "Needs your OK", folding 5 s after idle.
+    /// island's shape never changes for it; the glow pulses once behind the
+    /// pet as listening starts (2.6–4.0 s; NEO listens until 5.6 s). The panel
+    /// stays closed through the answer and opens at "Needs your OK", folding
+    /// 5 s after idle.
     func runNeoDemo() {
         let heard = "what's the weather like in Paris this weekend"
         let said = "Paris looks mild this weekend: sunny on Saturday, around 19 degrees, with a few clouds on Sunday."
