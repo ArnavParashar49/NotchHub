@@ -20,9 +20,27 @@ struct NeoListenerParsingTests {
             == [.transcript(role: .user, text: "hi", final: false)])
         #expect(NeoListener.facts(in: #"{"type":"note","data":{"text":"n"},"ts":1}"#) == [.note("n")])
         #expect(NeoListener.facts(in: #"{"type":"error","data":{"message":"m"},"ts":1}"#) == [.error("m")])
-        for other in ["browser_state", "camera_state", "song_state", "tool_start", "tool_end", "turn", "confirm", "problems", "erased", "ui_host"] {
+        for other in ["browser_state", "camera_state", "song_state", "tool_start", "tool_end", "turn", "confirm", "problems", "erased", "ui_host", "shell", "shell_status", "shell_result", "host_attached"] {
             #expect(NeoListener.facts(in: #"{"type":"\#(other)","data":{"state":"speaking"},"ts":1}"#).isEmpty, "\(other)")
         }
+    }
+
+    @Test("what NEO.app's shell reported is read from the hello and from shell_status, and from nothing else")
+    func shellStatus() {
+        let shell = #"{"running":true,"app":true,"accessibility":true,"screen_recording":false,"open_at_login":true,"version":"2.1.0","hotkey":"⌥⌘"}"#
+        let expected = NeoShellStatus(app: true, accessibility: true, screenRecording: false, openAtLogin: true, version: "2.1.0", hotkey: "⌥⌘")
+        #expect(NeoListener.shellStatus(in: #"{"type":"hello","data":{"state":"idle","recent":[],"shell":\#(shell)},"ts":1}"#) == expected)
+        #expect(NeoListener.shellStatus(in: #"{"type":"shell_status","data":\#(shell),"ts":1}"#) == expected)
+        // A core run by hand: it answers, but no NEO.app stands behind it.
+        let bare = #"{"running":true,"app":false,"accessibility":null,"screen_recording":null,"open_at_login":null,"version":null,"hotkey":null}"#
+        #expect(NeoListener.shellStatus(in: #"{"type":"shell_status","data":\#(bare),"ts":1}"#) == NeoShellStatus())
+        // An older core's hello has none; a host's own answers and requests are not a status.
+        #expect(NeoListener.shellStatus(in: #"{"type":"hello","data":{"state":"idle","recent":[]},"ts":1}"#) == nil)
+        #expect(NeoListener.shellStatus(in: #"{"type":"shell_status","data":{"accessibility":true},"ts":1}"#) == nil)
+        for other in ["shell", "shell_result", "state", "host_attached"] {
+            #expect(NeoListener.shellStatus(in: #"{"type":"\#(other)","data":\#(shell),"ts":1}"#) == nil, "\(other)")
+        }
+        #expect(NeoListener.shellStatus(in: "not json") == nil)
     }
 
     @Test("a card's opening and closing are facts for the panel")
@@ -64,7 +82,9 @@ struct NeoListenerParsingTests {
         try "\(token)&x=y".write(to: file, atomically: true, encoding: .utf8)
         #expect(NeoListener.readToken(at: file) == nil)
         let url = NeoListener.socketURL(base: NeoListener.defaultURL, token: token)
-        #expect(url?.absoluteString == "ws://127.0.0.1:8765/?token=\(token)")
+        // The listener says what it is: a host — the one kind of client the
+        // core takes NEO.app's menu actions from.
+        #expect(url?.absoluteString == "ws://127.0.0.1:8765/?token=\(token)&role=host")
     }
 }
 
@@ -94,16 +114,26 @@ struct NeoListenerStubTests {
     private final class Recorder: @unchecked Sendable {
         private let lock = NSLock()
         private var facts: [NeoFact] = []
+        private var statuses: [NeoShellStatus] = []
         func record(_ event: SystemEvent) {
-            guard case let .neo(fact) = event.payload else { return }
             lock.lock()
-            facts.append(fact)
-            lock.unlock()
+            defer { lock.unlock() }
+            switch event.payload {
+            case let .neo(fact): facts.append(fact)
+            case let .neoShell(status): statuses.append(status)
+            default: break
+            }
         }
         var snapshot: [NeoFact] {
             lock.lock()
             defer { lock.unlock() }
             return facts
+        }
+        /// What NEO.app's shell reported, in order.
+        var shells: [NeoShellStatus] {
+            lock.lock()
+            defer { lock.unlock() }
+            return statuses
         }
     }
 
@@ -191,6 +221,43 @@ struct NeoListenerStubTests {
         #expect(commands == ["CMD " + NeoListener.cameraOffCommand])
         #expect(stub.lines.contains("ORIGIN -"))
         #expect(!stub.lines.contains { $0.hasPrefix("REJECT") })
+        // …and with no Origin and `role=host`, the core counts it a host.
+        #expect(stub.lines.contains("ROLE host"))
+
+        // What NEO.app's shell reported: from the hello, then as it changed.
+        let ready = NeoShellStatus(app: true, accessibility: true, screenRecording: true, openAtLogin: true, version: "2.1.0", hotkey: "⌥⌘")
+        var missing = ready
+        missing.screenRecording = false
+        #expect(recorder.shells == [missing, ready])
+    }
+
+    @Test("NEO.app's menu actions go out as shell commands — only while the core is there", .enabled(if: NeoListenerStubTests.available))
+    func shellActions() async throws {
+        let stub = try Stub(drop: false)
+        defer { stub.stop() }
+        #expect(await waitFor { stub.lines.contains("READY") })
+
+        let recorder = Recorder()
+        let listener = NeoListener(url: URL(string: "ws://127.0.0.1:\(stub.port)/")!, tokenFile: stub.tokenFile, reconnectDelay: 0.2) { recorder.record($0) }
+        // Asked before the core is there: dropped, never kept for later.
+        listener.send(.quit)
+        listener.start()
+        #expect(await waitFor { recorder.snapshot.contains(.connected(true)) })
+
+        // Through the monitor, as the app's coordinator sends them.
+        let monitor = SystemMonitor()
+        monitor.register(listener)
+        let actions: [NeoShellAction] = [.settings, .openLogs, .openAtLogin(false), .eraseMemory, .restart, .show]
+        actions.forEach(monitor.neoShell)
+        #expect(await waitFor { stub.lines.filter { $0.hasPrefix("CMD ") }.count == 1 + actions.count })
+        #expect(stub.lines.filter { $0.hasPrefix("CMD ") } == ["CMD " + NeoListener.cameraOffCommand] + actions.map { "CMD " + $0.command })
+        #expect(!stub.lines.contains { $0.contains(#""action":"quit""#) })
+
+        // Stopped: nothing more leaves.
+        listener.stop()
+        listener.send(.quit)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        #expect(!stub.lines.contains { $0.contains(#""action":"quit""#) })
     }
 
     @Test("hosting NEO's UI it says so on connecting, and hands the UI back as it stops", .enabled(if: NeoListenerStubTests.available))
@@ -253,6 +320,8 @@ struct NeoListenerStubTests {
         #expect(await waitFor { stub.lines.contains { $0.hasPrefix("CMD {\"cmd\":\"page\"") } })
         #expect(stub.lines.contains("ORIGIN \(NeoSchemeHandler.origin)"))
         #expect(!stub.lines.contains { $0.hasPrefix("REJECT") })
+        // A page is a page: it never asks to be a host (and the core would refuse it).
+        #expect(stub.lines.contains("ROLE -") && !stub.lines.contains("ROLE host"))
         let command = stub.lines.first { $0.hasPrefix("CMD {\"cmd\":\"page\"") } ?? ""
         #expect(command.contains(#""host":"notch""#) && command.contains(#""area":{"w":760,"h":640}"#))
         #expect(await waitFor { !messages.bodies.isEmpty })

@@ -3,10 +3,14 @@
 Mirrors the parts of neo2/core/server/ws.py the listener depends on: the
 token in the query string, the Origin rule (a request with an Origin header
 that is not NEO's own overlay or the notch's page is refused with 403), the
-`hello` first, then a scripted run of state / transcript / note / error /
-card messages. Every command a client sends is echoed to stdout as
-`CMD <json>`, each connection as `OPEN <n>` and the Origin it came with as
-`ORIGIN <origin>` (`-` for none), so the test can check what a client said.
+role rule (`role=host` beside the token makes a client a host — the only
+kind the core takes NEO.app's menu actions from — and is refused, 403, to
+anything that sent an Origin: no page is ever a host), the `hello` first
+(with what NEO.app's shell reported, `shell`), then a scripted run of state /
+transcript / note / error / card messages and one `shell_status`. Every
+command a client sends is echoed to stdout as `CMD <json>`, each connection
+as `OPEN <n>`, the Origin it came with as `ORIGIN <origin>` and its role as
+`ROLE <role>` (`-` for none), so the test can check what a client said.
 
     neo_stub.py PORT TOKEN [drop]
 
@@ -38,10 +42,16 @@ def admit(connection, request):
     if origin is not None and origin not in ALLOWED_ORIGINS:
         say(f"REJECT origin={origin}")
         return connection.respond(403, "Forbidden origin\n")
-    given = (parse_qs(urlparse(request.path).query).get("token") or [""])[0]
+    query = parse_qs(urlparse(request.path).query)
+    given = (query.get("token") or [""])[0]
     if given != TOKEN:
         say("REJECT token")
         return connection.respond(401, "Missing or wrong token\n")
+    role = (query.get("role") or [""])[0]
+    say(f"ROLE {role or '-'}")
+    if role not in ("", "host") or (role and origin is not None):
+        say(f"REJECT role={role}")
+        return connection.respond(403, "Forbidden role\n")
     return None
 
 
@@ -62,6 +72,10 @@ async def handle(ws):
             "recent": [{"type": "transcript", "data": {"role": "assistant", "text": "stale reply", "final": True}, "ts": 0.5}],
             "confirm": None,
             "problems": [],
+            "host_attached": True,
+            # NEO.app's shell has reported: Screen Recording is not allowed yet.
+            "shell": {"running": True, "app": True, "accessibility": True, "screen_recording": False,
+                      "open_at_login": True, "version": "2.1.0", "hotkey": "⌥⌘"},
         })
         await asyncio.sleep(0.05)
         await send("transcript", {"role": "user", "text": "hello neo", "final": False, "job": ""})
@@ -73,6 +87,11 @@ async def handle(ws):
         await send("transcript", {"role": "assistant", "text": "Hi there", "final": True, "job": ""})
         await send("note", {"text": "quiet result"})
         await send("error", {"message": "boom"})
+        # The user allowed Screen Recording: NEO.app's shell says so, the core tells everyone.
+        await send("shell_status", {"running": True, "app": True, "accessibility": True, "screen_recording": True,
+                                    "open_at_login": True, "version": "2.1.0", "hotkey": "⌥⌘"})
+        await send("shell_result", {"action": "restart", "ok": True})  # an answer to a host: not a fact
+        await send("host_attached", {"attached": True})  # NEO.app's business
         await send("state", {"state": "idle", "job": ""})
         await ws.send(b"\x00\x01\x02")  # a binary frame: ignored
 

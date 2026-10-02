@@ -9,12 +9,22 @@ import NotchHubCore
 /// one file (nothing else under `~/.neo`), connects with the token, and turns
 /// the core's `hello` / `state` / `transcript` / `note` / `error` messages and
 /// its card openings (`browser_open` …) and its `woke` (NEO summoned by hand)
-/// into `NeoFact`s. It sends two kinds
+/// into `NeoFact`s — and what NEO.app's shell reported (the hello's `shell`,
+/// and `shell_status`) into a `NeoShellStatus`. It sends three kinds
 /// of command and nothing else, ever: `camera_view visible:false`, so the
-/// core never streams camera frames to a client that cannot show them; and,
+/// core never streams camera frames to a client that cannot show them;
 /// when NotchHub hosts NEO's UI (`hostsUI`), `ui_host notch` on every
 /// connection and `ui_host window` as it stops, so NEO.app keeps its own
-/// window hidden while the notch shows NEO and brings it back afterwards.
+/// window hidden while the notch shows NEO and brings it back afterwards;
+/// and `shell` (`send(_:)`), one of NEO.app's menu actions, when the user
+/// asks for it in Settings.
+///
+/// It connects as a HOST: `role=host` in the query beside the token. The
+/// core gives the menu's actions to a host alone, and only a native client
+/// can be one — a `URLSession` websocket carries no Origin header, and the
+/// core refuses the role to anything that does (every web page). While a
+/// host is connected NEO.app keeps its menu-bar item away; NotchHub's
+/// Settings carry that menu instead.
 ///
 /// NEO may be off. The listener retries every `reconnectDelay` while the core
 /// is not there, quietly: a missing token file or a refused connection is the
@@ -133,11 +143,26 @@ public final class NeoListener: NSObject, SystemListener {
         return token
     }
 
-    /// The socket URL carrying the token.
+    /// The socket URL carrying the token, and the listener's role: a host.
     static func socketURL(base: URL, token: String) -> URL? {
         guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
-        components.queryItems = [URLQueryItem(name: "token", value: token)]
+        components.queryItems = [URLQueryItem(name: "token", value: token), URLQueryItem(name: "role", value: "host")]
         return components.url
+    }
+
+    // MARK: - NEO.app's menu
+
+    /// Asks NEO.app (through its core) for one of its menu's actions. Dropped
+    /// when the core is not connected: there is nobody to ask, and a command
+    /// kept for later would run at a moment the user did not choose.
+    public func send(_ action: NeoShellAction) {
+        queue.async { [self] in
+            guard isRunning, isConnected, let task else {
+                NotchLog.debug("neo: \(action.name) not sent — no core")
+                return
+            }
+            task.send(.string(action.command)) { _ in }
+        }
     }
 
     private func connect() {
@@ -197,6 +222,9 @@ public final class NeoListener: NSObject, SystemListener {
                 switch result {
                 case let .success(message):
                     if case let .string(text) = message {
+                        if let status = Self.shellStatus(in: text) {
+                            self.emit(SystemEvent(source: .neo, payload: .neoShell(status)))
+                        }
                         for fact in Self.facts(in: text) {
                             self.emit(SystemEvent(source: .neo, payload: .neo(fact)))
                         }
@@ -211,6 +239,21 @@ public final class NeoListener: NSObject, SystemListener {
     }
 
     // MARK: - Parsing
+
+    /// What NEO.app's shell reported, when a message carries it: the `shell`
+    /// object of the core's `hello`, or a `shell_status` event. `nil` for
+    /// every other message, and for a hello from a core too old to send one.
+    public static func shellStatus(in text: String) -> NeoShellStatus? {
+        guard let data = text.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String else { return nil }
+        let payload = object["data"] as? [String: Any] ?? [:]
+        switch type {
+        case "hello": return (payload["shell"] as? [String: Any]).flatMap(NeoShellStatus.init(payload:))
+        case "shell_status": return NeoShellStatus(payload: payload)
+        default: return nil
+        }
+    }
 
     /// The facts in one message from the core. A card's opening and closing
     /// (`browser_open` / `browser_close`, camera, song) are facts for the

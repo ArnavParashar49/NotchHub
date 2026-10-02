@@ -49,7 +49,9 @@ extension NotchHubApp {
                         }
                     ),
                     onChange: {},
-                    onClose: { [weak self] in self?.closeSettings() }
+                    onClose: { [weak self] in self?.closeSettings() },
+                    neo: neoSettings,
+                    onNeo: { [weak self] in self?.neoSettingsIntent($0) }
                 )
             )
 

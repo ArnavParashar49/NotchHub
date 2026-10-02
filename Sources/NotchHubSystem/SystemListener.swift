@@ -206,6 +206,12 @@ public final class SystemMonitor {
         entries.compactMap { $0.listener as? MeetingListener }.forEach { $0.noteLeft(meeting) }
     }
 
+    /// Asks NEO.app, through the NEO listener, for one of its menu's actions
+    /// (the NEO section of Settings). Nothing happens while NEO is off or away.
+    public func neoShell(_ action: NeoShellAction) {
+        entries.compactMap { $0.listener as? NeoListener }.forEach { $0.send(action) }
+    }
+
     /// Asks the meeting listener to read the call's state again soon.
     public func refreshMeeting() {
         entries.compactMap { $0.listener as? MeetingListener }.forEach { $0.pollSoon() }

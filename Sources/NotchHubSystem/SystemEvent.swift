@@ -122,6 +122,9 @@ public struct SystemEvent: Equatable {
         /// A fact from NEO's core: connected or not, its state, a transcript
         /// line, a note or an error. Never an activity.
         case neo(NeoFact)
+        /// What NEO.app's shell reported through the core (its permissions,
+        /// Open at Login, its version): for the NEO section of Settings.
+        case neoShell(NeoShellStatus)
     }
 
     public let source: Source

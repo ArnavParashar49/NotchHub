@@ -103,6 +103,10 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     var neoPanel = NeoPanelModel()
     /// NEO's page in its web view, made on first use and kept.
     var neoWeb: NeoWebHost?
+    /// What NEO.app's shell last reported through its core (permissions, Open
+    /// at Login, version): shown by the NEO section of Settings, which
+    /// carries NEO.app's menu while the notch hosts NEO. See `+NeoSettings`.
+    var neoShellStatus: NeoShellStatus?
     /// The page size NEO's page last asked for (a browser card wants more
     /// than the chat); `nil` is the chat's own size.
     var neoPanelRequest: CGSize?
@@ -419,6 +423,8 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             timerElapsed = nil
         case let .neo(fact):
             neoReceive(fact)
+        case let .neoShell(status):
+            neoShellReceived(status)
         default:
             break
         }

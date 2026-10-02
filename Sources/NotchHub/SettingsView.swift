@@ -132,15 +132,44 @@ extension IslandSettings {
 /// city field, and a quiet footer. Monochrome, like the island itself: a tile
 /// is its own switch — lit white when on, dim when off. The window takes key status while this panel is open
 /// (`needsInteraction`), so these are real SwiftUI controls.
+///
+/// One tile is a door instead of a switch: NEO's opens the NEO section
+/// (`NeoSettingsSection`) — the feature's own switch, and NEO.app's menu,
+/// which lives here while the notch hosts NEO.
 struct SettingsView: View {
+    /// Which page of the panel shows.
+    enum Page: Equatable {
+        case features
+        case neo
+    }
+
     @Binding var settings: IslandSettings
     let onChange: () -> Void
     let onClose: () -> Void
+    /// What the NEO section shows, and where its taps go.
+    let neo: NeoSettingsModel
+    let onNeo: (NeoSettingsIntent) -> Void
+    /// `false` only for headless snapshots: an image renderer cannot draw a
+    /// scroll view, so the page is laid out bare.
+    let scrolls: Bool
+    @State private var page: Page
 
-    init(settings: Binding<IslandSettings>, onChange: @escaping () -> Void, onClose: @escaping () -> Void = {}) {
+    init(
+        settings: Binding<IslandSettings>,
+        onChange: @escaping () -> Void,
+        onClose: @escaping () -> Void = {},
+        neo: NeoSettingsModel = NeoSettingsModel(featureOn: false, connected: false, shell: nil),
+        onNeo: @escaping (NeoSettingsIntent) -> Void = { _ in },
+        page: Page = .features,
+        scrolls: Bool = true
+    ) {
         self._settings = settings
         self.onChange = onChange
         self.onClose = onClose
+        self.neo = neo
+        self.onNeo = onNeo
+        self.scrolls = scrolls
+        self._page = State(initialValue: page)
     }
 
     // MARK: - Model
@@ -152,6 +181,8 @@ struct SettingsView: View {
         /// A line under the title, for a tile whose name does not say enough on
         /// its own. Most do; Ghost Mode has to say what it actually hides.
         var detail: String? = nil
+        /// The page the tile opens instead of switching (its switch is there).
+        var opens: Page? = nil
         var id: String { title }
     }
 
@@ -191,7 +222,7 @@ struct SettingsView: View {
                 Item(title: "Ghost Mode", symbol: "eye.slash.fill", key: \.ghostMode,
                      detail: "Hidden from screen sharing"),
                 Item(title: "NEO", symbol: "waveform.circle.fill", key: \.neo,
-                     detail: "Its orb and chat in the notch"),
+                     detail: "Its chat, keys and permissions", opens: .neo),
             ]),
             Group(title: PetIdentity.name, tint: SettingsMetrics.ink, items: [
                 Item(title: "Show \(PetIdentity.name)", symbol: "pawprint.fill", key: \.showPet),
@@ -223,40 +254,72 @@ struct SettingsView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 12)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: SettingsMetrics.groupSpacing) {
-                    ForEach(groups) { group in
-                        groupView(group)
+            if scrolls {
+                ScrollView { pageContent }
+                    .scrollIndicators(.hidden)
+                    .overlay(alignment: .top) {
+                        LinearGradient(colors: [DesignTokens.islandFill, DesignTokens.islandFill.opacity(0)], startPoint: .top, endPoint: .bottom)
+                            .frame(height: 10)
+                            .allowsHitTesting(false)
                     }
-                    weatherCard
-                    footer
-                }
-                .padding(.horizontal, SettingsMetrics.inset)
-                .padding(.bottom, SettingsMetrics.inset)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .scrollIndicators(.hidden)
-            .overlay(alignment: .top) {
-                LinearGradient(colors: [DesignTokens.islandFill, DesignTokens.islandFill.opacity(0)], startPoint: .top, endPoint: .bottom)
-                    .frame(height: 10)
-                    .allowsHitTesting(false)
+            } else {
+                pageContent
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var pageContent: some View {
+        VStack(alignment: .leading, spacing: SettingsMetrics.groupSpacing) {
+            switch page {
+            case .features:
+                ForEach(groups) { group in
+                    groupView(group)
+                }
+                weatherCard
+                footer
+            case .neo:
+                NeoSettingsSection(
+                    model: neo,
+                    featureOn: settings.neo,
+                    onToggleFeature: {
+                        settings.neo.toggle()
+                        onChange()
+                    },
+                    onIntent: onNeo
+                )
+            }
+        }
+        .padding(.horizontal, SettingsMetrics.inset)
+        .padding(.bottom, SettingsMetrics.inset)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Header & footer
 
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
+            if page != .features {
+                Button { page = .features } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(DesignTokens.textPrimary)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.white.opacity(0.10)))
+                        .contentShape(Circle())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Back to Settings")
+            }
             VStack(alignment: .leading, spacing: 2) {
-                Text("Settings")
+                Text(page == .neo ? "NEO" : "Settings")
                     .font(.system(size: 17, weight: .bold, design: .rounded))
                     .foregroundStyle(DesignTokens.textPrimary)
-                Text("\(enabledCount) of \(totalCount) features on")
+                Text(page == .neo ? neo.subtitle : "\(enabledCount) of \(totalCount) features on")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(DesignTokens.textTertiary)
                     .monospacedDigit()
+                    .lineLimit(1)
             }
             Spacer(minLength: 0)
             Button(action: onClose) {
@@ -311,10 +374,15 @@ struct SettingsView: View {
                         symbol: item.symbol,
                         detail: item.detail,
                         tint: group.tint,
-                        isOn: settings[keyPath: item.key]
+                        isOn: settings[keyPath: item.key],
+                        opensSection: item.opens != nil
                     ) {
-                        settings[keyPath: item.key].toggle()
-                        onChange()
+                        if let opens = item.opens {
+                            page = opens
+                        } else {
+                            settings[keyPath: item.key].toggle()
+                            onChange()
+                        }
                     }
                 }
             }
@@ -322,11 +390,7 @@ struct SettingsView: View {
     }
 
     private func sectionLabel(_ text: String) -> some View {
-        Text(text.uppercased())
-            .font(.system(size: 10, weight: .semibold, design: .rounded))
-            .tracking(0.8)
-            .foregroundStyle(DesignTokens.textTertiary)
-            .padding(.leading, 4)
+        SettingsSectionLabel(text: text)
     }
 
     // MARK: - Weather
@@ -392,7 +456,20 @@ struct SettingsView: View {
 
 // MARK: - Pieces
 
-private enum SettingsMetrics {
+/// A group's caption: small, tracked capitals.
+struct SettingsSectionLabel: View {
+    let text: String
+
+    var body: some View {
+        Text(text.uppercased())
+            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .tracking(0.8)
+            .foregroundStyle(DesignTokens.textTertiary)
+            .padding(.leading, 4)
+    }
+}
+
+enum SettingsMetrics {
     static let inset: CGFloat = 18
     static let tileSpacing: CGFloat = 8
     static let groupSpacing: CGFloat = 16
@@ -413,6 +490,8 @@ private struct FeatureTile: View {
     var detail: String? = nil
     let tint: Color
     let isOn: Bool
+    /// The tile opens a section rather than switching: a chevron, not a dot.
+    var opensSection = false
     let action: () -> Void
 
     @State private var isHovered = false
@@ -427,10 +506,17 @@ private struct FeatureTile: View {
                         .foregroundStyle(isOn ? tint : DesignTokens.textTertiary)
                         .frame(height: 18)
                     Spacer(minLength: 0)
-                    Circle()
-                        .fill(Color.white.opacity(isOn ? 1 : 0.18))
-                        .frame(width: 6, height: 6)
-                        .padding(.top, 3)
+                    if opensSection {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .heavy))
+                            .foregroundStyle(Color.white.opacity(isOn ? 1 : 0.3))
+                            .padding(.top, 2)
+                    } else {
+                        Circle()
+                            .fill(Color.white.opacity(isOn ? 1 : 0.18))
+                            .frame(width: 6, height: 6)
+                            .padding(.top, 3)
+                    }
                 }
                 Spacer(minLength: 0)
                 Text(title)
@@ -469,7 +555,7 @@ private struct FeatureTile: View {
 
 /// Presses feel physical: the control sinks slightly while held and springs
 /// back on release, independent of how long the action takes.
-private struct PressStyle: ButtonStyle {
+struct PressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.95 : 1)
@@ -479,7 +565,7 @@ private struct PressStyle: ButtonStyle {
 }
 
 /// A compact on/off switch.
-private struct SwitchIndicator: View {
+struct SwitchIndicator: View {
     let isOn: Bool
     let tint: Color
 

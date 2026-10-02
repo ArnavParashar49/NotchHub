@@ -109,4 +109,10 @@ struct ActivityBridgeTests {
             }
         }
     }
+
+    @Test("what NEO.app's shell reported is for Settings alone: never an activity, never a redraw of the island")
+    func neoShellIsNotTheIslands() {
+        let status = NeoShellStatus(app: true, accessibility: true, screenRecording: false, openAtLogin: true)
+        #expect(instructions(.neoShell(status)).isEmpty)
+    }
 }
