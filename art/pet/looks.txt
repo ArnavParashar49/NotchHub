@@ -20,3 +20,43 @@ o #E6BF7E  fur: pale golden sand
 O #B8864E  fur shade: warm tan
 y #F5DFAE  fur highlight
 
+
+# --- More colours (Settings → Neo → Look). Each keeps the fur at least 3:1 against
+# the island's black and against the dark eyes, and the cream parts distinct from it
+# (PetLookTests checks every look).
+
+@look red
+o #D8432F  fur: red fox, a clear step redder than the orange
+O #A12C22  fur shade: brick
+y #F06A4E  fur highlight: coral
+
+@look midnight
+o #5A6699  fur: night blue, as dark as still reads on black with dark eyes on it
+O #3A4370  fur shade: deep indigo
+y #7785B8  fur highlight: dusk
+w #E6ECFA  cream: moonlit, cooler than the fox's
+W #AEB9D6  cream shade
+
+@look snow
+o #FAFAFA  fur: plain white (arctic is the icy one)
+O #B8BEC9  fur shade: soft grey
+y #FFFFFF  fur highlight
+w #CFE0F2  cream: pale blue shadow, so muzzle, chest and tail tip read on white fur
+W #A9BDD6  cream shade
+
+@look cocoa
+o #8B5A3C  fur: cocoa brown
+O #63402B  fur shade: dark chocolate
+y #A9744F  fur highlight: caramel
+
+@look sakura
+o #F7B6D2  fur: cherry-blossom pink, cooler and lighter than the blush (p) so it still shows
+O #DB86AB  fur shade: rose
+y #FCD3E3  fur highlight: petal
+
+@look cyber
+o #19C8B9  fur: neon teal
+O #0F8F8A  fur shade: deep teal
+y #6FF0DE  fur highlight: mint glow
+w #E9FBFF  cream: cool white
+W #A8D5DC  cream shade

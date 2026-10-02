@@ -19,16 +19,25 @@ Extras (see art/pet/SPEC.md, "Looks and hats"):
                              pixel boundary 0-16, Y the frame row the hat's row 15
                              lands on) or "frame none"
 
+    art/pet/wear.pet         accessories (glasses, a scarf, ...): frames named
+                             acc_<name> drawn exactly where the fox wears them on
+                             `sit` (front view), and acc_<name>_side drawn where
+                             it wears them on `run_1` (side view, facing left)
+    art/pet/wear.txt         how each pet frame wears accessories, where it is
+                             not simply "front view at the hat anchor":
+                             "frame VIEW [X Y] [-face] [-neck] [-ears]"
+
 Commands:
     validate [FILE.pet ...]  check frames (size, palette, duplicates)
     extras [--strict]        check looks, hats and anchors (--strict: every pet
                              frame must be anchored)
     sheet OUT.png [--scale N] [--cols N] [--look NAME] [--hat NAME|test]
-          [--anchor X,Y] [--frames a,b,...] [FILE.pet ...]
+          [--wear NAME] [--anchor X,Y] [--frames a,b,...] [FILE.pet ...]
                              render a labelled contact sheet on black (default 8x,
                              8 columns); --look recolours the fox, --hat puts a
                              hat on every anchored frame ("test": a placeholder;
-                             --anchor puts it at X,Y on every frame instead)
+                             --anchor puts it at X,Y on every frame instead);
+                             --wear puts an accessory on every frame that wears it
     generate                 write Sources/NotchHubCore/PetArt.generated.swift
 """
 import glob, os, re, struct, sys, zlib
@@ -39,6 +48,15 @@ OUT_SWIFT = os.path.join(ROOT, "Sources", "NotchHubCore", "PetArt.generated.swif
 WIDTH = HEIGHT = 16
 HAT_PREFIX = "hat_"
 HAT_HEADROOM = 8
+WEAR_PREFIX = "acc_"
+SIDE_SUFFIX = "_side"
+# Accessory art is drawn where these frames wear it: (x boundary, y row) of
+# their hat anchor. A frame's own wear anchor moves the art by the difference.
+WEAR_REF = {"front": (7, 3), "side": (6, 3)}
+WEAR_VIEWS = ("front", "side", "peek", "none")
+# What part of the fox an accessory is worn on; a frame can hide a slot.
+WEAR_SLOTS = ("face", "neck", "ears")
+WEAR_SLOT_OF = {"glasses": "face", "sunglasses": "face", "scarf": "neck", "bowtie": "neck", "headphones": "ears"}
 
 # A placeholder hat for authoring anchors before the real hats exist: a red
 # brim (cols 6-9) under a yellow crown (cols 7-8), centred on the boundary x=8.
@@ -166,6 +184,92 @@ def load_anchors():
     return anchors, errors
 
 
+def load_wear():
+    """Frame name -> (view, x, y, hidden slots) with x/y None for "the hat anchor". Returns (wear, errors)."""
+    path = os.path.join(ART, "wear.txt")
+    wear, errors = {}, []
+    if not os.path.exists(path):
+        return wear, errors
+    with open(path) as fh:
+        for line_no, raw in enumerate(fh, 1):
+            line = raw.split("#", 1)[0].strip()
+            if not line:
+                continue
+            parts = line.split()
+            loc = f"wear.txt:{line_no}"
+            if len(parts) < 2 or parts[1] not in WEAR_VIEWS:
+                errors.append(f"{loc}: expected 'frame VIEW [X Y] [-slot ...]' with VIEW one of {', '.join(WEAR_VIEWS)}")
+                continue
+            rest, x, y = parts[2:], None, None
+            if len(rest) >= 2 and re.fullmatch(r"-?\d+", rest[0]) and re.fullmatch(r"-?\d+", rest[1]):
+                x, y, rest = int(rest[0]), int(rest[1]), rest[2:]
+                if not (0 <= x <= WIDTH and -HAT_HEADROOM <= y < HEIGHT):
+                    errors.append(f"{loc}: anchor ({x},{y}) out of range (x 0-16, y -8..15)")
+                    continue
+            hidden = set()
+            for flag in rest:
+                if flag.startswith("-") and flag[1:] in WEAR_SLOTS:
+                    hidden.add(flag[1:])
+                else:
+                    errors.append(f"{loc}: unknown flag {flag!r} (expected -face, -neck or -ears)")
+            if parts[0] in wear:
+                errors.append(f"{loc}: {parts[0]} listed twice")
+            wear[parts[0]] = (parts[1], x, y, hidden)
+    return wear, errors
+
+
+def resolve_wear(pet_names, anchors, wear):
+    """Every pet frame -> (view, x, y, hidden slots) or None (wears nothing). Returns (resolved, errors).
+
+    A frame not in wear.txt wears accessories in front view at its hat anchor;
+    one without a hat anchor must be listed.
+    """
+    resolved, errors = {}, []
+    for name in sorted(wear):
+        if name not in pet_names:
+            errors.append(f"wear.txt: unknown frame {name}")
+    for name in pet_names:
+        view, x, y, hidden = wear.get(name, ("front", None, None, set()))
+        if view == "none":
+            resolved[name] = None
+            continue
+        if x is None:
+            anchor = anchors.get(name)
+            if anchor is None:
+                errors.append(f"wear: {name} has no hat anchor, so wear.txt must place it (or say 'none')")
+                continue
+            x, y = anchor
+        resolved[name] = (view, x, y, hidden)
+    return resolved, errors
+
+
+def wear_pixels(frames_by_name, accessory, placement, mirrored_frame=False):
+    """The pixels (x, y, key) of `accessory` on a frame with wear `placement`, clipped to the frame."""
+    if placement is None:
+        return []
+    view, ax, ay, hidden = placement
+    if WEAR_SLOT_OF.get(accessory) in hidden:
+        return []
+    art_name = WEAR_PREFIX + accessory + ("" if view == "front" else SIDE_SUFFIX)
+    rows = frames_by_name.get(art_name)
+    if rows is None:
+        return []
+    pixels = []
+    for y, row in enumerate(rows[:HEIGHT]):
+        for x, key in enumerate(row[:WIDTH]):
+            if key == ".":
+                continue
+            if view == "peek":
+                # The side art mirrored: the fox faces right, its anchor mirrored with it.
+                px, py = (WIDTH - 1 - x) + ax - (WIDTH - WEAR_REF["side"][0]), y + ay - WEAR_REF["side"][1]
+            else:
+                rx, ry = WEAR_REF[view]
+                px, py = x + ax - rx, y + ay - ry
+            if 0 <= px < WIDTH and 0 <= py < HEIGHT:
+                pixels.append((px, py, key))
+    return pixels
+
+
 def check_extras(frames, palette, strict=False):
     errors, warnings = [], []
     looks, look_errors = load_looks(palette)
@@ -173,13 +277,13 @@ def check_extras(frames, palette, strict=False):
     anchors, anchor_errors = load_anchors()
     errors += anchor_errors
     names = {name for _, name, _ in frames}
-    pet = sorted(n for n in names if not n.startswith(HAT_PREFIX))
+    pet = sorted(n for n in names if not n.startswith(HAT_PREFIX) and not n.startswith(WEAR_PREFIX))
     hats = sorted(n[len(HAT_PREFIX):] for n in names if n.startswith(HAT_PREFIX))
     for name in sorted(anchors):
         if name not in names:
             errors.append(f"anchors: unknown frame {name}")
-        elif name.startswith(HAT_PREFIX):
-            errors.append(f"anchors: {name} is a hat, not a pet frame")
+        elif name.startswith(HAT_PREFIX) or name.startswith(WEAR_PREFIX):
+            errors.append(f"anchors: {name} is a hat or an accessory, not a pet frame")
     missing = [n for n in pet if n not in anchors]
     if missing:
         (errors if strict else warnings).append(f"anchors: {len(missing)} pet frames not anchored: {', '.join(missing)}")
@@ -188,6 +292,26 @@ def check_extras(frames, palette, strict=False):
             for x in range(WIDTH):
                 pass
     return looks, anchors, hats, errors, warnings
+
+
+def check_wear(frames, anchors):
+    """Accessories and how every pet frame wears them. Returns (resolved, accessories, errors)."""
+    names = {name for _, name, _ in frames}
+    pet = sorted(n for n in names if not n.startswith(HAT_PREFIX) and not n.startswith(WEAR_PREFIX))
+    wear, errors = load_wear()
+    resolved, resolve_errors = resolve_wear(pet, anchors, wear)
+    errors += resolve_errors
+    art = sorted(n[len(WEAR_PREFIX):] for n in names if n.startswith(WEAR_PREFIX))
+    accessories = [n for n in art if not n.endswith(SIDE_SUFFIX)]
+    for name in accessories:
+        if name not in WEAR_SLOT_OF:
+            errors.append(f"wear.pet: {WEAR_PREFIX}{name} has no slot (add it to WEAR_SLOT_OF)")
+        if name + SIDE_SUFFIX not in art:
+            errors.append(f"wear.pet: {WEAR_PREFIX}{name} needs a side view, {WEAR_PREFIX}{name}{SIDE_SUFFIX}")
+    for name in art:
+        if name.endswith(SIDE_SUFFIX) and name[:-len(SIDE_SUFFIX)] not in accessories:
+            errors.append(f"wear.pet: {WEAR_PREFIX}{name} has no front view")
+    return resolved, accessories, errors
 
 
 def hat_rows(frames, hat):
@@ -230,9 +354,10 @@ FONT = {
 }
 
 
-def sheet(out, frames, palette, scale=8, cols=8, look=None, hat=None, anchors=None, hat_art=None):
+def sheet(out, frames, palette, scale=8, cols=8, look=None, hat=None, anchors=None, hat_art=None, wear=None, wear_placements=None):
     tile = WIDTH * scale
     head = HAT_HEADROOM * scale if hat else 0
+    all_rows = {name: rows for _, name, rows in load_frames()} if wear else {}
     label_h = 14
     gap = 6
     rows_n = (len(frames) + cols - 1) // cols
@@ -259,13 +384,17 @@ def sheet(out, frames, palette, scale=8, cols=8, look=None, hat=None, anchors=No
         for y in range(-HAT_HEADROOM if hat else 0, HEIGHT):
             for x in range(WIDTH):
                 plot(cx, cy, x, y, (0, 0, 0))  # the island's black
-        colors = base_colors if name.startswith(HAT_PREFIX) else fox_colors
+        colors = base_colors if name.startswith(HAT_PREFIX) or name.startswith(WEAR_PREFIX) else fox_colors
         for y, row in enumerate(rows[:HEIGHT]):
             for x, key in enumerate(row[:WIDTH]):
                 if key != "." and key in colors:
                     plot(cx, cy, x, y, colors[key])
+        if wear and not name.startswith(HAT_PREFIX) and not name.startswith(WEAR_PREFIX):
+            for px, py, key in wear_pixels(all_rows, wear, (wear_placements or {}).get(name)):
+                if key in base_colors:
+                    plot(cx, cy, px, py, base_colors[key])
         anchor = (anchors or {}).get(name) if hat else None
-        if anchor and hat_art and not name.startswith(HAT_PREFIX):
+        if anchor and hat_art and not name.startswith(HAT_PREFIX) and not name.startswith(WEAR_PREFIX):
             ax, ay = anchor
             for hy, row in enumerate(hat_art[:HEIGHT]):
                 for hx, key in enumerate(row[:WIDTH]):
@@ -297,7 +426,7 @@ def sheet(out, frames, palette, scale=8, cols=8, look=None, hat=None, anchors=No
         print(f"[{index // cols},{index % cols}] {os.path.basename(path)}:{name}{mark}")
 
 
-def generate(frames, palette, looks, anchors):
+def generate(frames, palette, looks, anchors, wear_placements):
     lines = [
         "// Generated by scripts/pet_art.py from art/pet — do not edit by hand.",
         "// Edit the .pet files, then run: python3 scripts/pet_art.py generate",
@@ -335,12 +464,25 @@ def generate(frames, palette, looks, anchors):
             x, y = anchored[name]
             lines.append(f'        "{name}": [{x}, {y}],')
         lines.append("    ]")
+    lines += ["", "    /// Frame name → how it wears accessories (the frames named acc_*): [view, x boundary, y row, hidden slots].",
+              "    /// View 0: front (the art as drawn on `sit`), 1: side (as drawn on `run_1`), 2: peek (the side art mirrored).",
+              "    /// Hidden slots: bit 0 face, bit 1 neck, bit 2 ears. Frames not listed wear none."]
+    worn = {k: v for k, v in (wear_placements or {}).items() if v is not None}
+    if not worn:
+        lines.append("    public static let wearAnchors: [String: [Int]] = [:]")
+    else:
+        lines.append("    public static let wearAnchors: [String: [Int]] = [")
+        for name in sorted(worn):
+            view, x, y, hidden = worn[name]
+            mask = sum(1 << WEAR_SLOTS.index(slot) for slot in hidden)
+            lines.append(f'        "{name}": [{WEAR_VIEWS.index(view)}, {x}, {y}, {mask}],')
+        lines.append("    ]")
     lines += ["}", ""]
     tmp = OUT_SWIFT + ".tmp"
     with open(tmp, "w") as fh:
         fh.write("\n".join(lines))
     os.replace(tmp, OUT_SWIFT)
-    print(f"wrote {len(frames)} frames, {len(looks)} looks, {len(anchored)} hat anchors to {os.path.relpath(OUT_SWIFT, ROOT)}")
+    print(f"wrote {len(frames)} frames, {len(looks)} looks, {len(anchored)} hat anchors, {len(worn)} wear anchors to {os.path.relpath(OUT_SWIFT, ROOT)}")
 
 
 def main():
@@ -360,17 +502,21 @@ def main():
         errors = validate(frames, palette)
         looks, anchors, hats, extra_errors, warnings = check_extras(frames, palette, strict="--strict" in sys.argv)
         errors += extra_errors
+        wear_placements, accessories, wear_errors = check_wear(frames, anchors)
+        errors += wear_errors
         for w in warnings:
             print("warning:", w)
         for e in errors:
             print("error:", e)
         anchored = sum(1 for v in anchors.values() if v is not None)
+        wearing = sum(1 for v in wear_placements.values() if v is not None)
         print(f"{len(looks)} looks ({', '.join(sorted(looks)) or '-'}), {len(hats)} hats ({', '.join(hats) or '-'}), "
-              f"{len(anchors)} frames in anchors ({anchored} wear hats), {len(errors)} errors")
+              f"{len(anchors)} frames in anchors ({anchored} wear hats), "
+              f"{len(accessories)} accessories ({', '.join(accessories) or '-'}; {wearing} frames wear them), {len(errors)} errors")
         sys.exit(1 if errors else 0)
     if command == "sheet":
-        args, scale, cols, look_name, hat, only, fixed = sys.argv[3:], 8, 8, None, None, None, None
-        while args and args[0] in ("--scale", "--cols", "--look", "--hat", "--frames", "--anchor"):
+        args, scale, cols, look_name, hat, only, fixed, wear = sys.argv[3:], 8, 8, None, None, None, None, None
+        while args and args[0] in ("--scale", "--cols", "--look", "--hat", "--frames", "--anchor", "--wear"):
             flag, value, args = args[0], args[1], args[2:]
             if flag == "--scale":
                 scale = int(value)
@@ -380,6 +526,8 @@ def main():
                 look_name = value
             elif flag == "--hat":
                 hat = value
+            elif flag == "--wear":
+                wear = value
             elif flag == "--anchor":
                 fixed = tuple(int(v) for v in value.split(","))
             else:
@@ -407,22 +555,30 @@ def main():
             if fixed:
                 anchors = {name: fixed for _, name, _ in frames}
             hat_art = hat_rows(frames, hat)
+        wear_placements = None
+        if wear:
+            hat_anchors, anchor_errors = load_anchors()
+            wear_placements, _, wear_errors = check_wear(load_frames(), hat_anchors)
+            errors += anchor_errors + wear_errors
         for e in errors:
             print("error:", e)
-        sheet(sys.argv[2], frames, palette, scale=scale, cols=cols, look=look, hat=hat, anchors=anchors, hat_art=hat_art)
+        sheet(sys.argv[2], frames, palette, scale=scale, cols=cols, look=look, hat=hat, anchors=anchors, hat_art=hat_art,
+              wear=wear, wear_placements=wear_placements)
         sys.exit(1 if errors else 0)
     if command == "generate":
         frames = load_frames()
         errors = validate(frames, palette)
         looks, anchors, hats, extra_errors, warnings = check_extras(frames, palette)
         errors += extra_errors
+        wear_placements, _, wear_errors = check_wear(frames, anchors)
+        errors += wear_errors
         for w in warnings:
             print("warning:", w)
         if errors:
             for e in errors:
                 print("error:", e)
             sys.exit(1)
-        generate(frames, palette, looks, anchors)
+        generate(frames, palette, looks, anchors, wear_placements)
         return
     raise SystemExit(__doc__)
 

@@ -185,6 +185,10 @@ Tools: `python3 scripts/pet_art.py extras` checks looks, hats and anchors;
   because they use other keys. The base palette is the look `fox`. Every look
   must read on pure black at true size: silhouette, cream chest and tail tip
   distinct from the fur, dark eyes, and the shade still reading as shade.
+  The fur `o` keeps at least 3:1 contrast against black and against the eyes
+  `e` (`PetLookTests`). A CUSTOM fur colour is not art: the app derives the
+  same five keys (`o` `O` `y` `k`, and `w` `W` on light fur) from the colour
+  the user picks (`PetPalette.custom`), within the same bounds.
 - **Hats** (`art/pet/hats.pet`, frames `hat_<name>`): drawn centred on the pixel
   BOUNDARY x = 8 (symmetric across columns 7|8), with the hat's bottom row on
   row 15 — the row that sits on the head — and everything else above it. At most
@@ -204,6 +208,35 @@ Tools: `python3 scripts/pet_art.py extras` checks looks, hats and anchors;
   `hat_bunny` (Easter ears), `hat_turkey` (Thanksgiving feather fan),
   `hat_lunar` (Lunar New Year red-and-gold cap), `hat_marigold` (Diwali and Día
   de Muertos marigold crown).
+
+- **Accessories** (`art/pet/wear.pet`, frames `acc_<name>` and
+  `acc_<name>_side`): what the fox wears besides a hat — `glasses`,
+  `sunglasses` (the face), `scarf`, `bowtie` (the neck), `headphones` (the
+  ears) — one at a time, together with any hat. An accessory is drawn ONCE per
+  view, exactly where the fox wears it on a reference frame: `acc_<name>` on
+  `sit` (front view), `acc_<name>_side` on `run_1` (side view, facing left).
+  Palette keys only, a few pixels, never hiding the eyes (lenses leave the eye
+  pixels open, so blinks and glances show through); never recoloured by a look.
+  View it on every frame with `sheet OUT.png --wear NAME` (add `--hat NAME`
+  to see the two together).
+- **Wear anchors** (`art/pet/wear.txt`): how each pet frame wears accessories,
+  `frame VIEW [X Y] [-face] [-neck] [-ears]`. A frame NOT listed wears them in
+  front view at its hat anchor, which is right for every front-facing frame
+  whose head is where its hat is. List a frame when: it is a side view (`side`);
+  it leans out of the notch facing right (`peek`: the side art mirrored); it has
+  no head (`none`); its hat anchor is not the top of its head, because the art
+  already has something there (its own headphones, a package) — then give
+  `X Y`, the pixel boundary at the middle of the head and the row of the head's
+  top outline between the ears; or a prop covers a slot (`-neck` for a clock or
+  a bowl held in front of the chest). The engine moves the art by the frame's
+  anchor minus the reference frame's (`sit` 7 3, `run_1` 6 3), mirrors it with
+  the frame, moves it with the frame's offset, and clips it to the 16×16 frame
+  — an accessory can never draw outside the pet.
+- **Adding an accessory**: draw `acc_<name>` on a copy of `sit` and
+  `acc_<name>_side` on a copy of `run_1` (keep only the accessory's pixels),
+  add `<name>` and its slot to `WEAR_SLOT_OF` in `scripts/pet_art.py` and a
+  case to `PetAccessory` in `PetStyle.swift`, then `extras`, `sheet --wear`,
+  `generate`.
 
 ### `touch.pet` — stroking the big pet in its panel
 - `lean_left`, `lean_right` — from `happy`: the head and shoulders lean 1 px

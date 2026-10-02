@@ -1,0 +1,60 @@
+# How each pet frame wears accessories (art/pet/wear.pet). See SPEC.md, "Accessories".
+# "frame VIEW [X Y] [-face] [-neck] [-ears]"
+#   VIEW   front: the acc_<name> art, drawn as worn on `sit` (whose anchor is 7 3)
+#          side:  the acc_<name>_side art, drawn as worn on `run_1` (anchor 6 3), facing left
+#          peek:  the side art mirrored (the fox leans out of the notch facing right)
+#          none:  nothing is worn (no head or neck in the frame)
+#   X Y    the frame's wear anchor: the pixel boundary at the middle of the head and
+#          the row of the head's top outline between the ears. Left out: the hat anchor.
+#   -slot  an accessory of that slot is not drawn on this frame (a prop is in the way)
+# A frame not listed here wears everything in front view at its hat anchor.
+
+# Frames whose hat anchor sits above something on the head (their own headphones, a package).
+headphones_on front 7 3
+meet_talk_1 front 7 3
+meet_talk_2 front 7 3
+meet_listen front 7 3
+meet_muted front 7 3
+meet_camera_off front 7 3
+meet_type_1 front 7 3
+meet_type_2 front 7 3
+music_1 front 6 3
+music_2 front 7 3
+music_3 front 8 3
+music_4 front 7 3
+music_excited front 7 3
+download_1 front 7 4
+download_2 front 7 4
+
+# Side views (mischief_move.pet): facing left.
+run_1 side
+run_2 side
+run_3 side
+run_4 side
+skid side
+sneak_1 side
+sneak_2 side
+wiggle_1 side
+wiggle_2 side
+pounce side
+
+# Leaning out of the notch, facing right: only the head shows (its neck is behind
+# the notch); the tail alone wears nothing.
+peek_1 peek 10 3 -neck
+peek_2 peek 10 3 -neck
+peek_grin peek 10 3 -neck
+tail_peek_1 none
+tail_peek_2 none
+
+# A prop held in front of the chest hides what is worn at the neck.
+timer_1 front -neck
+timer_2 front -neck
+timer_alert front -neck
+timer_done front -neck
+camera_on front -neck
+eat_1 front -neck
+eat_2 front -neck
+snicker_1 front -neck
+snicker_2 front -neck
+# Its own headphones, held below the chin on their way on or off.
+headphones_off front -neck -ears
