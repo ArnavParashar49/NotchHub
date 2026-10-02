@@ -25,14 +25,15 @@ extension NotchHubApp {
     /// display with a notch: elsewhere idle stays fully transparent.
     var petDocked: Bool { petVisible && window.hasNotch }
 
-    /// Room the pet takes at the right of notch-height bars — with NEO's
-    /// listening mark beside it, while that shows.
+    /// Room the pet takes at the right of notch-height bars — with the word
+    /// "Listening" beside it, for the first moment NEO listens.
     var petBarReserve: CGFloat { petVisible ? PetLayout.barSlot + listeningSlot : 0 }
 
     /// Room the larger pet takes at the right of the expanded island.
     var petExpandedReserve: CGFloat { petVisible ? PetLayout.expandedReserve + listeningSlot : 0 }
 
-    /// Room NEO's listening mark takes beside the pet in the island as drawn.
+    /// Room NEO's listening mark takes beside the pet in the island as
+    /// drawn: its word's, while that shows; nothing for the glow alone.
     var listeningSlot: CGFloat { listeningMark?.slot ?? 0 }
 
     /// The idle island's dock for the pet, where the brain has it.
@@ -154,8 +155,8 @@ extension NotchHubApp {
     func petTick() {
         let update = updatePet()
         let dockMoved = petVisible && currentIslandState() == .idle && islandModel.contentSize.petDock != petIdleDock
-        // The pet coming home from a game is also when NEO's mark may stand
-        // beside it.
+        // The pet coming home from a game is also when NEO's listening glow
+        // may come up behind it.
         if dockMoved || listeningNeedsRender {
             renderIsland()
         } else {
@@ -294,8 +295,8 @@ extension NotchHubApp {
                 rect.origin.x += CGFloat(presentation.mirrored ? -offset.dx : offset.dx)
                 rect.origin.y -= CGFloat(offset.dy)
                 let notch = window.localFrame(for: .idle, content: .default)
-                // The dock as drawn: NEO's listening mark stands between the
-                // notch and the pet, which sits that much further out.
+                // The dock as drawn: while the word "Listening" stands between
+                // the notch and the pet, the pet sits that much further out.
                 let reach = dock.reach + content.listeningSlot
                 let beside = dock.side == .right
                     ? CGRect(x: notch.maxX, y: frame.minY, width: reach, height: frame.height)

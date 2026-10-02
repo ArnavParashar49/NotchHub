@@ -91,12 +91,13 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
 
     // NEO in the notch: the pet IS NEO. Its presence is state the app keeps,
     // like the weather: never an activity, so it never competes with one —
-    // only the pet's pose, and a small mark beside it while NEO listens.
+    // only the pet's pose, and a glow behind it while NEO listens.
     // See `+Neo`.
     var neoPresence = NeoPresenceModel()
     /// The one thing NEO adds to the island: while it is LISTENING (its mic
-    /// is live) a small voice meter stands beside the pet, with the word
-    /// "Listening" for the first moment. Fed NEO's held state; see `+Neo`.
+    /// is live) a soft glow breathes behind the pet, with the word
+    /// "Listening" beside it for the first moment. Fed NEO's held state;
+    /// see `+Neo`.
     var neoListening = NeoListeningIndicator()
     /// The listening mark as the island last drew it (`renderIsland`), so
     /// the hit layouts reserve exactly the room the drawn island does.
@@ -483,7 +484,8 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         let petUpdate = updatePet()
         let state = currentIslandState()
         // After the pet (the idle dock shows the mark only with the pet at
-        // its spot) and before the measuring pass, which makes room for it.
+        // its spot) and before the measuring pass, which makes room for its
+        // word.
         listeningMark = neoListeningMark(for: state)
         // Before anything is drawn for this shape: a surface that must not be
         // captured has to be out of the capture path BEFORE its first frame.
@@ -529,8 +531,9 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             model.wingStatus = status
             model.panelContent = panel
             model.meeting = meeting
-            // NEO's listening mark appears, drops its word and leaves on the
-            // same spring that moves the island around it.
+            // NEO's listening mark: the word comes and goes on the same spring
+            // that moves the island around it; the glow behind the pet keeps
+            // its own (the island often does not move when it changes).
             model.listening = listeningMark
             // In the same transaction as the shape, so the pet's move from where
             // it was drawn rides the island's spring.
@@ -569,7 +572,7 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
 
     func computeContentSize(state: IslandState, status: WingStatus) -> IslandContentSize {
         var size = measuredContentSize(state: state, status: status)
-        // The wings and the compact bar carry the mark's room in their own
+        // The wings and the compact bar carry the word's room in their own
         // measured widths (`petBarReserve`); the idle dock takes it from here.
         size.listeningSlot = listeningMark?.slot ?? 0
         return size

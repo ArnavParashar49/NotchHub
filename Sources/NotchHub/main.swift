@@ -155,16 +155,23 @@ func runSelfTest() -> Int32 {
           "playback-stopped maps to nil (handled by the queue)")
 
     // --- NEO's listening mark ---
-    // Shown only while NEO listens: the word and the bars for 1.5 s, then the
-    // bars alone, and nothing — no room taken — the rest of the time.
+    // Shown only while NEO listens: a glow behind the pet, with the word
+    // beside it for 1.5 s; after that it takes no room at all, and nothing —
+    // no glow, no room — the rest of the time.
     let heard = Date(timeIntervalSinceReferenceDate: 0)
     var listening = NeoListeningIndicator()
     check(listening.mark(for: .idle, at: heard, labelWidth: 50) == nil, "no listening mark while NEO is not listening")
     listening.update(listening: true, at: heard)
     let early = listening.mark(for: .idle, at: heard.addingTimeInterval(0.5), labelWidth: 50)
-    check(early?.showsLabel == true && early?.slot == NeoListeningLayout.maxSlot, "listening: the word and the bars for the first 1.5 s (72 pt on the pet's side)")
+    check(early?.showsLabel == true && early?.slot == NeoListeningLayout.maxSlot, "listening: the glow and the word for the first 1.5 s (56 pt on the pet's side)")
     let settledMark = listening.mark(for: .idle, at: heard.addingTimeInterval(3), labelWidth: 50)
-    check(settledMark?.showsLabel == false && settledMark?.slot == NeoListeningLayout.barsSlot, "listening: then the bars alone (18 pt)")
+    check(settledMark != nil && settledMark?.showsLabel == false && settledMark?.slot == 0, "listening: then the glow alone — no extra width")
+    check(listening.mark(for: .interactive, at: heard.addingTimeInterval(0.5), labelWidth: 50) == NeoListeningMark(showsLabel: false, labelWidth: 0, slot: 0, since: heard),
+          "a fixed strip shows the glow only: no word, no room")
+    check(NeoListeningLayout.glowDiameter(petSize: PetLayout.artSize) * NeoListeningLayout.glowScaleRange.upperBound <= 32,
+          "the glow (the fox + 6 pt) stays inside the 32-pt notch strip at the top of a breath")
+    check(NeoListeningLayout.glowOpacity(breath: 0) == 0.35 && NeoListeningLayout.glowOpacity(breath: 1) == 0.75 && NeoListeningLayout.breathPeriod == 1.6,
+          "the glow breathes 0.35–0.75 on a 1.6 s cycle")
     listening.update(listening: false, at: heard.addingTimeInterval(4))
     check(listening.mark(for: .idle, at: heard.addingTimeInterval(4), labelWidth: 50) == nil, "the mark is gone the moment NEO stops listening")
 
@@ -271,9 +278,15 @@ if let index = arguments.firstIndex(of: "--surface-snapshots") {
 if let index = arguments.firstIndex(of: "--neo-snapshots") {
     let directory = index + 1 < arguments.count ? arguments[index + 1] : "."
     // An optional third argument keeps only the rows whose name contains it
-    // (`listening`: NEO's listening mark in every shape).
+    // (`listening`: NEO's listening glow in every shape).
     let filter = index + 2 < arguments.count ? arguments[index + 2] : nil
     exit(MainActor.assumeIsolated { NeoSnapshots.render(directory: directory, filter: filter) })
+}
+
+// --neo-glow-zoom DIR: the fox and its listening glow, enlarged, at the top and bottom of a breath (headless).
+if let index = arguments.firstIndex(of: "--neo-glow-zoom") {
+    let directory = index + 1 < arguments.count ? arguments[index + 1] : "."
+    exit(MainActor.assumeIsolated { NeoSnapshots.renderGlowZoom(directory: directory) })
 }
 
 // --pet-snapshots DIR: the real IslandView's pet layer in each dock shape (headless).

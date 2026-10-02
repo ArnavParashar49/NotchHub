@@ -9,10 +9,11 @@ import NotchHubSystem
 /// held state and whether its core is there — and, from that state and the
 /// card facts, `NeoPanelModel` (`+NeoPanel`). The pet takes NEO's state
 /// through `petContext` (`PetContext.neoState`) and poses as what NEO is
-/// doing. The island's shape changes for NEO in one way only: while NEO is
-/// LISTENING a small voice meter stands beside the pet
-/// (`NeoListeningIndicator`), with the word "Listening" for the first 1.5 s,
-/// and the pet's side of the island makes room for it. The models are pure
+/// doing. One thing is added, and only while NEO is LISTENING: a soft glow
+/// breathes behind the pet (`NeoListeningIndicator`). For the first 1.5 s
+/// the word "Listening" stands beside the pet and the pet's side of the
+/// island makes room for it; after that the island is exactly as wide as it
+/// is without NEO. The models are pure
 /// and clock-driven: they say when something will change on its own (a held
 /// state becoming due, the settle after idle, the panel folding, the word
 /// stepping aside), and `scheduleNeoWake` comes back exactly then. NEO's state lives here and in
@@ -92,7 +93,7 @@ extension NotchHubApp {
     }
 
     /// Re-poses the pet for NEO — and re-renders the island when the
-    /// listening mark changed, so the mark and the room it takes move on the
+    /// listening mark changed, so the word and the room it takes move on the
     /// island's own spring, in one transaction.
     func refreshNeoPet() {
         let update = updatePet()
@@ -142,8 +143,8 @@ extension NotchHubApp {
     /// without a core — connect, wake (connecting), listen, think, search,
     /// speak, ask for an OK, go idle — repeating, so the pet can be watched
     /// posing as NEO through a turn and settling back into its own life. The
-    /// island's shape changes only while it listens (2.6–5.6 s: the mark
-    /// beside the pet, with its word until 4.1 s); the panel stays closed
+    /// island's shape changes only for the word "Listening" (2.6–4.1 s; the
+    /// glow behind the pet stays until 5.6 s and takes no room); the panel stays closed
     /// through the answer and opens at "Needs your OK", folding 5 s after idle.
     func runNeoDemo() {
         let heard = "what's the weather like in Paris this weekend"

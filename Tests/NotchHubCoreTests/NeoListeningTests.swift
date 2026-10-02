@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import NotchHubCore
 
-@Suite("NEO's listening mark: shown only while NEO listens")
+@Suite("NEO's listening glow: shown only while NEO listens")
 struct NeoListeningIndicatorTests {
 
     let t0 = Date(timeIntervalSinceReferenceDate: 5_000)
@@ -15,7 +15,7 @@ struct NeoListeningIndicatorTests {
         return neo
     }
 
-    @Test("hidden until NEO listens; the word for the first 1.5 s, then the bars alone; gone the moment listening ends")
+    @Test("hidden until NEO listens; the glow with the word for the first 1.5 s, then the glow alone; gone the moment listening ends")
     func phases() {
         var mark = NeoListeningIndicator()
         #expect(mark.phase(at: t0) == .hidden && mark.since == nil && mark.nextWake(at: t0) == nil)
@@ -25,9 +25,9 @@ struct NeoListeningIndicatorTests {
         #expect(mark.phase(at: t0) == .labelled)
         #expect(mark.phase(at: at(0.5)) == .labelled)
         #expect(mark.phase(at: at(1.49)) == .labelled)
-        #expect(mark.phase(at: at(1.5)) == .bars)
-        #expect(mark.phase(at: at(3)) == .bars)
-        #expect(mark.phase(at: at(600)) == .bars) // however long NEO listens
+        #expect(mark.phase(at: at(1.5)) == .glow)
+        #expect(mark.phase(at: at(3)) == .glow)
+        #expect(mark.phase(at: at(600)) == .glow) // however long NEO listens
 
         let left = mark.update(listening: false, at: at(4))
         #expect(left)
@@ -52,7 +52,7 @@ struct NeoListeningIndicatorTests {
         var mark = NeoListeningIndicator()
         mark.update(listening: true, at: t0)
         let again = mark.update(listening: true, at: at(2))
-        #expect(!again && mark.since == t0 && mark.phase(at: at(2)) == .bars)
+        #expect(!again && mark.since == t0 && mark.phase(at: at(2)) == .glow)
         let stillHidden = NeoListeningIndicator().since
         #expect(stillHidden == nil)
 
@@ -121,7 +121,7 @@ struct NeoListeningIndicatorTests {
     }
 }
 
-@Suite("NEO's listening mark: its size and the room it takes")
+@Suite("NEO's listening glow: its size, its breath, and the room its word takes")
 struct NeoListeningLayoutTests {
 
     let t0 = Date(timeIntervalSinceReferenceDate: 6_000)
@@ -136,39 +136,125 @@ struct NeoListeningLayoutTests {
         return mark
     }
 
-    @Test("four thin bars: 14 pt wide, at most 12 pt tall")
-    func bars() {
-        #expect(NeoListeningLayout.barCount == 4)
-        #expect(NeoListeningLayout.markWidth == 14)
-        #expect(NeoListeningLayout.markWidth >= 12 && NeoListeningLayout.markWidth <= 14)
-        #expect(NeoListeningLayout.markHeight <= 12)
-        #expect(NeoListeningLayout.barWidth <= 2)
+    /// Every shape the pet rides, with an island size it really takes.
+    private let shapes: [(IslandState, CGSize)] = [
+        (.idle, CGSize(width: 219, height: 32)), (.wings, CGSize(width: 360, height: 32)),
+        (.compact, CGSize(width: 308, height: 32)), (.expanded, CGSize(width: 514, height: 88)),
+        (.interactive, CGSize(width: 440, height: 300)), (.appPanel, CGSize(width: 440, height: 300)),
+        (.meeting, CGSize(width: 360, height: 120)),
+    ]
+
+    @Test("the glow is the fox's size + 6 pt: 22 pt in the notch strip, 38 pt expanded, centred on the pet")
+    func glowSize() {
+        #expect(NeoListeningLayout.glowSpread == 3)
+        #expect(NeoListeningLayout.glowDiameter(petSize: 16) == 22)
+        #expect(NeoListeningLayout.glowDiameter(petSize: 32) == 38)
+        for (state, size) in shapes {
+            let pet = PetLayout.placement(for: state, islandSize: size, notchHeight: 32)!
+            let glow = NeoListeningLayout.glowFrame(behind: pet)
+            let petRect = CGRect(x: pet.origin.x, y: pet.origin.y, width: pet.size, height: pet.size)
+            #expect(glow.width == pet.size + 6 && glow.height == pet.size + 6, "\(state)")
+            #expect(glow.midX == petRect.midX && glow.midY == petRect.midY, "\(state)")
+            #expect(glow.contains(petRect), "\(state)")
+        }
     }
 
-    @Test("the width math: nothing hidden, 18 pt for the bars, at most 72 pt with the word")
+    @Test("at the top of a breath the glow is still inside the 32-pt notch strip, and inside the island in every shape")
+    func glowStaysInside() {
+        let top = NeoListeningLayout.glowScaleRange.upperBound
+        #expect(NeoListeningLayout.glowDiameter(petSize: PetLayout.artSize) * top <= 32)
+        for (state, size) in shapes {
+            let pet = PetLayout.placement(for: state, islandSize: size, notchHeight: 32)!
+            let glow = NeoListeningLayout.glowFrame(behind: pet, scale: top)
+            #expect(CGRect(origin: .zero, size: size).contains(glow), "\(state)")
+            if pet.scale == 1 {
+                #expect(glow.minY >= 0 && glow.maxY <= 32, "\(state): within the notch strip")
+            }
+        }
+        // On the idle dock, either side of the notch: clear of the notch too.
+        let notch = geometry.notchFrame
+        for side in [PetSide.right, .left] {
+            var content = IslandContentSize.default
+            content.petDock = PetDock(side: side, reach: PetLayout.idleDock)
+            let island = geometry.frame(for: .idle, content: content)
+            let pet = PetLayout.placement(for: .idle, islandSize: island.size, notchHeight: 32, dock: content.petDock!)!
+            let glow = NeoListeningLayout.glowFrame(behind: pet, scale: top)
+            #expect(CGRect(origin: .zero, size: island.size).contains(glow), "\(side)")
+            #expect(!glow.intersects(CGRect(x: notch.minX - island.minX, y: 0, width: notch.width, height: 32)), "\(side)")
+        }
+    }
+
+    @Test("the breath: opacity 0.35–0.75 and scale 0.92–1.06 on a 1.6 s cycle, eased at both ends, steady under Reduce Motion")
+    func breath() {
+        #expect(NeoListeningLayout.breathPeriod == 1.6)
+        #expect(NeoListeningLayout.glowOpacityRange == 0.35...0.75)
+        #expect(NeoListeningLayout.glowScaleRange == 0.92...1.06)
+        // It starts half-way and rising, peaks 0.4 s in, bottoms out at 1.2 s.
+        #expect(abs(NeoListeningLayout.breath(at: 0) - 0.5) < 1e-9)
+        #expect(abs(NeoListeningLayout.breath(at: 0.4) - 1) < 1e-9)
+        #expect(abs(NeoListeningLayout.breath(at: 1.2)) < 1e-9)
+        #expect(NeoListeningLayout.breath(at: 0.2) > NeoListeningLayout.breath(at: 0))
+        var low = 1.0, high = 0.0
+        for step in 0...960 {
+            let time = Double(step) / 60
+            let breath = NeoListeningLayout.breath(at: time)
+            #expect(breath >= -1e-9 && breath <= 1 + 1e-9)
+            // One cycle later it is where it was: 1.6 s, exactly.
+            #expect(abs(NeoListeningLayout.breath(at: time + 1.6) - breath) < 1e-9)
+            let opacity = NeoListeningLayout.glowOpacity(breath: breath)
+            let scale = NeoListeningLayout.glowScale(breath: breath)
+            #expect(opacity >= 0.35 - 1e-9 && opacity <= 0.75 + 1e-9)
+            #expect(scale >= 0.92 - 1e-9 && scale <= 1.06 + 1e-9)
+            low = min(low, opacity); high = max(high, opacity)
+        }
+        #expect(abs(low - 0.35) < 1e-3 && abs(high - 0.75) < 1e-3, "it really travels the whole range")
+        // Ease in and out: it moves slowest at the two ends, fastest between.
+        let nearEnd = abs(NeoListeningLayout.breath(at: 0.45) - NeoListeningLayout.breath(at: 0.4))
+        let midway = abs(NeoListeningLayout.breath(at: 0.85) - NeoListeningLayout.breath(at: 0.8))
+        #expect(nearEnd < midway / 4)
+        // The ends, and out-of-range input, are clamped.
+        #expect(NeoListeningLayout.glowOpacity(breath: 0) == 0.35 && NeoListeningLayout.glowOpacity(breath: 1) == 0.75)
+        #expect(NeoListeningLayout.glowOpacity(breath: 7) == 0.75 && NeoListeningLayout.glowOpacity(breath: -7) == 0.35)
+        #expect(NeoListeningLayout.glowScale(breath: 0) == 0.92 && abs(NeoListeningLayout.glowScale(breath: 1) - 1.06) < 1e-9)
+        // Deterministic: the same instant draws the same glow (no noise, no level input).
+        #expect(NeoListeningLayout.breath(at: 1.25) == NeoListeningLayout.breath(at: 1.25))
+        // Reduce Motion: a steady glow inside the breathing range, at its drawn size.
+        #expect(NeoListeningLayout.glowOpacityRange.contains(NeoListeningLayout.steadyOpacity))
+        #expect(NeoListeningLayout.steadyScale == 1)
+    }
+
+    @Test("the width math: only the word takes room — 56 pt with it, NOTHING for the glow")
     func slots() {
         #expect(NeoListeningLayout.slot(.hidden, labelWidth: word) == 0)
-        #expect(NeoListeningLayout.slot(.bars, labelWidth: word) == 18)
-        #expect(NeoListeningLayout.barsSlot == NeoListeningLayout.markWidth + NeoListeningLayout.gap)
-        #expect(NeoListeningLayout.slot(.labelled, labelWidth: word) == 72) // 18 + 4 + 50
-        #expect(NeoListeningLayout.maxSlot == 72)
+        #expect(NeoListeningLayout.slot(.glow, labelWidth: word) == 0)
+        #expect(NeoListeningLayout.slot(.labelled, labelWidth: word) == 56) // 6 + 50
+        #expect(NeoListeningLayout.maxSlot == 56)
+        #expect(NeoListeningLayout.maxSlot == NeoListeningLayout.labelGap + NeoListeningLayout.maxLabelWidth)
+        // The gap clears the halo's own reach past the pet.
+        #expect(NeoListeningLayout.labelGap >= NeoListeningLayout.glowSpread)
         // A word wider than the cap never widens the island further; a
-        // nonsense width never shrinks it below the bars.
+        // nonsense width takes no room at all.
         #expect(NeoListeningLayout.slot(.labelled, labelWidth: 400) == NeoListeningLayout.maxSlot)
-        #expect(NeoListeningLayout.slot(.labelled, labelWidth: -5) == 22) // 18 + 4: the gap, no word
-        #expect(NeoListeningLayout.slot(.labelled, labelWidth: 30) == 52)
+        #expect(NeoListeningLayout.slot(.labelled, labelWidth: -5) == 0)
+        #expect(NeoListeningLayout.slot(.labelled, labelWidth: 30) == 36)
     }
 
-    @Test("the mark in each shape: the word and its room where the shape grows, the bars alone in the panels' notch strip, nothing where the pet steps aside")
+    @Test("the mark in each shape: the word and its room for 1.5 s where the shape grows, then zero width; the glow only in the fixed strips; nothing where the pet steps aside")
     func marks() {
         let indicator = listening()
         for state in [IslandState.idle, .wings, .compact, .expanded] {
             let early = indicator.mark(for: state, at: at(0.5), labelWidth: word)
-            #expect(early == NeoListeningMark(showsLabel: true, labelWidth: 50, slot: 72, since: t0), "\(state)")
-            #expect(early?.width == 68)
-            let later = indicator.mark(for: state, at: at(3), labelWidth: word)
-            #expect(later == NeoListeningMark(showsLabel: false, labelWidth: 0, slot: 18, since: t0), "\(state)")
-            #expect(later?.width == 14)
+            #expect(early == NeoListeningMark(showsLabel: true, labelWidth: 50, slot: 56, since: t0), "\(state)")
+            let justBefore = indicator.mark(for: state, at: at(1.49), labelWidth: word)
+            #expect(justBefore?.showsLabel == true && justBefore?.slot == 56, "\(state)")
+            // The word gone: the glow is still there, and takes no room.
+            for time in [1.5, 3.0, 600.0] {
+                let later = indicator.mark(for: state, at: at(time), labelWidth: word)
+                #expect(later == NeoListeningMark(showsLabel: false, labelWidth: 0, slot: 0, since: t0), "\(state) at \(time)")
+            }
+            // No measurable word: no word and no room, only the glow.
+            let wordless = indicator.mark(for: state, at: at(0.5), labelWidth: 0)
+            #expect(wordless == NeoListeningMark(showsLabel: false, labelWidth: 0, slot: 0, since: t0), "\(state)")
         }
         for state in [IslandState.interactive, .appPanel, .meeting] {
             for time in [0.5, 3.0] {
@@ -184,10 +270,11 @@ struct NeoListeningLayoutTests {
         }
     }
 
-    @Test("on the idle dock the mark waits for the pet to stand at its spot")
+    @Test("on the idle dock the glow waits for the pet to stand at its spot")
     func petAway() {
         let indicator = listening()
         #expect(indicator.mark(for: .idle, at: at(0.5), labelWidth: word, petAtHome: false) == nil)
+        #expect(indicator.mark(for: .idle, at: at(3), labelWidth: word, petAtHome: false) == nil)
         #expect(indicator.mark(for: .idle, at: at(0.5), labelWidth: word, petAtHome: true) != nil)
         // Elsewhere the pet is always at its place in the bar.
         #expect(indicator.mark(for: .compact, at: at(0.5), labelWidth: word, petAtHome: false) != nil)
@@ -202,137 +289,129 @@ struct NeoListeningLayoutTests {
         #expect(geometry.frame(for: .idle, content: content) == today)
         // A hidden mark reserves nothing, so the frame cannot differ.
         let hidden = NeoListeningIndicator().mark(for: .idle, at: t0, labelWidth: word)
+        #expect(hidden == nil)
         content.listeningSlot = hidden?.slot ?? 0
         #expect(geometry.frame(for: .idle, content: content) == today)
         // Without a dock (no pet, or the pet inside the notch) idle is the
         // notch whatever the slot says.
         var bare = IslandContentSize.default
-        bare.listeningSlot = 72
+        bare.listeningSlot = 56
         #expect(geometry.frame(for: .idle, content: bare) == geometry.notchFrame)
         bare.petDock = PetDock(side: .right, reach: 0)
         #expect(geometry.frame(for: .idle, content: bare) == geometry.notchFrame)
     }
 
-    @Test("the idle dock grows on the pet's side only: 72 pt with the word, 18 pt after — the notch side never moves")
+    @Test("zero width after the word: 1.5 s into listening every shape has exactly the frame it has without NEO")
+    func noWidthForTheGlow() {
+        let indicator = listening()
+        for state in IslandState.allCases {
+            var plain = IslandContentSize.default
+            if state == .idle { plain.petDock = .home }
+            var lit = plain
+            lit.listeningSlot = indicator.mark(for: state, at: at(3), labelWidth: word)?.slot ?? 0
+            #expect(lit == plain, "\(state)")
+            #expect(geometry.frame(for: state, content: lit) == geometry.frame(for: state, content: plain), "\(state)")
+        }
+        // …and on the left of the notch.
+        var left = IslandContentSize.default
+        left.petDock = PetDock(side: .left, reach: PetLayout.idleDock)
+        let plain = geometry.frame(for: .idle, content: left)
+        left.listeningSlot = indicator.mark(for: .idle, at: at(1.5), labelWidth: word)!.slot
+        #expect(geometry.frame(for: .idle, content: left) == plain)
+    }
+
+    @Test("for the word's 1.5 s the idle dock grows by 56 pt on the pet's side only — the notch side never moves")
     func idleGrowth() {
         var content = IslandContentSize.default
         content.petDock = .home
         let plain = geometry.frame(for: .idle, content: content)
 
-        content.listeningSlot = 72
+        content.listeningSlot = listening().mark(for: .idle, at: at(0.5), labelWidth: word)!.slot
         let labelled = geometry.frame(for: .idle, content: content)
-        #expect(labelled.minX == plain.minX && labelled.maxX == plain.maxX + 72)
+        #expect(labelled.minX == plain.minX && labelled.maxX == plain.maxX + 56)
         #expect(labelled.height == plain.height && labelled.minY == plain.minY)
-
-        content.listeningSlot = 18
-        let bars = geometry.frame(for: .idle, content: content)
-        #expect(bars.minX == plain.minX && bars.maxX == plain.maxX + 18)
 
         // The pet on the left of the notch: the island grows LEFT, and its
         // right edge stays the notch's.
         var left = IslandContentSize.default
         left.petDock = PetDock(side: .left, reach: PetLayout.idleDock)
         let leftPlain = geometry.frame(for: .idle, content: left)
-        left.listeningSlot = 72
+        left.listeningSlot = 56
         let leftLabelled = geometry.frame(for: .idle, content: left)
-        #expect(leftLabelled.maxX == leftPlain.maxX && leftLabelled.minX == leftPlain.minX - 72)
+        #expect(leftLabelled.maxX == leftPlain.maxX && leftLabelled.minX == leftPlain.minX - 56)
 
-        // Only idle reads the slot: the bars carry it in their measured widths.
+        // Only idle reads the slot: the wings and the compact bar carry it in
+        // their measured widths.
         var other = IslandContentSize.default
-        other.listeningSlot = 72
+        other.listeningSlot = 56
         for state in IslandState.allCases where state != .idle {
             #expect(geometry.frame(for: state, content: other) == geometry.frame(for: state, content: .default), "\(state)")
         }
     }
 
-    @Test("the mark stands between the notch and the pet — never under the notch, never on the pet — on either side")
+    @Test("the word stands between the notch and the pet — never under the notch, never on the pet — on either side")
     func besideThePet() {
         let indicator = listening()
         let notch = geometry.notchFrame
         for side in [PetSide.right, .left] {
-            for time in [0.5, 3.0] {
-                let mark = indicator.mark(for: .idle, at: at(time), labelWidth: word)!
-                var content = IslandContentSize.default
-                content.petDock = PetDock(side: side, reach: PetLayout.idleDock)
-                content.listeningSlot = mark.slot
-                let island = geometry.frame(for: .idle, content: content)
-                let pet = PetLayout.placement(for: .idle, islandSize: island.size, notchHeight: 32, dock: content.petDock!)!
-                let rect = NeoListeningLayout.frame(mark, beside: pet)
-                let petRect = CGRect(x: pet.origin.x, y: pet.origin.y, width: pet.size, height: pet.size)
-                // The notch, in the island's coordinates.
-                let notchMinX = notch.minX - island.minX
-                let notchMaxX = notch.maxX - island.minX
-                #expect(rect.width == mark.width && rect.height == NeoListeningLayout.markHeight)
-                #expect(rect.minY >= 0 && rect.maxY <= 32)
-                #expect(rect.midY == petRect.midY)
-                if side == .right {
-                    #expect(rect.minX == notchMaxX + PetLayout.dockInset, "the notch's edge, the dock's inset, then the mark")
-                    #expect(rect.maxX == petRect.minX - NeoListeningLayout.gap)
-                    #expect(petRect.maxX == island.width - PetLayout.dockInset, "the pet keeps its inset from the outer edge")
-                } else {
-                    #expect(rect.maxX == notchMinX - PetLayout.dockInset)
-                    #expect(rect.minX == petRect.maxX + NeoListeningLayout.gap)
-                    #expect(petRect.minX == PetLayout.dockInset)
-                }
-                #expect(!rect.intersects(CGRect(x: notchMinX, y: 0, width: notch.width, height: 32)))
-                #expect(!rect.intersects(petRect))
+            let mark = indicator.mark(for: .idle, at: at(0.5), labelWidth: word)!
+            var content = IslandContentSize.default
+            content.petDock = PetDock(side: side, reach: PetLayout.idleDock)
+            content.listeningSlot = mark.slot
+            let island = geometry.frame(for: .idle, content: content)
+            let pet = PetLayout.placement(for: .idle, islandSize: island.size, notchHeight: 32, dock: content.petDock!)!
+            let rect = NeoListeningLayout.labelFrame(mark, beside: pet)
+            let petRect = CGRect(x: pet.origin.x, y: pet.origin.y, width: pet.size, height: pet.size)
+            // The notch, in the island's coordinates.
+            let notchMinX = notch.minX - island.minX
+            let notchMaxX = notch.maxX - island.minX
+            #expect(rect.width == 50 && rect.height == NeoListeningLayout.labelHeight)
+            #expect(rect.minY >= 0 && rect.maxY <= 32)
+            #expect(rect.midY == petRect.midY)
+            if side == .right {
+                #expect(rect.minX == notchMaxX + PetLayout.dockInset, "the notch's edge, the dock's inset, then the word")
+                #expect(rect.maxX == petRect.minX - NeoListeningLayout.labelGap)
+                #expect(petRect.maxX == island.width - PetLayout.dockInset, "the pet keeps its inset from the outer edge")
+            } else {
+                #expect(rect.maxX == notchMinX - PetLayout.dockInset)
+                #expect(rect.minX == petRect.maxX + NeoListeningLayout.labelGap)
+                #expect(petRect.minX == PetLayout.dockInset)
             }
+            #expect(!rect.intersects(CGRect(x: notchMinX, y: 0, width: notch.width, height: 32)))
+            #expect(!rect.intersects(petRect))
+            // The word is clear of the halo too, even at the top of a breath.
+            #expect(!rect.intersects(NeoListeningLayout.glowFrame(behind: pet, scale: NeoListeningLayout.glowScaleRange.upperBound)))
+
+            // Without its word the mark has no rectangle beside the pet at all.
+            let later = indicator.mark(for: .idle, at: at(3), labelWidth: word)!
+            #expect(NeoListeningLayout.labelFrame(later, beside: pet).width == 0)
         }
     }
 
-    @Test("in a bar and in the expanded island the mark sits left of the pet, inside the room the content gave up")
+    @Test("in a bar and in the expanded island the word sits left of the pet, inside the room the content gave up")
     func besideThePetInABar() {
         let indicator = listening()
         let mark = indicator.mark(for: .compact, at: at(0.5), labelWidth: word)!
         let size = CGSize(width: 380, height: 32)
         let pet = PetLayout.placement(for: .compact, islandSize: size, notchHeight: 32)!
-        let rect = NeoListeningLayout.frame(mark, beside: pet)
-        #expect(rect.maxX == pet.origin.x - NeoListeningLayout.gap)
-        // The content's trailing edge: the bar's inset, the pet's slot, the mark's slot.
+        let rect = NeoListeningLayout.labelFrame(mark, beside: pet)
+        #expect(rect.maxX == pet.origin.x - NeoListeningLayout.labelGap)
+        // The content's trailing edge: the bar's inset, the pet's slot, the word's slot.
         let contentMaxX = size.width - DesignTokens.compactInset - PetLayout.barSlot - mark.slot
         #expect(rect.minX >= contentMaxX)
 
         let expanded = CGSize(width: 514, height: 88)
         let big = PetLayout.placement(for: .expanded, islandSize: expanded, notchHeight: 32)!
-        let later = indicator.mark(for: .expanded, at: at(3), labelWidth: word)!
-        let bigRect = NeoListeningLayout.frame(later, beside: big)
-        #expect(bigRect.maxX == big.origin.x - NeoListeningLayout.gap)
+        let early = indicator.mark(for: .expanded, at: at(0.5), labelWidth: word)!
+        let bigRect = NeoListeningLayout.labelFrame(early, beside: big)
+        #expect(bigRect.maxX == big.origin.x - NeoListeningLayout.labelGap)
         #expect(bigRect.midY == big.origin.y + big.size / 2)
         #expect(bigRect.minY >= 32, "below the notch strip, with the larger pet")
+        // The larger pet's glow stays below the notch strip as well.
+        #expect(NeoListeningLayout.glowFrame(behind: big, scale: NeoListeningLayout.glowScaleRange.upperBound).minY >= 32)
     }
 
-    @Test("the bars move procedurally: always between a dot and full height, out of step with each other, and still under Reduce Motion")
-    func motion() {
-        var seen: [Set<Int>] = Array(repeating: [], count: NeoListeningLayout.barCount)
-        for step in 0..<600 {
-            let time = Double(step) / 30
-            for bar in 0..<NeoListeningLayout.barCount {
-                let level = NeoListeningLayout.level(bar: bar, at: time)
-                #expect(level >= NeoListeningLayout.minLevel && level <= 1)
-                let height = NeoListeningLayout.barHeight(level: level)
-                #expect(height >= NeoListeningLayout.minBarHeight && height <= NeoListeningLayout.markHeight)
-                seen[bar].insert(Int(height * 2))
-            }
-        }
-        // Each bar really travels, and the four are not one bar drawn four times.
-        for bar in 0..<NeoListeningLayout.barCount {
-            #expect(seen[bar].count >= 10, "bar \(bar)")
-        }
-        let together = (0..<NeoListeningLayout.barCount).map { NeoListeningLayout.level(bar: $0, at: 0.7) }
-        #expect(Set(together.map { Int($0 * 100) }).count > 1)
-        // Deterministic: the same instant draws the same bars (no noise, no level input).
-        #expect(NeoListeningLayout.level(bar: 2, at: 1.25) == NeoListeningLayout.level(bar: 2, at: 1.25))
-
-        #expect(NeoListeningLayout.restingLevels.count == NeoListeningLayout.barCount)
-        for level in NeoListeningLayout.restingLevels {
-            let height = NeoListeningLayout.barHeight(level: level)
-            #expect(height >= NeoListeningLayout.minBarHeight && height <= NeoListeningLayout.markHeight)
-        }
-        #expect(NeoListeningLayout.barHeight(level: 0) == NeoListeningLayout.minBarHeight)
-        #expect(NeoListeningLayout.barHeight(level: 7) == NeoListeningLayout.markHeight)
-    }
-
-    @Test("Ghost Mode hides the mark with the island: it adds no shape of its own")
+    @Test("Ghost Mode hides the glow with the island: it adds no shape of its own")
     func ghost() {
         for state in IslandState.allCases where NeoListeningLayout.room(in: state) != nil {
             #expect(GhostMode.hidesFromCapture(state: state, ghostModeEnabled: true), "\(state)")

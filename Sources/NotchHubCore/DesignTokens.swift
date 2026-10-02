@@ -3,7 +3,8 @@ import SwiftUI
 /// The NotchHub design system.
 ///
 /// Apple Dynamic Island language: near-black, high contrast, generous spacing,
-/// sharp rectangular corners, SF typography, no borders, no gradients, no
+/// sharp rectangular corners, SF typography, no borders, no gradients (one
+/// deliberate exception: `listeningGlow`, which is light, not a surface), no
 /// clutter. Every container, row, chip, panel, badge, progress track and
 /// search field uses square corners to match the notch's hard-edged
 /// industrial language. Status dots may remain round when they read as
@@ -48,10 +49,20 @@ public enum DesignTokens {
     public static let fieldFill = Color.white.opacity(0.06)
     /// Tint for a live call's "on air" state.
     public static let onAir = Color(red: 0.30, green: 0.85, blue: 0.46)
-    /// NEO's listening mark — the small voice meter beside the pet while its
-    /// microphone is live. The same calm green as a call's "on air": it reads
-    /// clearly on black, and apart from the fox's own orange beside it.
-    public static let listening = onAir
+    /// NEO's listening glow — the soft halo that breathes behind the pet
+    /// while NEO's microphone is live. A cool cyan-teal: it reads as "awake"
+    /// on black, it is the complement of the fox's orange (so the fox stands
+    /// out against its own light rather than melting into it, as it does in a
+    /// warm amber), and it is neither the now-playing visualizer's green nor
+    /// the orange and green of the system's microphone and camera dots. Drawn
+    /// as a blurred radial falloff (`NeoListeningGlowView`) — the design
+    /// system's one gradient, because it is light and not a surface.
+    public static let listeningGlow = Color(red: 0.40, green: 0.88, blue: 0.96)
+    /// How the glow arrives when listening starts: a soft spring, like a lamp
+    /// coming up.
+    public static let listeningGlowIn = Animation.spring(response: 0.42, dampingFraction: 0.78, blendDuration: 0.12)
+    /// How it leaves when listening ends: a plain fade.
+    public static let listeningGlowOut = Animation.easeOut(duration: 0.30)
 
     // MARK: - Panel geometry
     
