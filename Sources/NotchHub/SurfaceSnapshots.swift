@@ -203,7 +203,8 @@ enum SurfaceSnapshots {
     /// The settings panel's NEO section — NEO.app's menu, carried here while
     /// the notch hosts NEO — in each state NEO can be in: running with
     /// everything allowed, missing a permission, a core with no NEO.app, not
-    /// running, and switched off. Plus the features page, for the NEO tile
+    /// running, and switched off — and with "Listen for “Neo”" off (the
+    /// microphone only while summoned). Plus the features page, for the NEO tile
     /// that opens the section. (No scroll view: an image renderer cannot draw one.)
     static func settingsRows(geometry: NotchGeometry) -> [Row] {
         let frame = geometry.frame(for: .settings, content: .default)
@@ -211,10 +212,12 @@ enum SurfaceSnapshots {
         var missing = ready
         missing.screenRecording = false
         missing.openAtLogin = false
+        let listens = NeoCoreSettings(wakeWord: true)
         let cases: [(String, SettingsView.Page, NeoSettingsModel)] = [
-            ("features, with NEO's tile", .features, NeoSettingsModel(featureOn: true, connected: true, shell: ready)),
-            ("NEO — running", .neo, NeoSettingsModel(featureOn: true, connected: true, shell: ready)),
-            ("NEO — a permission missing", .neo, NeoSettingsModel(featureOn: true, connected: true, shell: missing)),
+            ("features, with NEO's tile", .features, NeoSettingsModel(featureOn: true, connected: true, shell: ready, core: listens)),
+            ("NEO — running", .neo, NeoSettingsModel(featureOn: true, connected: true, shell: ready, core: listens)),
+            ("NEO — the wake word off", .neo, NeoSettingsModel(featureOn: true, connected: true, shell: ready, core: NeoCoreSettings(wakeWord: false))),
+            ("NEO — a permission missing", .neo, NeoSettingsModel(featureOn: true, connected: true, shell: missing, core: listens)),
             ("NEO — a core without NEO.app", .neo, NeoSettingsModel(featureOn: true, connected: true, shell: NeoShellStatus())),
             ("NEO — not running", .neo, NeoSettingsModel(featureOn: true, connected: false, shell: ready)),
             ("NEO — off", .neo, NeoSettingsModel(featureOn: false, connected: false, shell: nil)),

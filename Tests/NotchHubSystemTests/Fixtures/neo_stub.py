@@ -12,7 +12,7 @@ command a client sends is echoed to stdout as `CMD <json>`, each connection
 as `OPEN <n>`, the Origin it came with as `ORIGIN <origin>` and its role as
 `ROLE <role>` (`-` for none), so the test can check what a client said.
 
-    neo_stub.py PORT TOKEN [drop | confirm]
+    neo_stub.py PORT TOKEN [drop | confirm | settings]
 
 With `drop`, the first connection is closed by the server after the script,
 so the client's reconnect can be watched; later connections stay open.
@@ -24,6 +24,16 @@ for the old id, `confirm` for the new), and a client's
 `{"cmd":"confirm","yes":…,"action_id":…}` for the card that is pending is
 answered with `confirm_done` — to every client, as the bus does. An answer
 naming any other id closes nothing.
+
+With `settings`, the stub plays a core whose "Listen for 'Neo'" can be
+switched, as neo2/core/server/ws.py and app.py do it: the `hello` says where
+it stands (`wake_word`), and a `{"cmd":"set","name":"wake_word","value":bool}`
+from a host is applied, told to every client in a `settings` event, and
+answered to the sender with `set_result`. From anything that is not a host
+it is refused (`forbidden`); a name it does not know is `unknown`, a value
+that is not a boolean `invalid` — and nothing changes. (The other modes'
+hello says `wake_word` too, except `confirm`'s: an older core, which has no
+such setting.)
 """
 import asyncio
 import json
@@ -36,6 +46,7 @@ PORT = int(sys.argv[1])
 TOKEN = sys.argv[2]
 DROP = len(sys.argv) > 3 and sys.argv[3] == "drop"
 CONFIRM = len(sys.argv) > 3 and sys.argv[3] == "confirm"
+SETTINGS = len(sys.argv) > 3 and sys.argv[3] == "settings"
 CARD_A = {"action_id": "trash:4d15b0099e5a9d0a", "tool": "trash", "summary": "move report.pdf to the Trash",
           "detail": "/Users/me/Documents/report.pdf", "scopes": [], "app": ""}
 CARD_B = {"action_id": "shell:b7f034d65f0f4e1a", "tool": "shell", "summary": "run a command",
@@ -43,6 +54,8 @@ CARD_B = {"action_id": "shell:b7f034d65f0f4e1a", "tool": "shell", "summary": "ru
 ALLOWED_ORIGINS = {"tauri://localhost", "neo://app"}
 
 connections = 0
+wake_word = {"on": True}
+clients = set()
 
 
 def say(line: str) -> None:
@@ -86,6 +99,7 @@ async def handle(ws):
             "confirm": None,
             "problems": [],
             "host_attached": True,
+            "wake_word": wake_word["on"],
             # NEO.app's shell has reported: Screen Recording is not allowed yet.
             "shell": {"running": True, "app": True, "accessibility": True, "screen_recording": False,
                       "open_at_login": True, "version": "2.1.0", "hotkey": "⌥⌘"},
@@ -118,7 +132,29 @@ async def handle(ws):
         await send("state", {"state": "confirming", "job": "j4"})
         await send("confirm", CARD_B)
 
-    sender = asyncio.create_task(confirm_script() if CONFIRM else script())
+    async def settings_script():
+        await send("hello", {"state": "idle", "recent": [], "confirm": None, "problems": [], "host_attached": True,
+                             "wake_word": wake_word["on"]})
+
+    async def set_(cmd):
+        """`set`, as the core answers it."""
+        name, value = str(cmd.get("name") or ""), cmd.get("value")
+        role = (parse_qs(urlparse(ws.request.path).query).get("role") or [""])[0]
+        error = ""
+        if role != "host":
+            error = "forbidden"
+        elif name != "wake_word":
+            error = "unknown"
+        elif not isinstance(value, bool):
+            error = "invalid"
+        if not error:
+            wake_word["on"] = value
+            for other in list(clients):
+                await other.send(json.dumps({"type": "settings", "data": {"wake_word": value}, "ts": 1.0}))
+        await send("set_result", {"name": name, "ok": not error, **({"error": error} if error else {})})
+
+    clients.add(ws)
+    sender = asyncio.create_task(confirm_script() if CONFIRM else settings_script() if SETTINGS else script())
     try:
         if DROP and n == 1:
             await sender
@@ -128,11 +164,15 @@ async def handle(ws):
         async for raw in ws:
             if isinstance(raw, str):
                 say(f"CMD {raw}")
-                if not CONFIRM:
+                if not (CONFIRM or SETTINGS):
                     continue
                 try:
                     cmd = json.loads(raw)
                 except ValueError:
+                    continue
+                if SETTINGS:
+                    if isinstance(cmd, dict) and cmd.get("cmd") == "set":
+                        await set_(cmd)
                     continue
                 if cmd.get("cmd") == "confirm" and cmd.get("action_id") == pending["id"]:
                     pending["id"] = None
@@ -140,6 +180,7 @@ async def handle(ws):
                     await send("confirm_done", {"action_id": cmd["action_id"], "outcome": outcome})
                     await send("state", {"state": "idle", "job": "j4"})
     finally:
+        clients.discard(ws)
         if not sender.done():
             sender.cancel()
 

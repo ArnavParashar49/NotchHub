@@ -62,6 +62,71 @@ struct NeoShellTests {
         #expect(NeoPermission.screenRecording.settingsURL.hasSuffix("?Privacy_ScreenCapture"))
     }
 
+    @Test("“Listen for Neo” is one set command, with a real boolean")
+    func settingCommand() {
+        #expect(NeoSetting.wakeWord(false).command == #"{"cmd":"set","name":"wake_word","value":false}"#)
+        #expect(NeoSetting.wakeWord(true).command == #"{"cmd":"set","name":"wake_word","value":true}"#)
+        for on in [true, false] {
+            let setting = NeoSetting.wakeWord(on)
+            let object = try? JSONSerialization.jsonObject(with: Data(setting.command.utf8)) as? [String: Any]
+            #expect(Set((object ?? [:]).keys) == ["cmd", "name", "value"])
+            #expect(object?["cmd"] as? String == "set" && object?["name"] as? String == setting.name)
+            #expect(NeoCoreSettings(payload: ["wake_word": object?["value"] as Any]).wakeWord == on) // a JSON boolean, as the core requires
+        }
+        // The intent that asks for it is the core's to do — not NEO.app's shell's.
+        #expect(NeoSettingsIntent.wakeWord(false).setting == .wakeWord(false))
+        #expect(NeoSettingsIntent.wakeWord(true).shellAction == nil)
+        for intent in [NeoSettingsIntent.openChat, .apiKeys, .restart, .openAtLogin(true), .quit, .start, .openPermission(.accessibility)] {
+            #expect(intent.setting == nil, "\(intent)")
+        }
+    }
+
+    @Test("the core's settings are read from its object: a boolean, or nothing")
+    func corePayload() {
+        #expect(NeoCoreSettings(payload: ["wake_word": true]) == NeoCoreSettings(wakeWord: true))
+        #expect(NeoCoreSettings(payload: ["wake_word": false, "state": "idle"]) == NeoCoreSettings(wakeWord: false))
+        #expect(NeoCoreSettings(payload: [:]) == NeoCoreSettings())
+        for odd in ["false", 0, 1, NSNull(), ["on": true]] as [Any] {
+            #expect(NeoCoreSettings(payload: ["wake_word": odd]).wakeWord == nil, "\(odd)")
+        }
+    }
+
+    @Test("“Listen for Neo” shows what the core said, with what it means for the microphone — and dims when there is no core to ask")
+    func wakeWord() {
+        // On: the microphone stays open for the wake word.
+        let on = NeoSettingsModel(featureOn: true, connected: true, shell: ready, core: NeoCoreSettings(wakeWord: true))
+        #expect(on.wakeWord == true && on.listensForNeo)
+        #expect(on.wakeWordCaption == "The microphone stays on to hear “Neo”.")
+        #expect(on.isEnabled(.wakeWord(false)))
+        // Off: the keys summon NEO, and the caption names the ones that do right now.
+        let off = NeoSettingsModel(featureOn: true, connected: true, shell: ready, core: NeoCoreSettings(wakeWord: false))
+        #expect(off.wakeWord == false && !off.listensForNeo)
+        #expect(off.wakeWordCaption == "Summon with ⌥⌘ — the microphone is on only while NEO listens.")
+        #expect(off.isEnabled(.wakeWord(true)))
+        var fallback = ready
+        fallback.hotkey = "⌘⇧Space" // before Accessibility is allowed
+        #expect(NeoSettingsModel(featureOn: true, connected: true, shell: fallback, core: NeoCoreSettings(wakeWord: false)).wakeWordCaption
+            == "Summon with ⌘⇧Space — the microphone is on only while NEO listens.")
+        // It is the core's setting: a core with no NEO.app behind it switches it too.
+        let coreOnly = NeoSettingsModel(featureOn: true, connected: true, shell: nil, core: NeoCoreSettings(wakeWord: false))
+        #expect(coreOnly.availability == .coreOnly && coreOnly.isEnabled(.wakeWord(true)) && !coreOnly.listensForNeo)
+        #expect(coreOnly.wakeWordCaption.hasPrefix("Summon with \(NeoSettingsModel.defaultHotkey) —"))
+        // NEO not running, the feature off, or a core too old to say: the row
+        // stays, dimmed, on the side NEO starts with — what was said before
+        // NEO quit says nothing now.
+        let stale = NeoCoreSettings(wakeWord: false)
+        for model in [
+            NeoSettingsModel(featureOn: true, connected: false, shell: ready, core: stale),
+            NeoSettingsModel(featureOn: false, connected: true, shell: ready, core: stale),
+            NeoSettingsModel(featureOn: true, connected: true, shell: ready, core: NeoCoreSettings()),
+            NeoSettingsModel(featureOn: true, connected: true, shell: ready),
+        ] {
+            #expect(model.wakeWord == nil && model.listensForNeo, "\(model.availability)")
+            #expect(!model.isEnabled(.wakeWord(false)) && !model.isEnabled(.wakeWord(true)), "\(model.availability)")
+            #expect(model.wakeWordCaption == "The microphone stays on to hear “Neo”.")
+        }
+    }
+
     @Test("NEO running, everything allowed: every row works, and nothing asks to be allowed or started")
     func readyModel() {
         let model = NeoSettingsModel(featureOn: true, connected: true, shell: ready)

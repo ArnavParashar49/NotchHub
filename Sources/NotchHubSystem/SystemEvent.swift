@@ -125,6 +125,9 @@ public struct SystemEvent: Equatable {
         /// What NEO.app's shell reported through the core (its permissions,
         /// Open at Login, its version): for the NEO section of Settings.
         case neoShell(NeoShellStatus)
+        /// What NEO's core said about its own settings ("Listen for 'Neo'"):
+        /// at every hello, and whenever one is switched.
+        case neoSettings(NeoCoreSettings)
     }
 
     public let source: Source

@@ -212,6 +212,13 @@ public final class SystemMonitor {
         entries.compactMap { $0.listener as? NeoListener }.forEach { $0.send(action) }
     }
 
+    /// Switches one of the core's settings through the NEO listener ("Listen
+    /// for 'Neo'" in the NEO section of Settings). Nothing happens while NEO
+    /// is off or away.
+    public func neoSet(_ setting: NeoSetting) {
+        entries.compactMap { $0.listener as? NeoListener }.forEach { $0.send(setting) }
+    }
+
     /// Answers NEO's pending confirmation through the NEO listener (Allow or
     /// Cancel under the notch). Nothing happens while NEO is off or away.
     public func neoConfirm(_ answer: NeoConfirmAnswer) {

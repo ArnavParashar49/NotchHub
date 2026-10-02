@@ -20,7 +20,7 @@ struct NeoListenerParsingTests {
             == [.transcript(role: .user, text: "hi", final: false)])
         #expect(NeoListener.facts(in: #"{"type":"note","data":{"text":"n"},"ts":1}"#) == [.note("n")])
         #expect(NeoListener.facts(in: #"{"type":"error","data":{"message":"m"},"ts":1}"#) == [.error("m")])
-        for other in ["browser_state", "camera_state", "song_state", "tool_start", "tool_end", "turn", "confirm", "problems", "erased", "ui_host", "shell", "shell_status", "shell_result", "host_attached"] {
+        for other in ["browser_state", "camera_state", "song_state", "tool_start", "tool_end", "turn", "confirm", "problems", "erased", "ui_host", "shell", "shell_status", "shell_result", "host_attached", "settings", "set_result"] {
             #expect(NeoListener.facts(in: #"{"type":"\#(other)","data":{"state":"speaking"},"ts":1}"#).isEmpty, "\(other)")
         }
     }
@@ -41,6 +41,30 @@ struct NeoListenerParsingTests {
             #expect(NeoListener.shellStatus(in: #"{"type":"\#(other)","data":\#(shell),"ts":1}"#) == nil, "\(other)")
         }
         #expect(NeoListener.shellStatus(in: "not json") == nil)
+    }
+
+    @Test("where “Listen for Neo” stands is read from the hello and from a settings event, and from nothing else")
+    func coreSettings() {
+        // The hello says it; a settings event says it again whenever it is switched.
+        #expect(NeoListener.coreSettings(in: #"{"type":"hello","data":{"state":"idle","recent":[],"wake_word":true},"ts":1}"#) == NeoCoreSettings(wakeWord: true))
+        #expect(NeoListener.coreSettings(in: #"{"type":"hello","data":{"state":"idle","recent":[],"wake_word":false},"ts":1}"#) == NeoCoreSettings(wakeWord: false))
+        #expect(NeoListener.coreSettings(in: #"{"type":"settings","data":{"wake_word":false},"ts":1}"#) == NeoCoreSettings(wakeWord: false))
+        #expect(NeoListener.coreSettings(in: #"{"type":"settings","data":{"wake_word":true},"ts":1}"#) == NeoCoreSettings(wakeWord: true))
+        // An older core's hello has no such setting: "unknown" — said, so that
+        // what an earlier connection reported does not linger.
+        #expect(NeoListener.coreSettings(in: #"{"type":"hello","data":{"state":"idle","recent":[]},"ts":1}"#) == NeoCoreSettings(wakeWord: nil))
+        // Only a real boolean is an answer.
+        for odd in [#""false""#, "0", "1", "null", #"{"on":true}"#] {
+            #expect(NeoListener.coreSettings(in: #"{"type":"hello","data":{"state":"idle","wake_word":\#(odd)},"ts":1}"#) == NeoCoreSettings(wakeWord: nil), "\(odd)")
+            #expect(NeoListener.coreSettings(in: #"{"type":"settings","data":{"wake_word":\#(odd)},"ts":1}"#) == nil, "\(odd)")
+        }
+        // A settings event about something else, the answer to a host's own
+        // request, and every other message: not where the switch stands.
+        #expect(NeoListener.coreSettings(in: #"{"type":"settings","data":{"listen_timeout_s":7},"ts":1}"#) == nil)
+        for other in ["set_result", "set", "state", "shell_status", "ui_host"] {
+            #expect(NeoListener.coreSettings(in: #"{"type":"\#(other)","data":{"wake_word":false,"name":"wake_word","ok":true},"ts":1}"#) == nil, "\(other)")
+        }
+        #expect(NeoListener.coreSettings(in: "not json") == nil)
     }
 
     @Test("a confirmation staged, pending in the hello, or over is a fact for the island's Allow / Cancel")
@@ -138,14 +162,22 @@ struct NeoListenerStubTests {
         private let lock = NSLock()
         private var facts: [NeoFact] = []
         private var statuses: [NeoShellStatus] = []
+        private var settings: [NeoCoreSettings] = []
         func record(_ event: SystemEvent) {
             lock.lock()
             defer { lock.unlock() }
             switch event.payload {
             case let .neo(fact): facts.append(fact)
             case let .neoShell(status): statuses.append(status)
+            case let .neoSettings(core): settings.append(core)
             default: break
             }
+        }
+        /// What the core said about its own settings, in order.
+        var cores: [NeoCoreSettings] {
+            lock.lock()
+            defer { lock.unlock() }
+            return settings
         }
         var snapshot: [NeoFact] {
             lock.lock()
@@ -252,6 +284,54 @@ struct NeoListenerStubTests {
         var missing = ready
         missing.screenRecording = false
         #expect(recorder.shells == [missing, ready])
+        // …and where the core's own setting stands: from the hello.
+        #expect(recorder.cores == [NeoCoreSettings(wakeWord: true)])
+    }
+
+    @Test("“Listen for Neo” goes out as the core's set command — only while the core is there — and the switch follows what the core then says", .enabled(if: NeoListenerStubTests.available))
+    func wakeWordSwitch() async throws {
+        let stub = try Stub(drop: false, mode: "settings")
+        defer { stub.stop() }
+        #expect(await waitFor { stub.lines.contains("READY") })
+
+        let recorder = Recorder()
+        let listener = NeoListener(url: URL(string: "ws://127.0.0.1:\(stub.port)/")!, tokenFile: stub.tokenFile, reconnectDelay: 0.2) { recorder.record($0) }
+        // Flipped before the core is there: dropped, never kept for later.
+        listener.send(NeoSetting.wakeWord(false))
+        listener.start()
+        #expect(await waitFor { recorder.cores == [NeoCoreSettings(wakeWord: true)] })
+        #expect(stub.lines.contains("ROLE host")) // a host: one of the two that may switch it
+
+        // The section's model says where the switch stands and what a tap asks
+        // for; the monitor sends it, as the app's coordinator does.
+        func model() -> NeoSettingsModel {
+            NeoSettingsModel(featureOn: true, connected: true, shell: nil, core: recorder.cores.last)
+        }
+        #expect(model().listensForNeo && model().isEnabled(.wakeWord(false)))
+        let monitor = SystemMonitor()
+        monitor.register(listener)
+        let off = try #require(NeoSettingsIntent.wakeWord(!model().listensForNeo).setting)
+        monitor.neoSet(off)
+        // The core applied it and told everyone: that is what moves the switch.
+        #expect(await waitFor { recorder.cores.last == NeoCoreSettings(wakeWord: false) })
+        #expect(!model().listensForNeo && model().wakeWordCaption.hasPrefix("Summon with ⌥⌘"))
+        let on = try #require(NeoSettingsIntent.wakeWord(!model().listensForNeo).setting)
+        monitor.neoSet(on)
+        #expect(await waitFor { recorder.cores.last == NeoCoreSettings(wakeWord: true) })
+        #expect(recorder.cores == [true, false, true].map { NeoCoreSettings(wakeWord: $0) })
+        #expect(stub.lines.filter { $0.hasPrefix("CMD ") } == [
+            "CMD " + NeoListener.cameraOffCommand,
+            #"CMD {"cmd":"set","name":"wake_word","value":false}"#,
+            #"CMD {"cmd":"set","name":"wake_word","value":true}"#,
+        ])
+        // The answers to its own requests (set_result) were no facts, and no settings.
+        #expect(recorder.snapshot == [.connected(true), .state(.idle)])
+
+        // Stopped: nothing more leaves.
+        listener.stop()
+        listener.send(NeoSetting.wakeWord(false))
+        try await Task.sleep(nanoseconds: 300_000_000)
+        #expect(stub.lines.filter { $0.contains(#""cmd":"set""#) }.count == 2)
     }
 
     @Test("NEO.app's menu actions go out as shell commands — only while the core is there", .enabled(if: NeoListenerStubTests.available))

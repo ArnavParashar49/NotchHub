@@ -12,6 +12,13 @@ import NotchHubSystem
 /// what the host does itself — its own panel, launching NEO.app, opening
 /// System Settings — is done here. NEO.app's answers come back the way all
 /// of NEO's facts do: through the listener, as `neoShell` events.
+///
+/// One row is not the menu's: "Listen for 'Neo'", a setting of NEO's core
+/// (the microphone always on for the wake word, or closed until NEO is
+/// summoned with its keys). The tap asks the core to switch it
+/// (`SystemMonitor.neoSet`); the switch moves when the core says it did
+/// (`neoSettings` events) — never on the tap alone, so it always shows what
+/// the microphone is really doing.
 extension NotchHubApp {
 
     /// What the NEO section shows right now.
@@ -20,8 +27,18 @@ extension NotchHubApp {
             // The panel's own model: it moves on the tap, before the feature set does.
             featureOn: panel == .settings ? settingsModel.neo : featureSettings.isEnabled(.neo),
             connected: neoPresence.isConnected,
-            shell: neoShellStatus
+            shell: neoShellStatus,
+            core: neoCoreSettings
         )
+    }
+
+    /// NEO's core said where its settings stand (on connecting, and whenever
+    /// one is switched — here, or anywhere else).
+    func neoCoreSettingsReceived(_ settings: NeoCoreSettings) {
+        guard settings != neoCoreSettings else { return }
+        neoCoreSettings = settings
+        log("neo: listens for “Neo”: \(settings.wakeWord.map { $0 ? "on" : "off" } ?? "unknown")")
+        if panel == .settings { refreshPanel() }
     }
 
     /// NEO.app's shell reported (on connecting, and whenever it changes: a
@@ -47,6 +64,10 @@ extension NotchHubApp {
             // NEO.app's own menu action: asked for through its core. Erasing
             // is still NEO's question to ask — it shows its own dialog first.
             if let action = intent.shellAction { monitor?.neoShell(action) }
+        case .wakeWord:
+            // The core's own setting: asked of the core, which answers
+            // everyone with where the switch now stands.
+            if let setting = intent.setting { monitor?.neoSet(setting) }
         }
     }
 

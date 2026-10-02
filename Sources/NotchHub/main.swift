@@ -213,6 +213,22 @@ func runSelfTest() -> Int32 {
     confirm.chat(open: true, at: asked.addingTimeInterval(4))
     confirm.receive(.confirm(card), at: asked.addingTimeInterval(5))
     check(!confirm.isShowing && confirm.chat(open: false, at: asked.addingTimeInterval(6)) && confirm.isShowing, "confirm: not doubled with the chat panel; up when it closes")
+    // "Listen for “Neo”" in Settings → NEO: the switch shows what NEO's core
+    // said, its caption what that means for the microphone, and a tap is the
+    // core's set command — only while there is a core that has the setting.
+    let listens = NeoSettingsModel(featureOn: true, connected: true, shell: nil, core: NeoCoreSettings(wakeWord: true))
+    let summoned = NeoSettingsModel(featureOn: true, connected: true, shell: NeoShellStatus(app: true, hotkey: "⌥⌘"), core: NeoCoreSettings(wakeWord: false))
+    check(listens.listensForNeo && listens.wakeWordCaption == "The microphone stays on to hear “Neo”." && listens.isEnabled(.wakeWord(false)),
+          "wake word: on, the microphone stays on to hear “Neo”")
+    check(!summoned.listensForNeo && summoned.wakeWordCaption == "Summon with ⌥⌘ — the microphone is on only while NEO listens.",
+          "wake word: off, NEO is summoned with its keys and the microphone is on only while it listens")
+    check(NeoSettingsIntent.wakeWord(false).setting?.command == #"{"cmd":"set","name":"wake_word","value":false}"#
+            && NeoListener.coreSettings(in: #"{"type":"settings","data":{"wake_word":false},"ts":1}"#) == NeoCoreSettings(wakeWord: false),
+          "wake word: a tap is the core's set command, and the switch follows the core's settings event")
+    check(!NeoSettingsModel(featureOn: true, connected: false, shell: nil, core: NeoCoreSettings(wakeWord: false)).isEnabled(.wakeWord(true))
+            && !NeoSettingsModel(featureOn: true, connected: true, shell: nil).isEnabled(.wakeWord(false)),
+          "wake word: the switch is dim while NEO isn't running, or its core has no such setting")
+
     let confirmFrame = selftestGeometry.frame(for: .neoConfirm, content: .default)
     let confirmButtons = NeoConfirmLayout.buttons(in: confirmFrame, notchInset: selftestGeometry.notchFrame.height)
     check(confirmFrame.size == CGSize(width: selftestGeometry.notchFrame.width + PetLayout.idleDock * 2, height: selftestGeometry.notchFrame.height + 40)

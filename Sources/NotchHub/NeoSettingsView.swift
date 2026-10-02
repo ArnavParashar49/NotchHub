@@ -6,7 +6,8 @@ import SwiftUI
 /// While the notch hosts NEO, NEO.app keeps no menu-bar item; what that menu
 /// showed and did is here instead — whether NEO runs, the two permissions
 /// macOS grants it, its chat, its keys, its logs, restart, erase, Open at
-/// Login, quit. A view of `NeoSettingsModel` and nothing more: every tap is a
+/// Login, quit — and one switch of the core's own: "Listen for “Neo”", the
+/// microphone always on for the wake word, or closed until NEO is summoned. A view of `NeoSettingsModel` and nothing more: every tap is a
 /// `NeoSettingsIntent` handed to the app, which alone decides what it means.
 /// Rows whose control has nobody to act on it (NEO is off, or not running)
 /// stay in place, dimmed, so the section never jumps around as NEO comes and
@@ -33,6 +34,9 @@ struct NeoSettingsSection: View {
                 permissionRow(.accessibility, symbol: "figure.wave")
                 separator
                 permissionRow(.screenRecording, symbol: "rectangle.dashed.badge.record")
+            }
+            group("Voice") {
+                wakeWordRow
             }
             group("Actions") {
                 actionRow("Open NEO chat", symbol: "bubble.left.fill", intent: .openChat, hint: model.hotkey)
@@ -149,6 +153,44 @@ struct NeoSettingsSection: View {
         }
         .padding(.trailing, 10)
         .frame(height: NeoSettingsMetrics.rowHeight)
+    }
+
+    // MARK: - Voice
+
+    /// "Listen for “Neo”": on, NEO's microphone stays open for the wake word;
+    /// off, it opens only while NEO is summoned with its keys. The switch
+    /// shows what the core said, and the line under it what that means for
+    /// the microphone right now.
+    private var wakeWordRow: some View {
+        let isOn = model.listensForNeo
+        let enabled = model.isEnabled(.wakeWord(!isOn))
+        return HStack(spacing: 0) {
+            rowIcon("mic.fill", lit: enabled && isOn)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Listen for “Neo”")
+                    .font(NeoSettingsMetrics.titleFont)
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .lineLimit(1)
+                Text(model.wakeWordCaption)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(DesignTokens.textTertiary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Button { onIntent(.wakeWord(!isOn)) } label: {
+                SwitchIndicator(isOn: isOn, tint: SettingsMetrics.ink)
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Listen for Neo")
+            .accessibilityValue(isOn ? "On" : "Off")
+            .accessibilityHint(model.wakeWordCaption)
+        }
+        .padding(.trailing, 10)
+        .padding(.vertical, 8)
+        .frame(minHeight: NeoSettingsMetrics.rowHeight)
+        .opacity(enabled ? 1 : NeoSettingsMetrics.disabledOpacity)
+        .disabled(!enabled)
     }
 
     // MARK: - Actions

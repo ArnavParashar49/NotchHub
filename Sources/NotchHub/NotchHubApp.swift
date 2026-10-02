@@ -115,6 +115,9 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     /// at Login, version): shown by the NEO section of Settings, which
     /// carries NEO.app's menu while the notch hosts NEO. See `+NeoSettings`.
     var neoShellStatus: NeoShellStatus?
+    /// What NEO's core last said about its own settings ("Listen for 'Neo'"):
+    /// the switch in the NEO section of Settings shows it. See `+NeoSettings`.
+    var neoCoreSettings: NeoCoreSettings?
     /// The page size NEO's page last asked for (a browser card wants more
     /// than the chat); `nil` is the chat's own size.
     var neoPanelRequest: CGSize?
@@ -436,6 +439,8 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             neoReceive(fact)
         case let .neoShell(status):
             neoShellReceived(status)
+        case let .neoSettings(settings):
+            neoCoreSettingsReceived(settings)
         default:
             break
         }

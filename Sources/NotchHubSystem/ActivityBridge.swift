@@ -177,9 +177,9 @@ public enum ActivityBridge {
         case .didWake, .willSleep:
             return []
 
-        // What NEO.app's shell reported: only the NEO section of Settings
-        // shows it, and the app redraws that itself.
-        case .neoShell:
+        // What NEO.app's shell reported, and the core's own settings: only
+        // the NEO section of Settings shows them, and the app redraws that itself.
+        case .neoShell, .neoSettings:
             return []
         }
     }

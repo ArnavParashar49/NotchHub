@@ -351,6 +351,15 @@ the frame; the page lays itself out for whatever it is given.
   hotkeys still wake NEO), and `ui_host: window` as it quits, so NEO's own
   orb returns. Without the installed page nothing is sent and the fox is all
   there is.
+- **Settings → NEO → Listen for “Neo”** switches NEO's wake word while it
+  runs. On, NEO keeps its microphone open to hear “Neo” (macOS shows the
+  orange microphone dot all the time). Off, the microphone is closed while
+  NEO is idle and opens only while NEO is summoned with its keys (⌥⌘) —
+  the line under the switch says which, with the keys NEO.app reports. The
+  tap sends the core `{"cmd":"set","name":"wake_word","value":…}` (a host's
+  command, like the menu's); the switch moves when the core announces the
+  change (`settings`, or the `hello`'s `wake_word`), so it always shows what
+  the microphone is doing. It is dim while NEO is not running.
 
 `NeoPresenceModel` (NEO's held state and whether its core is there) and
 `NeoPanelModel` (whether the panel is open) are both pure and clock-driven;

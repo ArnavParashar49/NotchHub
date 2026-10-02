@@ -8,7 +8,9 @@ import Foundation
 /// Settings instead. Everything here is plain values: what NEO's core
 /// reported (`NeoShellStatus`), what the section shows for it
 /// (`NeoSettingsModel`), what a tap asks for (`NeoSettingsIntent`), and the
-/// one command a host may send for it (`NeoShellAction`).
+/// one command a host may send for it (`NeoShellAction`). Beside the menu,
+/// one setting of the core's own: whether NEO listens for "Neo"
+/// (`NeoCoreSettings`, and `NeoSetting` to switch it).
 
 /// What NEO.app's own shell reported through the core — the `shell` object of
 /// the core's `hello`, and its `shell_status` event. `nil` fields are things
@@ -87,6 +89,57 @@ public enum NeoShellAction: Equatable, Sendable {
     }
 }
 
+/// What NEO's core said about its own settings — the `wake_word` of its
+/// `hello`, and its `settings` event when one is switched. `nil` is a core
+/// that did not say (an older one): then nothing is known, and the switch
+/// has nothing to show.
+public struct NeoCoreSettings: Equatable, Sendable {
+    /// "Listen for 'Neo'": the microphone stays on for the wake word (true),
+    /// or opens only while NEO is summoned by hand (false).
+    public var wakeWord: Bool?
+
+    public init(wakeWord: Bool? = nil) {
+        self.wakeWord = wakeWord
+    }
+
+    /// From the hello's data, or a `settings` event's. Only a real boolean
+    /// counts: `"false"` or `0` is not an answer.
+    public init(payload: [String: Any]) {
+        wakeWord = Self.bool(payload["wake_word"])
+    }
+
+    /// A JSON boolean, and nothing that merely bridges to one (a number).
+    private static func bool(_ value: Any?) -> Bool? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
+        return number.boolValue
+    }
+}
+
+/// One of the core's settings, as a host switches it while NEO runs:
+/// `{"cmd":"set","name":…,"value":…}`. The core takes it from a host (and
+/// from NEO.app's own page) only, keeps it in `~/.neo/.env`, applies it at
+/// once and tells every client in a `settings` event — which is what moves
+/// the switch here, not the tap.
+public enum NeoSetting: Equatable, Sendable {
+    /// Listen for "Neo" (on), or keep the microphone closed until NEO is
+    /// summoned with its keys (off).
+    case wakeWord(Bool)
+
+    /// The setting's name on the wire.
+    public var name: String {
+        switch self {
+        case .wakeWord: return "wake_word"
+        }
+    }
+
+    /// The command, as one line of JSON.
+    public var command: String {
+        switch self {
+        case let .wakeWord(on): return #"{"cmd":"set","name":"\#(name)","value":\#(on)}"#
+        }
+    }
+}
+
 /// One of the two permissions macOS grants NEO.app.
 public enum NeoPermission: String, Equatable, Sendable, CaseIterable {
     case accessibility
@@ -119,6 +172,8 @@ public enum NeoSettingsIntent: Equatable, Sendable {
     case eraseMemory
     case openAtLogin(Bool)
     case quit
+    /// Switch "Listen for 'Neo'" to this.
+    case wakeWord(Bool)
     /// NEO is not running: launch NEO.app.
     case start
     /// Open the pane of System Settings where the permission is granted.
@@ -134,14 +189,20 @@ public enum NeoSettingsIntent: Equatable, Sendable {
         case .eraseMemory: return .eraseMemory
         case let .openAtLogin(on): return .openAtLogin(on)
         case .quit: return .quit
-        case .openChat, .start, .openPermission: return nil
+        case .openChat, .start, .openPermission, .wakeWord: return nil
         }
+    }
+
+    /// The setting of the core's the intent switches, or `nil` for the rest.
+    public var setting: NeoSetting? {
+        if case let .wakeWord(on) = self { return .wakeWord(on) }
+        return nil
     }
 }
 
-/// What the NEO section of Settings shows, from three facts: whether the NEO
-/// feature is on, whether NEO's core is connected, and what NEO.app's shell
-/// last reported.
+/// What the NEO section of Settings shows, from four facts: whether the NEO
+/// feature is on, whether NEO's core is connected, what NEO.app's shell last
+/// reported, and what the core said about its own settings.
 public struct NeoSettingsModel: Equatable, Sendable {
 
     /// How much of NEO is there to talk to.
@@ -185,10 +246,15 @@ public struct NeoSettingsModel: Equatable, Sendable {
     public let openAtLogin: Bool?
     public let version: String?
     public let hotkey: String
+    /// "Listen for 'Neo'" as the core has it, or `nil` while nobody said
+    /// (NEO is not running, or its core is too old to have the setting).
+    public let wakeWord: Bool?
 
-    public init(featureOn: Bool, connected: Bool, shell: NeoShellStatus?) {
+    public init(featureOn: Bool, connected: Bool, shell: NeoShellStatus?, core: NeoCoreSettings? = nil) {
         self.featureOn = featureOn
         let live = featureOn && connected
+        // Like the shell's word: a setting from before NEO quit says nothing now.
+        wakeWord = live ? core?.wakeWord : nil
         if !featureOn {
             availability = .off
         } else if !connected {
@@ -249,6 +315,19 @@ public struct NeoSettingsModel: Equatable, Sendable {
         }
     }
 
+    /// The side the "Listen for 'Neo'" switch shows. NEO listens for its name
+    /// unless told otherwise, so that is what an unknown value shows (dimmed).
+    public var listensForNeo: Bool { wakeWord ?? true }
+
+    /// The line under "Listen for 'Neo'": what the switch's side means for
+    /// the microphone — with the keys that summon NEO right now, as its
+    /// shell reported them.
+    public var wakeWordCaption: String {
+        listensForNeo
+            ? "The microphone stays on to hear “Neo”."
+            : "Summon with \(hotkey) — the microphone is on only while NEO listens."
+    }
+
     /// "Start NEO" shows only when NotchHub is looking for NEO and it is not there.
     public var canStart: Bool { availability == .away }
 
@@ -259,7 +338,8 @@ public struct NeoSettingsModel: Equatable, Sendable {
         }
     }
 
-    /// Whether a row's control works right now. The chat needs NEO's core;
+    /// Whether a row's control works right now. The chat needs NEO's core,
+    /// and so does "Listen for 'Neo'" (a core that has the setting);
     /// the menu's actions need NEO.app behind it; a permission's button shows
     /// only for one NEO.app said it lacks; Start only when NEO is away.
     public func isEnabled(_ intent: NeoSettingsIntent) -> Bool {
@@ -270,6 +350,10 @@ public struct NeoSettingsModel: Equatable, Sendable {
             return availability == .ready
         case .openAtLogin:
             return availability == .ready && openAtLogin != nil
+        case .wakeWord:
+            // The core's own setting: it needs the core (NEO.app or not), and
+            // one that said where the switch stands.
+            return isRunning && wakeWord != nil
         case .start:
             return canStart
         case let .openPermission(permission):

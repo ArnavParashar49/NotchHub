@@ -12,14 +12,18 @@ import NotchHubCore
 /// into `NeoFact`s — and what NEO.app's shell reported (the hello's `shell`,
 /// and `shell_status`) into a `NeoShellStatus`. A confirmation NEO stages
 /// (`confirm`, or the one pending in the `hello`) and its end
-/// (`confirm_done`) are facts too: the island's Allow / Cancel. It sends four
+/// (`confirm_done`) are facts too: the island's Allow / Cancel. What the core
+/// says about its own settings (the hello's `wake_word`, and `settings`) is a
+/// `NeoCoreSettings`. It sends five
 /// kinds of command and nothing else, ever: `camera_view visible:false`, so
 /// the core never streams camera frames to a client that cannot show them;
 /// when NotchHub hosts NEO's UI (`hostsUI`), `ui_host notch` on every
 /// connection and `ui_host window` as it stops, so NEO.app keeps its own
 /// window hidden while the notch shows NEO and brings it back afterwards;
 /// `shell` (`send(_:)`), one of NEO.app's menu actions, when the user
-/// asks for it in Settings; and `confirm` (`send(_:)` with an answer), when
+/// asks for it in Settings; `set` (`send(_:)` with a setting), when the user
+/// flips "Listen for 'Neo'" there — the core takes it from a host; and
+/// `confirm` (`send(_:)` with an answer), when
 /// the user presses Allow or Cancel under the notch — the very command NEO's
 /// own page sends from its card, naming the card's action id.
 ///
@@ -169,6 +173,21 @@ public final class NeoListener: NSObject, SystemListener {
         }
     }
 
+    // MARK: - The core's settings
+
+    /// Switches one of the core's settings ("Listen for 'Neo'"). Dropped when
+    /// the core is not connected: a switch flipped later, by itself, would
+    /// turn the microphone on or off at a moment the user did not choose.
+    public func send(_ setting: NeoSetting) {
+        queue.async { [self] in
+            guard isRunning, isConnected, let task else {
+                NotchLog.debug("neo: set \(setting.name) not sent — no core")
+                return
+            }
+            task.send(.string(setting.command)) { _ in }
+        }
+    }
+
     // MARK: - NEO's Allow / Cancel
 
     /// Answers a pending confirmation: the user pressed Allow or Cancel under
@@ -244,6 +263,9 @@ public final class NeoListener: NSObject, SystemListener {
                         if let status = Self.shellStatus(in: text) {
                             self.emit(SystemEvent(source: .neo, payload: .neoShell(status)))
                         }
+                        if let settings = Self.coreSettings(in: text) {
+                            self.emit(SystemEvent(source: .neo, payload: .neoSettings(settings)))
+                        }
                         for fact in Self.facts(in: text) {
                             self.emit(SystemEvent(source: .neo, payload: .neo(fact)))
                         }
@@ -270,6 +292,26 @@ public final class NeoListener: NSObject, SystemListener {
         switch type {
         case "hello": return (payload["shell"] as? [String: Any]).flatMap(NeoShellStatus.init(payload:))
         case "shell_status": return NeoShellStatus(payload: payload)
+        default: return nil
+        }
+    }
+
+    /// What the core said about its own settings, when a message carries it:
+    /// every `hello` (one from a core too old to have the setting says
+    /// "unknown", so nothing from an earlier connection lingers), and a
+    /// `settings` event that names a setting this host knows. `nil` for
+    /// every other message — a host's own `set_result` among them: the
+    /// switch follows what the core announces, not what it was asked.
+    public static func coreSettings(in text: String) -> NeoCoreSettings? {
+        guard let data = text.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String else { return nil }
+        let payload = object["data"] as? [String: Any] ?? [:]
+        switch type {
+        case "hello": return NeoCoreSettings(payload: payload)
+        case "settings":
+            let settings = NeoCoreSettings(payload: payload)
+            return settings.wakeWord == nil ? nil : settings
         default: return nil
         }
     }
