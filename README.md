@@ -31,6 +31,9 @@ wrapper). Three layers, strictly separated:
   - `NeoState` · `NeoStateHold` · `NeoPresenceModel` · `NeoPanelModel` —
     NEO's state, the dwell that keeps the fox from strobing, whether NEO is
     here and busy, and whether its chat is open
+  - `NeoListeningIndicator` · `NeoListeningLayout` — the mark beside the fox
+    while NEO listens: when it shows, how long it carries its word, the room
+    it takes, and the bars' procedural motion
   - `Activity` / `ActivityKind` — the activity model
   - `ActivityQueue` — primary + stack, priority ordering, transients, auto-dismiss
   - `IslandStateMachine` — idle / wings / compact / expanded / interactive
@@ -120,16 +123,33 @@ Every other surface follows the setting.
 [NEO](../Neo%202.0/NEO), the voice assistant, lives in the notch — as the
 pet. The pixel fox beside the notch **is NEO**: its name is Neo, it is on
 screen whenever NEO's core is connected (whatever Show Pet says), and while
-NEO is busy its pose is what NEO is doing. The island's shape never changes
-for NEO: with NEO ready the fox lives its own life — the idle island is
-exactly the pre-NEO one, mischief and all — and with NEO active the fox
-simply animates, in whatever shape the island is in (idle, the hover wings,
-the compact bar, the expanded island). Nothing is added, nothing grows.
+NEO is busy its pose is what NEO is doing. With NEO ready the fox lives its
+own life — the idle island is exactly the pre-NEO one, mischief and all —
+and with NEO active the fox simply animates, in whatever shape the island is
+in (idle, the hover wings, the compact bar, the expanded island). One thing
+is added, and only while NEO is **listening** (its microphone is live): a
+small voice meter beside the fox.
+
+**The listening mark** (`NeoListeningIndicator`, `NeoListeningView`): four
+thin rounded bars in the island's calm green (`DesignTokens.listening`),
+14 pt wide and at most 12 pt tall, on the fox's inner side — toward the
+notch, never under it. For the first 1.5 s the word "Listening" stands
+beside them in the compact font, then fades and only the bars remain: the
+fox's side of the island grows by 72 pt for that moment and 18 pt afterwards
+(the idle dock, the wings and the compact bar grow; the expanded island's
+content gives the room up; in a panel's notch strip the bars fit as they
+are), on the same spring and in the same transaction as the island. The mark
+is gone the moment NEO's state leaves listening. NEO's core reports THAT it
+is listening, not how loud the room is, so the bars move to their own slow
+rhythm and claim no level; with Reduce Motion they stand still. It never
+takes a click, is hidden from capture with the rest of the island in Ghost
+Mode, and reads "Neo is listening" to assistive technology.
 
 The poses, from the fox's own frames (`PetBrain.neoAnimation`):
 
 - **connecting** → waking: a stretch, then standing alert
-- **listening** → attentive: ears up, eyes on you, a slow breath
+- **listening** → attentive: ears up, eyes on you, a slow breath — with the
+  listening mark beside it
 - **thinking** → the thought bubble, scratching its head
 - **working** → pacing toward the notch and back
 - **searching** → the magnifier, then a sniff along the ground
@@ -150,7 +170,9 @@ NotchHub is a second client of NEO's core (`ws://127.0.0.1:8765`, the token in
 and reconnects every 1.5 s while NEO is off. The toggle is **NEO** in
 Settings. `--neo-demo` runs a scripted turn through the fox without a core
 (the panel stays closed through the answer and opens at the OK);
-`--neo-snapshots DIR` renders each pose offscreen in each island shape.
+`--neo-snapshots DIR` renders each pose offscreen in each island shape
+(`--neo-snapshots DIR listening` only the listening mark's rows: 0.5 s and
+3 s into listening, in every shape).
 `NOTCHHUB_NEO_DIST=<folder>` serves that build of NEO's page (a `ui/dist`)
 instead of the installed one, for a debug run or the built-page tests.
 `NOTCHHUB_NEO_SNAPSHOTS=<dir>` makes `kill -USR1 <pid>` write NEO's page as it

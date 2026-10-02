@@ -35,6 +35,12 @@ public struct IslandContentSize: Equatable, Sendable {
     /// the panel is that plus the notch strip above it. `nil` is the chat's
     /// standard size.
     public var neoPanel: CGSize? = nil
+    /// Room NEO's listening mark takes on the pet's inner side
+    /// (`NeoListeningMark.slot`): the idle dock grows by it on the pet's side;
+    /// the wings and the compact bar already carry it in their measured
+    /// widths. `0` — NEO not listening, or away — leaves every shape exactly
+    /// as it is without the mark.
+    public var listeningSlot: CGFloat = 0
 
     public init(compactLead: CGFloat, compactTrail: CGFloat, wingSide: CGFloat) {
         self.compactLead = max(0, compactLead)

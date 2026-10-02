@@ -132,10 +132,10 @@ struct NeoAbsentTests {
         #expect(!ticked && !panel.isOpen && panel.nextWake(at: t0) == nil)
     }
 
-    @Test("every island shape has exactly its pre-NEO frame, whatever NEO is doing: a pose is not a size")
+    @Test("every island shape has exactly its pre-NEO frame — a pose is not a size; only NEO LISTENING adds room, for its mark (NeoListeningTests)")
     func frames() {
         let content = IslandContentSize.default
-        #expect(content.neoPanel == nil)
+        #expect(content.neoPanel == nil && content.listeningSlot == 0)
         #expect(geometry.frame(for: .idle, content: content) == geometry.notchFrame)
         #expect(geometry.frame(for: .wings, content: content) == geometry.wingsBar(sideWidth: NotchGeometry.wingWidth))
         #expect(geometry.frame(for: .compact, content: content) == geometry.compactFrame)

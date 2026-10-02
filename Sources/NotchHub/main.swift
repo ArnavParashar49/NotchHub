@@ -154,6 +154,20 @@ func runSelfTest() -> Int32 {
     check(ActivityBridge.activity(for: SystemEvent(source: .nowPlaying, payload: .nowPlayingStopped)) == nil,
           "playback-stopped maps to nil (handled by the queue)")
 
+    // --- NEO's listening mark ---
+    // Shown only while NEO listens: the word and the bars for 1.5 s, then the
+    // bars alone, and nothing — no room taken — the rest of the time.
+    let heard = Date(timeIntervalSinceReferenceDate: 0)
+    var listening = NeoListeningIndicator()
+    check(listening.mark(for: .idle, at: heard, labelWidth: 50) == nil, "no listening mark while NEO is not listening")
+    listening.update(listening: true, at: heard)
+    let early = listening.mark(for: .idle, at: heard.addingTimeInterval(0.5), labelWidth: 50)
+    check(early?.showsLabel == true && early?.slot == NeoListeningLayout.maxSlot, "listening: the word and the bars for the first 1.5 s (72 pt on the pet's side)")
+    let settledMark = listening.mark(for: .idle, at: heard.addingTimeInterval(3), labelWidth: 50)
+    check(settledMark?.showsLabel == false && settledMark?.slot == NeoListeningLayout.barsSlot, "listening: then the bars alone (18 pt)")
+    listening.update(listening: false, at: heard.addingTimeInterval(4))
+    check(listening.mark(for: .idle, at: heard.addingTimeInterval(4), labelWidth: 50) == nil, "the mark is gone the moment NEO stops listening")
+
     print("")
     print(failures == 0 ? "SELF-TEST PASSED" : "SELF-TEST FAILED (\(failures) failures)")
     return failures == 0 ? 0 : 1
@@ -256,7 +270,10 @@ if let index = arguments.firstIndex(of: "--surface-snapshots") {
 // --neo-snapshots DIR: the pet as NEO, in each of NEO's states and island shapes (headless).
 if let index = arguments.firstIndex(of: "--neo-snapshots") {
     let directory = index + 1 < arguments.count ? arguments[index + 1] : "."
-    exit(MainActor.assumeIsolated { NeoSnapshots.render(directory: directory) })
+    // An optional third argument keeps only the rows whose name contains it
+    // (`listening`: NEO's listening mark in every shape).
+    let filter = index + 2 < arguments.count ? arguments[index + 2] : nil
+    exit(MainActor.assumeIsolated { NeoSnapshots.render(directory: directory, filter: filter) })
 }
 
 // --pet-snapshots DIR: the real IslandView's pet layer in each dock shape (headless).

@@ -6,7 +6,8 @@ import Foundation
 ///
 /// The pet IS NEO (`PetBrain`, `PetMood.neo`): while NEO is listening,
 /// thinking, speaking or asking, the pet's pose says so, and the island's
-/// shape never changes for it — nothing grows, nothing is added. This model
+/// shape does not change for it — except that while NEO LISTENS a small mark
+/// stands beside the pet (`NeoListeningIndicator`). This model
 /// is pure and clock-driven, like the panel's: every method takes `now`,
 /// and `nextWake(at:)` says when something will change on its own (a held
 /// state becoming due, the settle after idle), so the app runs no timers.

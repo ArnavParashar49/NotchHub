@@ -48,6 +48,10 @@ public enum DesignTokens {
     public static let fieldFill = Color.white.opacity(0.06)
     /// Tint for a live call's "on air" state.
     public static let onAir = Color(red: 0.30, green: 0.85, blue: 0.46)
+    /// NEO's listening mark — the small voice meter beside the pet while its
+    /// microphone is live. The same calm green as a call's "on air": it reads
+    /// clearly on black, and apart from the fox's own orange beside it.
+    public static let listening = onAir
 
     // MARK: - Panel geometry
     

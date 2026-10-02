@@ -51,6 +51,9 @@ struct IslandView: View {
     var pet: PetRenderModel? = nil
     /// Without a notch there is no idle dock, so no idle pet either.
     var hasNotch: Bool = true
+    /// NEO's listening mark, while its microphone is live: a small voice
+    /// meter on the pet's inner side, riding every shape the pet does.
+    var listening: NeoListeningMark? = nil
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -63,6 +66,8 @@ struct IslandView: View {
             }
 
             petLayer
+
+            listeningLayer
         }
         .frame(width: localFrame.width, height: localFrame.height, alignment: .top)
         // Pinned by its top-left corner rather than positioned by its centre:
@@ -139,11 +144,37 @@ struct IslandView: View {
         }
     }
 
-    /// Room kept free for the pet at the right of notch-height bars.
-    private var petBarReserve: CGFloat { pet == nil ? 0 : PetLayout.barSlot }
+    /// NEO's listening mark, on the pet's inner side — toward the notch, never
+    /// under it. Placed from the same edge as the pet, in the same
+    /// transaction as the island's frame, so it rides the island's spring
+    /// with the pet; masked to the island like the pet; and it never takes
+    /// the mouse.
+    ///
+    /// The layer is there whenever the pet is — drawing nothing while NEO is
+    /// not listening — so that when the mark appears it is already travelling
+    /// with the pet's edge (see `NeoListeningView`).
+    @ViewBuilder
+    private var listeningLayer: some View {
+        if pet != nil, state != .idle || hasNotch,
+           let placement = PetLayout.placement(for: state, islandSize: localFrame.size, notchHeight: notchInset, dock: contentSize.petDock ?? .home) {
+            let leading = placement.anchor == .leading
+            // Measured from the pet's own edge to the side of the mark that
+            // faces the pet, so the bars stay put when the word leaves.
+            let edge = NeoListeningLayout.petEdge(beside: placement)
+            NeoListeningView(mark: listening, mirrored: leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: leading ? .topLeading : .topTrailing)
+                .offset(x: leading ? edge.x : edge.x - localFrame.width, y: edge.y)
+                .mask(surfaceShape)
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// Room kept free for the pet at the right of notch-height bars — and,
+    /// while NEO listens, for its mark beside the pet.
+    private var petBarReserve: CGFloat { pet == nil ? 0 : PetLayout.barSlot + contentSize.listeningSlot }
 
     /// Room kept free for the larger pet at the right of the expanded island.
-    private var petExpandedReserve: CGFloat { pet == nil ? 0 : PetLayout.expandedReserve }
+    private var petExpandedReserve: CGFloat { pet == nil ? 0 : PetLayout.expandedReserve + contentSize.listeningSlot }
 
     /// The island's silhouette for the current (target) shape: flared at the
     /// top like the notch, and in the pet's idle dock a continuation of the

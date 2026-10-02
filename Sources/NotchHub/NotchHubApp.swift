@@ -90,9 +90,17 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     var weatherActivity: Activity?
 
     // NEO in the notch: the pet IS NEO. Its presence is state the app keeps,
-    // like the weather: never an activity, so it never competes with one, and
-    // never a change of shape — only the pet's pose. See `+Neo`.
+    // like the weather: never an activity, so it never competes with one —
+    // only the pet's pose, and a small mark beside it while NEO listens.
+    // See `+Neo`.
     var neoPresence = NeoPresenceModel()
+    /// The one thing NEO adds to the island: while it is LISTENING (its mic
+    /// is live) a small voice meter stands beside the pet, with the word
+    /// "Listening" for the first moment. Fed NEO's held state; see `+Neo`.
+    var neoListening = NeoListeningIndicator()
+    /// The listening mark as the island last drew it (`renderIsland`), so
+    /// the hit layouts reserve exactly the room the drawn island does.
+    var listeningMark: NeoListeningMark?
     /// Whether NEO's panel (its chat, below the notch) is open — fed NEO's
     /// state from the presence's hold, so the two always agree. See `+NeoPanel`.
     var neoPanel = NeoPanelModel()
@@ -474,6 +482,9 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         }
         let petUpdate = updatePet()
         let state = currentIslandState()
+        // After the pet (the idle dock shows the mark only with the pet at
+        // its spot) and before the measuring pass, which makes room for it.
+        listeningMark = neoListeningMark(for: state)
         // Before anything is drawn for this shape: a surface that must not be
         // captured has to be out of the capture path BEFORE its first frame.
         applyGhostMode(for: state)
@@ -490,6 +501,7 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             || model.localFrame != frame
             || model.current?.id != machine.activity?.id
             || (model.panelContent == nil) != (panel == nil)
+            || model.listening != listeningMark
         let motion: IslandMotion = surfaceChanged
             ? IslandMotion.between(from: model.localFrame, fromIdle: wasIdle, to: frame, toIdle: isIdle)
             : .none
@@ -517,6 +529,9 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             model.wingStatus = status
             model.panelContent = panel
             model.meeting = meeting
+            // NEO's listening mark appears, drops its word and leaves on the
+            // same spring that moves the island around it.
+            model.listening = listeningMark
             // In the same transaction as the shape, so the pet's move from where
             // it was drawn rides the island's spring.
             publishPet(petUpdate)
@@ -553,6 +568,14 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     }
 
     func computeContentSize(state: IslandState, status: WingStatus) -> IslandContentSize {
+        var size = measuredContentSize(state: state, status: status)
+        // The wings and the compact bar carry the mark's room in their own
+        // measured widths (`petBarReserve`); the idle dock takes it from here.
+        size.listeningSlot = listeningMark?.slot ?? 0
+        return size
+    }
+
+    private func measuredContentSize(state: IslandState, status: WingStatus) -> IslandContentSize {
         switch state {
         case .appPanel:
             var size = IslandContentSize.default
@@ -575,8 +598,7 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             // content-driven.
             return .default
         case .neoPanel:
-            // NEO's chat hangs from the notch; nothing else about the island
-            // changes for NEO — the pet is NEO, and a pose is not a size.
+            // NEO's chat hangs from the notch, with no pet and no mark.
             var size = IslandContentSize.default
             size.neoPanel = neoPageSize
             return size

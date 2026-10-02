@@ -45,6 +45,8 @@ final class IslandModel: ObservableObject {
     @Published var meeting: Meeting?
     /// The pixel pet, when shown.
     @Published var pet: PetRenderModel?
+    /// NEO's listening mark beside the pet, while NEO's microphone is live.
+    @Published var listening: NeoListeningMark?
     /// Whether this display has a notch (no idle dock or idle pet without one).
     @Published var hasNotch: Bool = true
     /// The drawn control the cursor is resting on. The island's controls are
@@ -78,7 +80,8 @@ struct IslandRootView: View {
             surfaceVisible: model.surfaceVisible,
             meeting: model.meeting,
             pet: model.pet,
-            hasNotch: model.hasNotch
+            hasNotch: model.hasNotch,
+            listening: model.listening
         )
     }
 }
