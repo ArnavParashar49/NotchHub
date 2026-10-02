@@ -390,6 +390,13 @@ if let index = arguments.firstIndex(of: "--pet-snapshots") {
     exit(MainActor.assumeIsolated { PetStoryboard.snapshots(directory: directory) })
 }
 
+// --pet-custom-snapshots DIR: everything the pet's page of Settings can change — furs, accessories,
+// sizes and homes in the real island, the page itself → DIR/pet-custom.png (headless).
+if let index = arguments.firstIndex(of: "--pet-custom-snapshots") {
+    let directory = index + 1 < arguments.count ? arguments[index + 1] : "."
+    exit(MainActor.assumeIsolated { PetCustomSnapshots.render(directory: directory) })
+}
+
 // --demo: show the island on screen with a scripted sequence.
 let isDemo = arguments.contains("--demo")
 

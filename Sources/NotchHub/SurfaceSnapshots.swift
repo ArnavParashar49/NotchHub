@@ -222,6 +222,22 @@ enum SurfaceSnapshots {
             ("NEO — not running", .neo, NeoSettingsModel(featureOn: true, connected: false, shell: ready)),
             ("NEO — off", .neo, NeoSettingsModel(featureOn: false, connected: false, shell: nil)),
         ]
+        // The pet's page comes LAST, after every row that was here before it.
+        var customised = IslandSettings()
+        customised.pet.usesCustomFur = true
+        customised.pet.accessory = .scarf
+        customised.pet.size = .large
+        customised.pet.home = .left
+        customised.pet.sleepsAtNight = true
+        customised.pet.name = "Biscuit"
+        let petRows = [("Pet — as it opens", IslandSettings()), ("Pet — customised", customised)].map { name, settings in
+            Row(
+                name: "settings — \(name)",
+                state: .settings,
+                frame: frame,
+                content: AnyView(SettingsView(settings: .constant(settings), onChange: {}, page: .pet, scrolls: false))
+            )
+        }
         return cases.map { name, page, model in
             var settings = IslandSettings()
             settings.neo = model.featureOn
@@ -233,7 +249,7 @@ enum SurfaceSnapshots {
                     settings: .constant(settings), onChange: {}, neo: model, page: page, scrolls: false
                 ))
             )
-        }
+        } + petRows
     }
 
     // MARK: - Camera

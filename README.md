@@ -374,6 +374,79 @@ the page is not installed, or fails to load, NotchHub behaves as if the NEO
 feature were off — the fox alone, NEO's own window handed back, one log
 line — and the **NEO** tile in Settings turns the feature off entirely.
 
+## Making the pet your own
+
+Settings → the pet's group → **Customise** opens the pet's page
+(`PetSettingsSection`; the pet's panel has a "···" beside its swatches that
+opens the same page). A live preview at the top shows the fox as it is now —
+enlarged, and at its true size beside a notch on the side it lives on — and
+everything below applies at once, with no relaunch. Every option's default is
+the pet as it always was: with nothing changed, every island frame, the pet's
+placement and every snapshot are what they were.
+
+- **Look — fur.** Ten presets (`art/pet/looks.txt`: Fox, Arctic, Silver, Sand,
+  Red, Midnight, Snow, Cocoa, Sakura, Cyber) — palette swaps, so every frame
+  works in every look — or **a colour of your own**: hue, saturation and
+  lightness sliders. The fox's ramp (fur, shade, highlight, outline) is
+  derived from the pick (`PetPalette.custom`) with its luminance held between
+  0.16 and 0.60, so no pick can make the fox unreadable: black is lifted until
+  it is 4:1 against the island's black and 3:1 against the eyes and outline,
+  white is held down until the cream muzzle, chest and tail tip stand clear of
+  it. Palettes are built when the setting changes, never while drawing.
+- **Look — listening glow.** NEO's glow behind the fox: the design system's
+  teal (the default, untouched), Sky, Violet, Rose, Amber, White, or **Match
+  fur** (the fur's highlight colour, lifted if the fur is dark).
+- **Wear.** A hat (seasonal, none, or one of ten) and ONE accessory — glasses,
+  sunglasses, a scarf, a bow tie, headphones — which combine. Accessories are
+  pixel art like the hats (`art/pet/wear.pet`), drawn once for the front view
+  and once for the side view and placed on every frame's wear anchor
+  (`art/pet/wear.txt`): they follow the head through every pose, NEO's and
+  the mischief included, mirror with the fox, and are clipped to its 16×16
+  frame, so nothing is ever drawn outside the pet. A prop held in front of
+  the chest hides what is worn at the neck on those frames.
+- **Size.** Small (14 pt), Normal (16) or Large (20) in the notch strip; the
+  expanded island's fox is twice that. Normal is one point per art pixel. The
+  others are nearest-neighbour: each art pixel's edges are snapped to device
+  pixels and every position and offset is a whole number of points
+  (`PetMetrics`), so the art stays crisp and never shimmers as it moves. The
+  idle dock (30 / 34 / 42 pt), the room the bars keep, the transport's
+  reserve, the mischief (hiding, peeking) and the listening glow all follow
+  the size. NEO's Allow / Cancel surface does not change — a large fox still
+  fits beside the notch in it. The pet's panel always shows the fox at 48 pt.
+- **Home.** Right of the notch (the default), left of it, or Auto — no fixed
+  home: the fox stays on whichever side its games leave it. Mischief starts
+  from home and a visit to the other side ends with the trip back; a home on
+  the left is the same life mirrored. In the bars (wings, compact, expanded,
+  a panel's strip) the fox rides the trailing edge whatever its home.
+- **Energy.** Calm, Normal or Playful: how often it fidgets and plays, and
+  how soon it dozes (`PetEnergy`). Calm mostly sits and breathes — quiet
+  flourishes 2.2× further apart, mischief 3.5× rarer, asleep after 90 s.
+  Playful fidgets nearly twice as often, plays 2.5× as often and stays up
+  6 minutes. Normal is exactly the old schedule.
+- **Sleeps at night.** Between two hours (22:00 – 07:00 by default; the night
+  may run past midnight) the fox curls up whatever the Mac is doing — music,
+  a timer, an agent — unless NEO is doing something, a call is on, or you are
+  with it (the cursor on the island, its panel open, a click): then it is up,
+  and curls up again 20 s after it is left alone. The night's start and end
+  are on the brain's own schedule; nothing polls.
+- **Name.** 1–16 characters, trimmed ("Neo" if left empty): the panel's
+  hello, the accessibility labels and Settings use it. NEO the assistant is
+  still NEO — "Neo is listening", "Neo needs your OK" — only the pet's name
+  changes.
+
+Everything is stored in `PetSettings` (one JSON value in the defaults).
+Settings saved by an older build decode with every new option at its default,
+and a value this build does not know (a look or an accessory a newer build
+saved) falls back to its default on its own.
+
+`--pet-custom-snapshots DIR` renders all of it offscreen to
+`DIR/pet-custom.png` (`shots/pet-custom.png`): every preset, custom colours
+with the pick beside the fox drawn from it, each accessory alone and with a
+hat in front, side and peeking poses, the three sizes on both sides in the
+real island (idle, the listening glow, Allow / Cancel, the bars, mischief),
+and the Settings page. `python3 scripts/pet_art.py sheet OUT.png --wear NAME
+[--hat NAME] [--look NAME]` shows an accessory on every frame of the art.
+
 ## Permissions
 
 - **Automation** — reading the track from Spotify, and the page and tabs of
@@ -427,7 +500,9 @@ model, working state, tokens, turns, context and Codex plan limits), a pixel-art
 fox named Neo — NEO itself, see above — that lives in the notch, reacts to what you're doing and gets up to mischief
 when nothing is (hiding behind the notch, peeking out, dashing to the other
 side) — click it to stroke it, ask for tricks, start a 25-minute focus session
-together, or dress it up (colour looks, seasonal hats). It also knows the major
+together, or dress it up (colour looks, seasonal hats) — and make it your own:
+its fur (ten presets or any colour), what it wears, its size and side of the
+notch, its energy, its night and its name (see "Making the pet your own"). It also knows the major
 holidays (Christmas, Diwali, Lunar New Year, Eid, Thanksgiving, Hanukkah…),
 dressing up and wishing you a happy one. A settings panel gates every listener.
 

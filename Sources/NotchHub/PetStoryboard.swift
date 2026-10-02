@@ -355,7 +355,7 @@ enum PetStoryboard {
                                   width: notch.width * scale, height: notch.height * scale)
             context.setFillColor(CGColor(srgbRed: 0.6, green: 0.05, blue: 0.05, alpha: 0.45))
             context.fill(hardware)
-            let targets = [layout.pet, layout.hat] + layout.actions.map(\.rect) + layout.looks.map(\.rect)
+            let targets = [layout.pet, layout.hat, layout.more] + layout.actions.map(\.rect) + layout.looks.map(\.rect)
             context.setStrokeColor(CGColor(srgbRed: 0.2, green: 1, blue: 0.4, alpha: 0.9))
             context.setLineWidth(1)
             for rect in targets {
