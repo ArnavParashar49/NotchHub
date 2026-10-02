@@ -12,10 +12,18 @@ command a client sends is echoed to stdout as `CMD <json>`, each connection
 as `OPEN <n>`, the Origin it came with as `ORIGIN <origin>` and its role as
 `ROLE <role>` (`-` for none), so the test can check what a client said.
 
-    neo_stub.py PORT TOKEN [drop]
+    neo_stub.py PORT TOKEN [drop | confirm]
 
 With `drop`, the first connection is closed by the server after the script,
 so the client's reconnect can be watched; later connections stay open.
+
+With `confirm`, the stub plays a core that is waiting for an OK, as
+neo2/core/agent/confirm.py and ws.py do it: the `hello` carries the card
+still pending (`confirm`), a newer card then supersedes it (`confirm_done`
+for the old id, `confirm` for the new), and a client's
+`{"cmd":"confirm","yes":…,"action_id":…}` for the card that is pending is
+answered with `confirm_done` — to every client, as the bus does. An answer
+naming any other id closes nothing.
 """
 import asyncio
 import json
@@ -27,6 +35,11 @@ from websockets.asyncio.server import serve
 PORT = int(sys.argv[1])
 TOKEN = sys.argv[2]
 DROP = len(sys.argv) > 3 and sys.argv[3] == "drop"
+CONFIRM = len(sys.argv) > 3 and sys.argv[3] == "confirm"
+CARD_A = {"action_id": "trash:4d15b0099e5a9d0a", "tool": "trash", "summary": "move report.pdf to the Trash",
+          "detail": "/Users/me/Documents/report.pdf", "scopes": [], "app": ""}
+CARD_B = {"action_id": "shell:b7f034d65f0f4e1a", "tool": "shell", "summary": "run a command",
+          "detail": "mv '/Users/me/Documents/report.pdf' ~/.Trash/", "scopes": ["task"], "app": "Finder"}
 ALLOWED_ORIGINS = {"tauri://localhost", "neo://app"}
 
 connections = 0
@@ -95,7 +108,17 @@ async def handle(ws):
         await send("state", {"state": "idle", "job": ""})
         await ws.send(b"\x00\x01\x02")  # a binary frame: ignored
 
-    sender = asyncio.create_task(script())
+    pending = {"id": CARD_A["action_id"]}
+
+    async def confirm_script():
+        await send("hello", {"state": "idle", "recent": [], "confirm": CARD_A, "problems": [], "host_attached": True})
+        await asyncio.sleep(0.05)
+        await send("confirm_done", {"action_id": CARD_A["action_id"], "outcome": "superseded"})
+        pending["id"] = CARD_B["action_id"]
+        await send("state", {"state": "confirming", "job": "j4"})
+        await send("confirm", CARD_B)
+
+    sender = asyncio.create_task(confirm_script() if CONFIRM else script())
     try:
         if DROP and n == 1:
             await sender
@@ -105,6 +128,17 @@ async def handle(ws):
         async for raw in ws:
             if isinstance(raw, str):
                 say(f"CMD {raw}")
+                if not CONFIRM:
+                    continue
+                try:
+                    cmd = json.loads(raw)
+                except ValueError:
+                    continue
+                if cmd.get("cmd") == "confirm" and cmd.get("action_id") == pending["id"]:
+                    pending["id"] = None
+                    outcome = "confirmed" if cmd.get("yes") is True else "user cancelled"
+                    await send("confirm_done", {"action_id": cmd["action_id"], "outcome": outcome})
+                    await send("state", {"state": "idle", "job": "j4"})
     finally:
         if not sender.done():
             sender.cancel()

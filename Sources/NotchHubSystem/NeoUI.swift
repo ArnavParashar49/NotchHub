@@ -120,6 +120,18 @@ public final class NeoSchemeHandler: NSObject, WKURLSchemeHandler {
     }
 }
 
+/// The web view NEO's page lives in: one that takes the FIRST click.
+///
+/// The island's window is not key when NEO's panel opens on its own, and
+/// NotchHub is not the active app. AppKit then treats a click in it as the
+/// click that activates the window, and hands it to the view only if the
+/// view accepts first mouse — which a plain `WKWebView` does not. So the
+/// first click on a button in NEO's page (Allow, Cancel, Send, a card's
+/// controls) did nothing but activate, and the user had to click again.
+public final class NeoWebView: WKWebView {
+    override public func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 /// What the host tells NEO's page before any of its scripts run — see
 /// `ui/src/host.ts` in NEO: the host's name, the core's token, and the most
 /// room the panel can give the page.

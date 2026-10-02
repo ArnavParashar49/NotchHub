@@ -10,14 +10,18 @@ import NotchHubCore
 /// the core's `hello` / `state` / `transcript` / `note` / `error` messages and
 /// its card openings (`browser_open` …) and its `woke` (NEO summoned by hand)
 /// into `NeoFact`s — and what NEO.app's shell reported (the hello's `shell`,
-/// and `shell_status`) into a `NeoShellStatus`. It sends three kinds
-/// of command and nothing else, ever: `camera_view visible:false`, so the
-/// core never streams camera frames to a client that cannot show them;
+/// and `shell_status`) into a `NeoShellStatus`. A confirmation NEO stages
+/// (`confirm`, or the one pending in the `hello`) and its end
+/// (`confirm_done`) are facts too: the island's Allow / Cancel. It sends four
+/// kinds of command and nothing else, ever: `camera_view visible:false`, so
+/// the core never streams camera frames to a client that cannot show them;
 /// when NotchHub hosts NEO's UI (`hostsUI`), `ui_host notch` on every
 /// connection and `ui_host window` as it stops, so NEO.app keeps its own
 /// window hidden while the notch shows NEO and brings it back afterwards;
-/// and `shell` (`send(_:)`), one of NEO.app's menu actions, when the user
-/// asks for it in Settings.
+/// `shell` (`send(_:)`), one of NEO.app's menu actions, when the user
+/// asks for it in Settings; and `confirm` (`send(_:)` with an answer), when
+/// the user presses Allow or Cancel under the notch — the very command NEO's
+/// own page sends from its card, naming the card's action id.
 ///
 /// It connects as a HOST: `role=host` in the query beside the token. The
 /// core gives the menu's actions to a host alone, and only a native client
@@ -165,6 +169,21 @@ public final class NeoListener: NSObject, SystemListener {
         }
     }
 
+    // MARK: - NEO's Allow / Cancel
+
+    /// Answers a pending confirmation: the user pressed Allow or Cancel under
+    /// the notch. Dropped when the core is not connected — an answer kept for
+    /// later would approve something at a moment the user did not choose.
+    public func send(_ answer: NeoConfirmAnswer) {
+        queue.async { [self] in
+            guard isRunning, isConnected, let task else {
+                NotchLog.debug("neo: confirm answer not sent — no core")
+                return
+            }
+            task.send(.string(answer.command)) { _ in }
+        }
+    }
+
     private func connect() {
         guard isRunning, task == nil else { return }
         guard let token = Self.readToken(at: tokenFile), let socketURL = Self.socketURL(base: url, token: token) else {
@@ -257,9 +276,9 @@ public final class NeoListener: NSObject, SystemListener {
 
     /// The facts in one message from the core. A card's opening and closing
     /// (`browser_open` / `browser_close`, camera, song) are facts for the
-    /// panel; everything else — the cards' own state, tool calls, turn
-    /// metadata, confirmations — is not the island's business and yields
-    /// nothing.
+    /// panel; a confirmation staged or over is one for the island's Allow /
+    /// Cancel; everything else — the cards' own state, tool calls, turn
+    /// metadata — is not the island's business and yields nothing.
     public static func facts(in text: String) -> [NeoFact] {
         guard let data = text.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -267,10 +286,12 @@ public final class NeoListener: NSObject, SystemListener {
         let payload = object["data"] as? [String: Any] ?? [:]
         switch type {
         case "hello":
-            // Only what NEO is doing NOW. The replayed `recent` events are the
-            // old transcript, which must not pop up on the island.
-            guard let state = (payload["state"] as? String).flatMap(NeoState.init(rawValue:)) else { return [] }
-            return [.state(state)]
+            // Only what NEO is doing NOW — its state, and a question still
+            // waiting for an answer. The replayed `recent` events are the old
+            // transcript, which must not pop up on the island.
+            let pending = (payload["confirm"] as? [String: Any]).flatMap(NeoConfirmCard.init(payload:)).map { [NeoFact.confirm($0)] } ?? []
+            guard let state = (payload["state"] as? String).flatMap(NeoState.init(rawValue:)) else { return pending }
+            return [.state(state)] + pending
         case "state":
             guard let state = (payload["state"] as? String).flatMap(NeoState.init(rawValue:)) else { return [] }
             return [.state(state)]
@@ -290,6 +311,13 @@ public final class NeoListener: NSObject, SystemListener {
         case "song_open": return [.card(.song, open: true)]
         case "song_close": return [.card(.song, open: false)]
         case "woke": return [.woke] // summoned by hand (the hotkey, the tray)
+        case "confirm":
+            // NEO waits for an OK. Without an action id there is nothing an
+            // answer could name: no buttons.
+            return NeoConfirmCard(payload: payload).map { [.confirm($0)] } ?? []
+        case "confirm_done":
+            guard let id = payload["action_id"] as? String, !id.isEmpty else { return [] }
+            return [.confirmDone(id)]
         default:
             return []
         }

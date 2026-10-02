@@ -68,6 +68,12 @@ public enum NeoFact: Equatable, Sendable {
     /// NEO was summoned by hand — the hotkey, the menu-bar item, its orb —
     /// rather than by its wake word: the user asked to see it.
     case woke
+    /// NEO staged a confirmation and waits for the user's OK (`confirm`, or
+    /// the one still pending in the `hello`): the island's Allow / Cancel.
+    case confirm(NeoConfirmCard)
+    /// The confirmation with this action id is over (`confirm_done`):
+    /// answered — here, by voice, in NEO's page — superseded or expired.
+    case confirmDone(String)
 }
 
 /// Keeps each NEO state on screen for at least `minDwell`, as NEO's own

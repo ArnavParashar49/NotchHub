@@ -25,18 +25,20 @@ struct NeoPanelTests {
         #expect(!ticked && !panel.isOpen)
     }
 
-    @Test("only NEO needing an OK opens it on its own; it folds 5 s after NEO is quiet")
+    @Test("no state opens it on its own — NEO needing an OK is the island's Allow / Cancel, not the chat; an open panel is held through the question and folds 5 s after NEO is quiet")
     func confirmThenQuiet() {
         for state in NeoState.allCases {
             var panel = NeoPanelModel()
             panel.receive(state: state, at: t0)
-            #expect(panel.isOpen == (state == .confirming), "\(state)")
+            #expect(!panel.isOpen, "\(state)")
         }
-        #expect(NeoPanelModel.openingStates == [.confirming])
+        #expect(NeoPanelModel.openingStates.isEmpty)
         #expect(NeoPanelModel.answeringStates == [.thinking, .working, .searching, .speaking, .confirming])
 
+        // A panel the user has open shows the page's own card, and waits with it.
         var panel = NeoPanelModel()
-        panel.receive(state: .thinking, at: t0)
+        panel.show(at: t0)
+        panel.receive(state: .thinking, at: at(0.5))
         panel.receive(state: .confirming, at: at(1))
         #expect(panel.isOpen)
         #expect(panel.nextWake(at: at(1)) == nil) // NEO is waiting on the user: nothing folds it
@@ -95,7 +97,8 @@ struct NeoPanelTests {
         #expect(carded.nextWake(at: at(20)) == at(25))
 
         var pinned = NeoPanelModel()
-        pinned.receive(state: .confirming, at: t0)
+        pinned.show(at: t0)
+        pinned.receive(state: .speaking, at: at(0.5)) // NEO answers: the hand's hold is spent
         pinned.pin(true, at: at(1))
         pinned.receive(state: .idle, at: at(2))
         let ticked4 = pinned.tick(at: at(100))
@@ -124,7 +127,8 @@ struct NeoPanelTests {
     @Test("closed while NEO is busy it stays closed for the rest of the turn")
     func dismissedUntilQuiet() {
         var panel = NeoPanelModel()
-        panel.receive(state: .confirming, at: t0)
+        panel.show(at: t0)
+        panel.receive(state: .working, at: at(0.5))
         panel.close(at: at(1)) // Esc
         #expect(!panel.isOpen)
         panel.receive(state: .searching, at: at(2))
@@ -132,8 +136,9 @@ struct NeoPanelTests {
         #expect(!panel.isOpen)
         panel.card(.song, open: true, at: at(3.5))
         #expect(!panel.isOpen) // even a card of this turn
+        panel.card(.song, open: false, at: at(3.8))
         panel.receive(state: .idle, at: at(4))
-        panel.receive(state: .confirming, at: at(10)) // the next turn
+        panel.card(.browser, open: true, at: at(10)) // the next turn
         #expect(panel.isOpen)
     }
 

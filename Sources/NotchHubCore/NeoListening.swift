@@ -196,7 +196,7 @@ public enum NeoListeningLayout {
     /// where the pet steps aside.
     public static func shows(in state: IslandState) -> Bool {
         switch state {
-        case .idle, .wings, .compact, .expanded, .interactive, .appPanel, .meeting:
+        case .idle, .wings, .compact, .expanded, .interactive, .appPanel, .meeting, .neoConfirm:
             return true
         case .tray, .settings, .fileDrop, .skin,
              .teleprompter, .teleprompterCompose, .camera, .cameraExpanded, .neoPanel:

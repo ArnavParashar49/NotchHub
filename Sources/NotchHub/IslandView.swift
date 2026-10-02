@@ -197,6 +197,9 @@ struct IslandView: View {
     /// put a third of the bottom edge inside its own corners, which is the
     /// over-curved look; on a wide one the same number passed unnoticed.
     private var surfaceRadius: CGFloat {
+        // NEO's two buttons: a small surface, its corners concentric with
+        // the capsules inside it.
+        if state == .neoConfirm { return NeoConfirmLayout.cornerRadius }
         if Self.panelStates.contains(state) { return DesignTokens.radiusPanel }
         let base = state == .wings ? DesignTokens.radiusWingBottom : DesignTokens.radiusIslandBottom
         guard notchInset > 0 else { return base }

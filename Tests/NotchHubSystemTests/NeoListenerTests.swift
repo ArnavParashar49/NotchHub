@@ -43,6 +43,29 @@ struct NeoListenerParsingTests {
         #expect(NeoListener.shellStatus(in: "not json") == nil)
     }
 
+    @Test("a confirmation staged, pending in the hello, or over is a fact for the island's Allow / Cancel")
+    func confirmations() {
+        let card = #"{"action_id":"trash:4d15b0099e5a9d0a","tool":"trash","summary":"move report.pdf to the Trash","detail":"/Users/me/Documents/report.pdf","scopes":[],"app":""}"#
+        let expected = NeoConfirmCard(actionID: "trash:4d15b0099e5a9d0a", tool: "trash", summary: "move report.pdf to the Trash", detail: "/Users/me/Documents/report.pdf")
+        #expect(NeoListener.facts(in: #"{"type":"confirm","data":\#(card),"ts":1}"#) == [.confirm(expected)])
+        // A question still waiting when NotchHub connects: in the hello, after NEO's state.
+        #expect(NeoListener.facts(in: #"{"type":"hello","data":{"state":"confirming","recent":[],"confirm":\#(card)},"ts":1}"#)
+            == [.state(.confirming), .confirm(expected)])
+        #expect(NeoListener.facts(in: #"{"type":"hello","data":{"state":"idle","recent":[],"confirm":null},"ts":1}"#) == [.state(.idle)])
+        // Answered (anywhere), superseded or expired.
+        for outcome in ["confirmed", "user cancelled", "superseded", "expired"] {
+            #expect(NeoListener.facts(in: #"{"type":"confirm_done","data":{"action_id":"trash:4d15b0099e5a9d0a","outcome":"\#(outcome)"},"ts":1}"#)
+                == [.confirmDone("trash:4d15b0099e5a9d0a")], "\(outcome)")
+        }
+        // Nothing an answer could name: no buttons.
+        #expect(NeoListener.facts(in: #"{"type":"confirm","data":{"tool":"trash","summary":"x"},"ts":1}"#).isEmpty)
+        #expect(NeoListener.facts(in: #"{"type":"confirm","data":{"action_id":"","summary":"x"},"ts":1}"#).isEmpty)
+        #expect(NeoListener.facts(in: #"{"type":"confirm_done","data":{"outcome":"expired"},"ts":1}"#).isEmpty)
+        // A script's newlines never reach the card as layout: one plain line.
+        let script = #"{"type":"confirm","data":{"action_id":"shell:1","tool":"shell","summary":"run a command","detail":"cd /tmp\n  rm -rf x"},"ts":1}"#
+        #expect(NeoListener.facts(in: script) == [.confirm(NeoConfirmCard(actionID: "shell:1", tool: "shell", summary: "run a command", detail: "cd /tmp rm -rf x"))])
+    }
+
     @Test("a card's opening and closing are facts for the panel")
     func cards() {
         #expect(NeoListener.facts(in: #"{"type":"browser_open","data":{"sid":"s","job":"j"},"ts":1}"#) == [.card(.browser, open: true)])
@@ -147,13 +170,13 @@ struct NeoListenerStubTests {
         let folder: URL
         var tokenFile: URL { folder.appendingPathComponent("ws-token") }
 
-        init(drop: Bool) throws {
+        init(drop: Bool, mode: String? = nil) throws {
             port = Int.random(in: 20_000...60_000)
             folder = FileManager.default.temporaryDirectory.appendingPathComponent("notchhub-neo-\(UUID().uuidString)")
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             try token.write(to: tokenFile, atomically: true, encoding: .utf8)
             process.executableURL = NeoListenerStubTests.python
-            process.arguments = [NeoListenerStubTests.stub.path, "\(port)", token] + (drop ? ["drop"] : [])
+            process.arguments = [NeoListenerStubTests.stub.path, "\(port)", token] + (drop ? ["drop"] : []) + (mode.map { [$0] } ?? [])
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = FileHandle.nullDevice
@@ -258,6 +281,49 @@ struct NeoListenerStubTests {
         listener.send(.quit)
         try await Task.sleep(nanoseconds: 300_000_000)
         #expect(!stub.lines.contains { $0.contains(#""action":"quit""#) })
+    }
+
+    @Test("Allow and Cancel go out as the page's own confirm command, over the host connection — and the core's confirm_done comes back", .enabled(if: NeoListenerStubTests.available))
+    func confirmAnswers() async throws {
+        let stub = try Stub(drop: false, mode: "confirm")
+        defer { stub.stop() }
+        #expect(await waitFor { stub.lines.contains("READY") })
+
+        let first = NeoConfirmCard(actionID: "trash:4d15b0099e5a9d0a", tool: "trash", summary: "move report.pdf to the Trash", detail: "/Users/me/Documents/report.pdf")
+        let second = NeoConfirmCard(actionID: "shell:b7f034d65f0f4e1a", tool: "shell", summary: "run a command", detail: "mv '/Users/me/Documents/report.pdf' ~/.Trash/")
+        let recorder = Recorder()
+        let listener = NeoListener(url: URL(string: "ws://127.0.0.1:\(stub.port)/")!, tokenFile: stub.tokenFile, reconnectDelay: 0.2) { recorder.record($0) }
+        // Answered before the core is there: dropped, never kept for later.
+        listener.send(NeoConfirmAnswer(actionID: second.actionID, yes: true))
+        listener.start()
+        defer { listener.stop() }
+
+        // The card pending at the hello, then the newer one that superseded it.
+        #expect(await waitFor { recorder.snapshot.contains(.confirm(second)) })
+        #expect(recorder.snapshot == [.connected(true), .state(.idle), .confirm(first), .confirmDone(first.actionID), .state(.confirming), .confirm(second)])
+        #expect(stub.lines.contains("ROLE host")) // a host: one of the three that may answer
+
+        // The model decides (Cancel always counts), the monitor sends, as the app does.
+        var model = NeoConfirmModel()
+        recorder.snapshot.forEach { model.receive($0, at: Date()) }
+        #expect(model.card == second && model.isShowing)
+        let monitor = SystemMonitor()
+        monitor.register(listener)
+        // A stale card's button closes nothing…
+        monitor.neoConfirm(NeoConfirmAnswer(actionID: first.actionID, yes: true))
+        // …the pending card's Cancel does.
+        let cancel = model.answer(.cancel, at: Date())
+        let answer = try #require(cancel)
+        monitor.neoConfirm(answer)
+        #expect(await waitFor { recorder.snapshot.contains(.confirmDone(second.actionID)) })
+        let commands = stub.lines.filter { $0.hasPrefix("CMD ") }
+        #expect(commands == [
+            "CMD " + NeoListener.cameraOffCommand,
+            #"CMD {"cmd":"confirm","yes":true,"action_id":"trash:4d15b0099e5a9d0a"}"#,
+            #"CMD {"cmd":"confirm","yes":false,"action_id":"shell:b7f034d65f0f4e1a"}"#,
+        ])
+        #expect(recorder.snapshot.suffix(2) == [.confirmDone(second.actionID), .state(.idle)])
+        #expect(recorder.snapshot.filter { $0 == .confirmDone(first.actionID) }.count == 1) // the stale answer closed nothing
     }
 
     @Test("hosting NEO's UI it says so on connecting, and hands the UI back as it stops", .enabled(if: NeoListenerStubTests.available))

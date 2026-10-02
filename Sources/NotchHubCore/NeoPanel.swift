@@ -16,11 +16,14 @@ public enum NeoCardKind: String, CaseIterable, Equatable, Sendable {
 /// and `nextWake(at:)` says when the panel will change by itself.
 ///
 /// - NEO thinking, working, searching or speaking never opens it: a voice
-///   answer is the orb's alone, animating in the notch. It opens only when
-///   NEO needs the user — a confirmation ("Needs your OK"), a card (the
+///   answer is the orb's alone, animating in the notch. Nor does NEO needing
+///   an OK: that is the island's own Allow / Cancel under the notch
+///   (`NeoConfirmModel`), not the whole chat. It opens only for a card (the
 ///   browser, the camera, a song), the page asking to be seen (a login
 ///   page, a question) — or when the user asks: a click on the lane, or
-///   NEO summoned by hand (the hotkey, the tray: `woke`).
+///   NEO summoned by hand (the hotkey, the tray: `woke`). A panel that is
+///   already open shows the page's own confirm card, and is held open
+///   while NEO waits on it.
 /// - Once open it closes `idleCollapseDelay` after NEO is quiet (idle or
 ///   merely listening) — unless the mouse is in it, a card is open, it is
 ///   pinned, or it was opened by hand and NEO has not answered since. While
@@ -42,8 +45,10 @@ public struct NeoPanelModel: Equatable, Sendable {
     /// The states in which NEO is answering: an open panel is held through
     /// them, and a hand-opened hold is spent by them. They do NOT open it.
     public static let answeringStates: Set<NeoState> = [.thinking, .working, .searching, .speaking, .confirming]
-    /// The one state that opens the panel on its own: NEO needs the user.
-    public static let openingStates: Set<NeoState> = [.confirming]
+    /// The states that open the panel on their own: none. NEO needing an OK
+    /// used to (the whole chat came down for two buttons); the island's own
+    /// Allow / Cancel show instead.
+    public static let openingStates: Set<NeoState> = []
 
     public private(set) var isOpen = false
     public private(set) var cards: Set<NeoCardKind> = []
@@ -75,7 +80,7 @@ public struct NeoPanelModel: Equatable, Sendable {
         state = next
         if Self.isAnswering(next) {
             // A new answer: the hand-opened hold is spent (the quiet clock
-            // runs once NEO is done). Only NEO needing the user opens it.
+            // runs once NEO is done). No state opens it on its own.
             heldByUser = false
             if Self.openingStates.contains(next), !dismissedUntilQuiet {
                 isOpen = true

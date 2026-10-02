@@ -40,7 +40,8 @@ final class NeoWebHost: NSObject, WKNavigationDelegate, WKUIDelegate {
             forMainFrameOnly: true
         ))
         configuration.userContentController = content
-        webView = WKWebView(frame: .zero, configuration: configuration)
+        // A web view that takes the first click: see `NeoWebView`.
+        webView = NeoWebView(frame: .zero, configuration: configuration)
         super.init()
         // The content controller holds its handlers strongly: a proxy keeps
         // the host from retaining itself through its own web view.

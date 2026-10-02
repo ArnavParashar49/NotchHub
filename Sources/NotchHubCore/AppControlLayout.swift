@@ -46,6 +46,8 @@ public enum IslandControl: Equatable, Sendable {
     case wingBrowser(BrowserAction)
     /// A control in the frontmost app's panel.
     case appPanel(AppPanelAction)
+    /// One of NEO's two buttons under the notch.
+    case neoConfirm(NeoConfirmChoice)
 }
 
 // MARK: - Hover strip

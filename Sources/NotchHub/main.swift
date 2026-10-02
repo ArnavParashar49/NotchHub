@@ -191,6 +191,63 @@ func runSelfTest() -> Int32 {
     listening.update(listening: false, at: heard.addingTimeInterval(5.5))
     check(listening.mark(for: .idle, at: heard.addingTimeInterval(5.5)) == nil, "the mark is gone the moment NEO stops listening, mid-pulse or not")
 
+    // --- NEO's Allow / Cancel under the notch ---
+    // A staged confirmation drops two buttons under the notch, over whatever
+    // the island shows (but never doubled with NEO's own chat); Allow counts
+    // after 0.6 s; answered or over, the island is what it was.
+    let asked = Date(timeIntervalSinceReferenceDate: 100)
+    let card = NeoConfirmCard(actionID: "trash:4d15", tool: "trash", summary: "move report.pdf to the Trash", detail: "/Users/me/report.pdf")
+    var confirm = NeoConfirmModel()
+    check(!confirm.receive(.state(.confirming), at: asked) && !confirm.isShowing, "confirm: NEO's state alone shows no buttons")
+    check(confirm.receive(.confirm(card), at: asked) && confirm.state(over: .idle) == .neoConfirm && confirm.state(over: .expanded) == .neoConfirm
+            && confirm.state(over: .camera) == .neoConfirm && confirm.state(over: .neoPanel) == .neoPanel,
+          "confirm: a staged confirmation shows Allow / Cancel over everything but NEO's own chat")
+    check(confirm.answer(.allow, at: asked.addingTimeInterval(0.3)) == nil && confirm.isShowing, "confirm: Allow within 0.6 s of the buttons appearing does nothing")
+    check(NeoConfirmKey.choice(forKeyCode: 36) == .allow && NeoConfirmKey.choice(forKeyCode: 53) == .cancel && NeoConfirmKey.choice(forKeyCode: 36, isRepeat: true) == nil,
+          "confirm: Return allows, Esc cancels, a key held from before does neither")
+    let allowed = confirm.answer(.allow, at: asked.addingTimeInterval(0.7))
+    check(allowed?.command == #"{"cmd":"confirm","yes":true,"action_id":"trash:4d15"}"# && confirm.state(over: .expanded) == .expanded,
+          "confirm: Allow sends the page's own command, and the island is what it was")
+    confirm.receive(.confirm(card), at: asked.addingTimeInterval(2))
+    check(confirm.receive(.confirmDone(card.actionID), at: asked.addingTimeInterval(3)) && !confirm.isShowing, "confirm: confirm_done (answered elsewhere, expired) clears the buttons")
+    confirm.chat(open: true, at: asked.addingTimeInterval(4))
+    confirm.receive(.confirm(card), at: asked.addingTimeInterval(5))
+    check(!confirm.isShowing && confirm.chat(open: false, at: asked.addingTimeInterval(6)) && confirm.isShowing, "confirm: not doubled with the chat panel; up when it closes")
+    let confirmFrame = selftestGeometry.frame(for: .neoConfirm, content: .default)
+    let confirmButtons = NeoConfirmLayout.buttons(in: confirmFrame, notchInset: selftestGeometry.notchFrame.height)
+    check(confirmFrame.size == CGSize(width: selftestGeometry.notchFrame.width + PetLayout.idleDock * 2, height: selftestGeometry.notchFrame.height + 40)
+            && confirmButtons.map(\.choice) == [.allow, .cancel] && confirmButtons.allSatisfy { confirmFrame.contains($0.rect) },
+          "confirm: one 40-pt row of two buttons, the notch's width plus the pet's dock each side")
+    check(NeoConfirmLayout.choice(at: CGPoint(x: confirmButtons[0].rect.midX, y: confirmButtons[0].rect.midY), in: confirmFrame, notchInset: 32) == .allow
+            && NeoConfirmLayout.choice(at: CGPoint(x: confirmButtons[1].rect.midX, y: confirmButtons[1].rect.midY), in: confirmFrame, notchInset: 32) == .cancel
+            && NeoConfirmLayout.choice(at: CGPoint(x: confirmFrame.midX, y: confirmButtons[0].rect.midY), in: confirmFrame, notchInset: 32) == nil,
+          "confirm: a click lands on the button under it, and on neither between them")
+
+    // --- The first click ---
+    // A surface that comes up under a still cursor takes the very next
+    // click: the hit region is its final frame at once, the window stops
+    // ignoring the mouse without a mouse-move, and the views accept the
+    // first click in a window that is not key.
+    let region = IslandHitRegion(islandFrame: confirmFrame, idleNotchFrame: selftestGeometry.notchFrame, isIdle: false)
+    let onAllow = CGPoint(x: confirmButtons[0].rect.midX, y: confirmButtons[0].rect.midY)
+    check(region.catchesMouse(at: onAllow) && !region.windowIgnoresMouse(cursorAt: onAllow, interactive: false),
+          "first click: the hit region is the surface's final frame the moment it is presented")
+    let firstClick: (window: Bool, container: Bool, hosting: Bool, web: Bool) = MainActor.assumeIsolated {
+        let window = NotchWindow(geometry: selftestGeometry)
+        window.apply(state: .neoConfirm)
+        let frame = window.localFrame(for: .neoConfirm)
+        let button = NeoConfirmLayout.buttons(in: frame, notchInset: window.notchHeight)[0].rect
+        let hosting = IslandHostingView(rootView: IslandRootView(model: IslandModel()))
+        return (
+            window.takesClick(at: CGPoint(x: button.midX, y: button.midY)),
+            window.acceptsFirstClick,
+            hosting.acceptsFirstMouse(for: nil),
+            NeoWebView(frame: .zero).acceptsFirstMouse(for: nil)
+        )
+    }
+    check(firstClick.window, "first click: the window hit-tests a button the moment the surface is applied, before any mouse-move")
+    check(firstClick.container && firstClick.hosting && firstClick.web, "first click: the island's views and NEO's web view accept the first mouse")
+
     print("")
     print(failures == 0 ? "SELF-TEST PASSED" : "SELF-TEST FAILED (\(failures) failures)")
     return failures == 0 ? 0 : 1
@@ -303,6 +360,12 @@ if let index = arguments.firstIndex(of: "--neo-snapshots") {
 if let index = arguments.firstIndex(of: "--neo-glow-zoom") {
     let directory = index + 1 < arguments.count ? arguments[index + 1] : "."
     exit(MainActor.assumeIsolated { NeoSnapshots.renderGlowZoom(directory: directory) })
+}
+
+// --neo-confirm-snapshot DIR: NEO's Allow / Cancel under the notch → DIR/notch-confirm.png (headless).
+if let index = arguments.firstIndex(of: "--neo-confirm-snapshot") {
+    let directory = index + 1 < arguments.count ? arguments[index + 1] : "."
+    exit(MainActor.assumeIsolated { NeoConfirmSnapshots.render(directory: directory) })
 }
 
 // --pet-snapshots DIR: the real IslandView's pet layer in each dock shape (headless).

@@ -214,3 +214,23 @@ struct NeoBuiltPageTests {
         web.stopLoading()
     }
 }
+
+@Suite("NEO's page takes the first click")
+struct NeoFirstClickTests {
+
+    /// The island's window is not key when NEO's panel opens on its own, so
+    /// AppKit asks the view under the cursor whether it takes the click that
+    /// would otherwise only activate the window. A plain `WKWebView` says no
+    /// — which is why a button in NEO's page needed two or three clicks.
+    @Test("the web view NEO's page lives in accepts first mouse; a plain WKWebView would not")
+    @MainActor
+    func firstMouse() {
+        let web = NeoWebView(frame: CGRect(x: 0, y: 0, width: 340, height: 300), configuration: WKWebViewConfiguration())
+        #expect(web.acceptsFirstMouse(for: nil))
+        let down = NSEvent.mouseEvent(
+            with: .leftMouseDown, location: CGPoint(x: 20, y: 20), modifierFlags: [], timestamp: 0, windowNumber: 0,
+            context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+        )
+        #expect(web.acceptsFirstMouse(for: down))
+    }
+}

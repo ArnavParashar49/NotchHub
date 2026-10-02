@@ -164,6 +164,9 @@ extension NotchHubApp {
                 notchInset: window.notchHeight,
                 browserTabs: appPanelBrowserTabs()
             ).map { .appPanel($0) }
+        case .neoConfirm:
+            let frame = window.localFrame(for: .neoConfirm, content: islandModel.contentSize)
+            return NeoConfirmLayout.choice(at: point, in: frame, notchInset: window.notchHeight).map { .neoConfirm($0) }
         default:
             return nil
         }
@@ -181,7 +184,7 @@ extension NotchHubApp {
         islandModel.hoveredControl = resolved
         // An app panel's content is a snapshot, so it has to be rebuilt to see
         // the new hover; the wings read the model directly.
-        if currentIslandState() == .appPanel {
+        if currentIslandState() == .appPanel || currentIslandState() == .neoConfirm {
             islandModel.panelContent = panelContent()
         }
     }

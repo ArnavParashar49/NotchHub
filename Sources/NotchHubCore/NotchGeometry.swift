@@ -250,7 +250,16 @@ public struct NotchGeometry: Equatable {
         case .camera: return cameraFrame(expanded: false)
         case .cameraExpanded: return cameraFrame(expanded: true)
         case .neoPanel: return neoPanelFrame(page: content.neoPanel)
+        case .neoConfirm: return neoConfirmFrame
         }
+    }
+
+    /// NEO's Allow / Cancel: the island dropped just far enough under the
+    /// notch for one row of two buttons, as wide as the notch plus the pet's
+    /// dock on either side (`NeoConfirmLayout`), centred on the notch.
+    public var neoConfirmFrame: CGRect {
+        let size = NeoConfirmLayout.size(notch: notchFrame.size)
+        return panel(width: size.width, height: size.height)
     }
 
     /// NEO's panel: its chat page under the notch strip, centred on the
@@ -456,6 +465,7 @@ public struct NotchGeometry: Equatable {
             teleprompterComposeFrame,
             cameraFrame(expanded: true),
             neoPanelFrame(page: NeoPanelLayout.maxPageSize(screen: CGSize(width: screenWidth, height: screenHeight))),
+            neoConfirmFrame,
         ]
         guard let first = frames.first else { return notchFrame }
         return frames.dropFirst().reduce(first) { $0.union($1) }
@@ -496,4 +506,6 @@ public enum IslandState: String, CaseIterable, Equatable {
     case cameraExpanded
     /// NEO's panel: its whole chat, hanging down from the notch.
     case neoPanel
+    /// NEO needs an OK: Allow and Cancel, one row under the notch.
+    case neoConfirm
 }

@@ -37,10 +37,23 @@ extension NotchHubApp {
     func neoReceive(_ fact: NeoFact) {
         let now = Date()
         let wasPresent = neoPresent
+        let wasConfirming = neoConfirmShowing
+        _ = neoConfirm.chat(open: panel == .neo, at: now)
+        if neoConfirm.foldsChat(for: fact, at: now) {
+            // The page got the chat opened for this very card a moment ago
+            // (its socket was quicker than ours): the buttons are its UI.
+            neoPanel.close(at: now)
+            log("neo: the chat the page opened for a confirmation folds — the buttons show instead")
+        }
         neoPresence.receive(fact, at: now)
+        // A confirmation staged, answered elsewhere or lapsed — or the core
+        // gone, with whatever it was waiting on.
+        let confirmChanged = neoConfirm.receive(fact, at: now)
         switch fact {
         case let .card(kind, open): neoPanel.card(kind, open: open, at: now)
-        case .woke: neoPanel.show(at: now) // summoned by hand: the explicit show
+        case .woke:
+            neoConfirm.userOpenedChat()
+            neoPanel.show(at: now) // summoned by hand: the explicit show
         case .connected(false):
             neoPanel.disconnected(at: now)
             log("neo: core away — panel open=\(neoPanel.isOpen) waiting=\(neoPanel.isWaitingForCore)")
@@ -52,7 +65,10 @@ extension NotchHubApp {
         // The panel takes NEO's state from the presence's hold: one truth.
         neoPanel.receive(state: neoPresence.state, at: now)
         applyNeoPanel()
-        if wasPresent != neoPresent {
+        if confirmChanged || wasConfirming != neoConfirmShowing {
+            // The buttons pop out, change card, or the island springs back.
+            neoConfirmChanged(wasShowing: wasConfirming)
+        } else if wasPresent != neoPresent {
             // NEO arriving puts the pet on screen (its dock is a change of
             // shape); leaving hands the island back as it was.
             renderIsland()
@@ -157,9 +173,9 @@ extension NotchHubApp {
     /// speak, ask for an OK, go idle — repeating, so the pet can be watched
     /// posing as NEO through a turn and settling back into its own life. The
     /// island's shape never changes for it; the glow pulses once behind the
-    /// pet as listening starts (2.6–4.0 s; NEO listens until 5.6 s). The panel
-    /// stays closed through the answer and opens at "Needs your OK", folding
-    /// 5 s after idle.
+    /// pet as listening starts (2.6–4.0 s; NEO listens until 5.6 s). The chat
+    /// panel stays closed throughout; at "Needs your OK" (15 s) Allow and
+    /// Cancel pop out under the notch and stay 6 s, unless one is clicked.
     func runNeoDemo() {
         let heard = "what's the weather like in Paris this weekend"
         let said = "Paris looks mild this weekend: sunny on Saturday, around 19 degrees, with a few clouds on Sunday."
@@ -175,8 +191,11 @@ extension NotchHubApp {
             (11.6, .state(.speaking)),
             (11.8, .transcript(role: .assistant, text: said, final: true)),
         ]
+        let card = NeoConfirmCard(actionID: "demo:ok", tool: "trash", summary: "move report.pdf to the Trash", detail: "~/Documents/report.pdf")
         steps.append((15.0, .state(.confirming)))
-        steps.append((17.5, .state(.idle)))
+        steps.append((15.0, .confirm(card)))
+        steps.append((21.0, .confirmDone(card.actionID)))
+        steps.append((21.0, .state(.idle)))
         let period: TimeInterval = 24
 
         func run(round: Int) {
@@ -187,7 +206,7 @@ extension NotchHubApp {
         }
         neoDemoRound = run
         run(round: 0)
-        log("neo-demo: one turn every \(Int(period)) s — the pet poses as NEO; the panel opens only at the OK")
+        log("neo-demo: one turn every \(Int(period)) s — the pet poses as NEO; at the OK, Allow and Cancel pop out under the notch")
     }
 
     func runNeoDemoRound(_ round: Int) {

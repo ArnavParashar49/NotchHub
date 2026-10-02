@@ -64,8 +64,10 @@ extension NotchHubApp {
         // lasting activity (music, a timer, a download, a call) holds it up —
         // even one waiting behind a transient readout.
         context.isDocked = petDocked && !queue.all.contains { $0.autoDismiss == 0 }
-        // The pet is NEO: what NEO is doing is its pose.
-        context.neoState = neoPresent ? neoPresence.state : nil
+        // The pet is NEO: what NEO is doing is its pose. While NEO waits for
+        // an OK the pose is its "!" — whatever state the core reports (a tool
+        // the voice model called itself leaves it "speaking", then "listening").
+        context.neoState = neoPresent ? (neoConfirm.card != nil ? .confirming : neoPresence.state) : nil
         return context
     }
 

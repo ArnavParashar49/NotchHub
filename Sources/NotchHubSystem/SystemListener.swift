@@ -212,6 +212,12 @@ public final class SystemMonitor {
         entries.compactMap { $0.listener as? NeoListener }.forEach { $0.send(action) }
     }
 
+    /// Answers NEO's pending confirmation through the NEO listener (Allow or
+    /// Cancel under the notch). Nothing happens while NEO is off or away.
+    public func neoConfirm(_ answer: NeoConfirmAnswer) {
+        entries.compactMap { $0.listener as? NeoListener }.forEach { $0.send(answer) }
+    }
+
     /// Asks the meeting listener to read the call's state again soon.
     public func refreshMeeting() {
         entries.compactMap { $0.listener as? MeetingListener }.forEach { $0.pollSoon() }

@@ -9,6 +9,10 @@ extension NotchHubApp {
 
     /// The surface that replaces the queue-driven content, when one is showing.
     func panelContent() -> AnyView? {
+        // NEO's Allow / Cancel are drawn over whatever the island holds.
+        if currentIslandState() == .neoConfirm, let card = neoConfirm.card {
+            return neoConfirmContent(card)
+        }
         switch panel {
         case .tray:
             return AnyView(

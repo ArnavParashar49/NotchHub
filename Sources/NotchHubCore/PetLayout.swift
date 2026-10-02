@@ -125,6 +125,17 @@ public enum PetLayout {
             return Placement(origin: CGPoint(x: x, y: stripY), scale: 1)
         case .meeting:
             return Placement(origin: CGPoint(x: islandSize.width - MeetingControlLayout.contentInset - artSize, y: stripY), scale: 1)
+        case .neoConfirm:
+            // In the strip beside the notch, exactly where it stands on its
+            // idle dock (the surface reaches one dock beyond the notch on
+            // each side): the buttons come out under the notch and the pet,
+            // in its "!" pose, does not move.
+            switch dock.side {
+            case .right:
+                return Placement(origin: CGPoint(x: islandSize.width - idleDock + dockInset, y: stripY), scale: 1, anchor: .trailing)
+            case .left:
+                return Placement(origin: CGPoint(x: idleDock - dockInset - artSize, y: stripY), scale: 1, anchor: .leading)
+            }
         // Utility surfaces the pet steps aside for: a teleprompter with a fox
         // in it is a fox in the way, and the camera's picture is the content.
         case .tray, .settings, .fileDrop, .skin,

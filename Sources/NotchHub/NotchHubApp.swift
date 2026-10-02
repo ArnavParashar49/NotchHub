@@ -26,7 +26,7 @@ import SwiftUI
 final class NotchHubApp: NSObject, NSApplicationDelegate {
 
     var window: NotchWindow!
-    var hostingView: NSHostingView<IslandRootView>!
+    var hostingView: IslandHostingView!
     let queue = ActivityQueue()
 
     /// The island's observable state. The hosted view is created once around
@@ -103,6 +103,14 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     var neoPanel = NeoPanelModel()
     /// NEO's page in its web view, made on first use and kept.
     var neoWeb: NeoWebHost?
+    /// The confirmation NEO waits on, and whether the island shows its Allow
+    /// / Cancel under the notch. See `+NeoConfirm`.
+    var neoConfirm = NeoConfirmModel()
+    /// The card assistive technology was last told about.
+    var neoConfirmAnnounced: String?
+    /// The buttons took the keyboard (a click on their surface): it goes
+    /// back when they do.
+    var neoConfirmTookKeyboard = false
     /// What NEO.app's shell last reported through its core (permissions, Open
     /// at Login, version): shown by the NEO section of Settings, which
     /// carries NEO.app's menu while the notch hosts NEO. See `+NeoSettings`.
@@ -206,7 +214,9 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         window.onClick = { [weak self] in self?.islandClicked() }
         window.onControlHit = { [weak self] point in
             guard let self else { return false }
-            return self.neoIslandClickHit(at: point)
+            // NEO's Allow / Cancel own every click while they show.
+            return self.neoConfirmControlHit(at: point)
+                || self.neoIslandClickHit(at: point)
                 || self.petControlHit(at: point)
                 || self.teleprompterControlHit(at: point)
                 || self.cameraControlHit(at: point)
@@ -221,6 +231,7 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         window.onMediaCommand = { [weak self] command in self?.mediaCommand(command) }
         window.onCancel = { [weak self] in self?.dismissInteractivePanel() }
         window.onInteractiveClick = { [weak self] in self?.neoEngageKeyboard() }
+        window.onKeyDown = { [weak self] code, isRepeat in self?.neoConfirmKey(code, isRepeat: isRepeat) ?? false }
         window.onFileDraggedIn = { [weak self] in self?.fileDraggedIn() }
         window.onFileDraggedOut = { [weak self] in self?.fileDraggedOut() }
         window.onFileDropped = { [weak self] urls in self?.fileDropped(urls) }
@@ -229,7 +240,7 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         islandModel.notchInset = geometry.notchFrame.height
         islandModel.notchWidth = geometry.notchFrame.width
         islandModel.hasNotch = geometry.hasNotch
-        hostingView = NSHostingView(rootView: IslandRootView(model: islandModel))
+        hostingView = IslandHostingView(rootView: IslandRootView(model: islandModel))
         window.installContent(hostingView)
         // Sizes the window to its envelope. Nothing is measured against the
         // window before this: `localFrame` is taken from the envelope, never
@@ -483,6 +494,9 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         if currentIslandState() == .idle {
             petSleepHoverSession = false
         }
+        // Before the shape is read: NEO's buttons come up when its chat
+        // panel closes with a question still waiting.
+        syncNeoConfirm()
         let petUpdate = updatePet()
         let state = currentIslandState()
         // After the pet: on the idle dock the listening pulse waits for the
@@ -539,9 +553,16 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             publishPet(petUpdate)
         }
 
-        if let animation = DesignTokens.animation(for: motion) {
+        // NEO's buttons coming out are the island's one attention cue: their
+        // own spring "pop" (a plain ease under Reduce Motion), whatever the
+        // shape they come out of.
+        let popping = state == .neoConfirm && model.state != .neoConfirm
+        let animation = popping
+            ? DesignTokens.confirmPop(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+            : DesignTokens.animation(for: motion)
+        if let animation {
             withAnimation(animation) { apply() }
-            log("motion: \(motion.rawValue) → \(state)")
+            log("motion: \(popping ? "pop" : motion.rawValue) → \(state)")
         } else {
             apply()
         }
@@ -597,18 +618,34 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             var size = IslandContentSize.default
             size.neoPanel = neoPageSize
             return size
+        case .neoConfirm:
+            // The buttons' surface is a fixed size; the pet keeps its spot
+            // beside the notch, on whichever side it is on.
+            var size = IslandContentSize.default
+            size.petDock = PetDock(side: petBrain.dock.side, reach: PetLayout.idleDock)
+            return size
         default:
             return .default
         }
     }
 
-    /// The shape the island should take right now.
+    /// The shape the island should take right now: NEO's Allow / Cancel
+    /// while a confirmation waits (over everything but NEO's own chat panel,
+    /// whose page shows the card itself), else the shape underneath — which
+    /// is untouched by the buttons, so the island returns to exactly it.
+    func currentIslandState() -> IslandState {
+        let underlying = underlyingIslandState()
+        guard neoConfirmShowing, underlying != .neoPanel else { return underlying }
+        return .neoConfirm
+    }
+
+    /// The island's own shape, the buttons aside.
     ///
     /// Panels outrank the state machine. A call shows as an ordinary compact
     /// bar; its control panel is a deliberate detail surface, so it appears
     /// only once the island is expanded (hover or click) — it must not hang a
     /// large panel over the screen for the whole length of a call.
-    func currentIslandState() -> IslandState {
+    func underlyingIslandState() -> IslandState {
         switch panel {
         case .tray: return .tray
         case .settings: return .settings

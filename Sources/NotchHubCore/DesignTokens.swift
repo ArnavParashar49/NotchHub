@@ -227,6 +227,21 @@ public enum DesignTokens {
     /// rather than a zoom.
     public static let hoverScale: CGFloat = 1.10
 
+    /// NEO's Allow / Cancel coming out of the notch: the island's one
+    /// attention cue. Quicker and a little bouncier than an ordinary expand,
+    /// so the drop reads as a "pop" — once; it settles and stays still. With
+    /// Reduce Motion it is a short ease with no overshoot.
+    public static func confirmPop(reduceMotion: Bool) -> Animation {
+        reduceMotion
+            ? .easeOut(duration: 0.20)
+            : .spring(response: 0.38, dampingFraction: 0.66, blendDuration: 0.12)
+    }
+    /// A hovered Cancel: the secondary button's fill, lifted.
+    public static let confirmSecondaryFill = Color.white.opacity(0.14)
+    public static let confirmSecondaryFillHover = Color.white.opacity(0.24)
+    /// A hovered Allow: the white capsule, a touch softer.
+    public static let confirmPrimaryFillHover = Color.white.opacity(0.86)
+
     /// The spring for a motion, or `nil` when nothing visible moves.
     public static func animation(for motion: IslandMotion) -> Animation? {
         switch motion {

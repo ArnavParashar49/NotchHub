@@ -79,6 +79,13 @@ extension NotchHubApp {
         let now = Date()
         switch message {
         case .show:
+            // The page asks to be seen whenever a question comes up on its
+            // card. A confirmation is the island's own Allow / Cancel now:
+            // while one waits the chat stays folded.
+            guard neoConfirm.pageAsksToShow(at: now) else {
+                log("neo: the page asked to show — declined, the buttons are up")
+                break
+            }
             neoPanel.show(at: now)
             applyNeoPanel()
         case .collapse:
@@ -138,6 +145,7 @@ extension NotchHubApp {
             neoActive: neoActive(at: now), panelOpen: panel == .neo, otherPanel: panel != .none && panel != .neo
         )
         guard outcome == .open else { return false }
+        neoConfirm.userOpenedChat()
         neoPanel.show(at: now)
         applyNeoPanel()
         neoEngageKeyboard()

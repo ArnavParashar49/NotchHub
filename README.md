@@ -31,6 +31,12 @@ wrapper). Three layers, strictly separated:
   - `NeoState` · `NeoStateHold` · `NeoPresenceModel` · `NeoPanelModel` —
     NEO's state, the dwell that keeps the fox from strobing, whether NEO is
     here and busy, and whether its chat is open
+  - `NeoConfirmModel` · `NeoConfirmLayout` · `NeoConfirmAnswer` — NEO needs
+    an OK: whether the island shows Allow / Cancel under the notch, where
+    the two buttons are (drawn and hit-tested from the same numbers), and
+    the command an answer sends
+  - `IslandHitRegion` — where the island catches the mouse: its final frame
+    from the moment a surface is presented, so the first click on it lands
   - `NeoListeningIndicator` · `NeoListeningLayout` — the glow that pulses
     once behind the fox each time NEO starts to listen: the pulse's window,
     its curve, and where it shows (it takes no room)
@@ -55,8 +61,9 @@ wrapper). Three layers, strictly separated:
   - Listeners for battery, volume, brightness, now-playing, downloads,
     clipboard, meetings, privacy, Bluetooth, calendar, weather, focus,
     notifications, coding agents, Wi-Fi and the frontmost app
-  - `NeoListener` — a client of NEO's core websocket, relaying its state and
-    transcript as `NeoFact`s
+  - `NeoListener` — a client of NEO's core websocket, relaying its state,
+    transcript and pending confirmation as `NeoFact`s, and sending the
+    answer to one
   - `CameraController` — the camera. `@MainActor`, and its own `phase` is the
     only truth about whether the hardware is on, so nothing can infer it from
     a panel being open
@@ -168,7 +175,9 @@ The poses, from the fox's own frames (`PetBrain.neoAnimation`):
 - **working** → pacing toward the notch and back
 - **searching** → the magnifier, then a sniff along the ground
 - **speaking** → talking to a cadence, with a small bob
-- **needs your OK** → the "!", insisting gently
+- **needs your OK** → the "!", insisting gently — whenever a confirmation
+  waits, whatever state the core reports — with Allow and Cancel under the
+  notch (below)
 - **ready** → settles back into its own life (and 1.2 s after a turn ends,
   a click on the island still opens the chat)
 
@@ -183,7 +192,10 @@ NotchHub is a second client of NEO's core (`ws://127.0.0.1:8765`, the token in
 `camera_view visible:false`, so the core never streams camera frames to it,
 and reconnects every 1.5 s while NEO is off. The toggle is **NEO** in
 Settings. `--neo-demo` runs a scripted turn through the fox without a core
-(the panel stays closed through the answer and opens at the OK);
+(the chat stays closed; at the OK, Allow and Cancel pop out under the notch
+for 6 s); `--neo-confirm-snapshot DIR` renders those buttons offscreen —
+before, as seen, with their hit targets, hovered, and with the fox on the
+left — to `DIR/notch-confirm.png`;
 `--neo-snapshots DIR` renders each pose offscreen in each island shape
 (`--neo-snapshots DIR listening` only the listening rows: 0.45 s — the
 pulse at its peak — 1.0 s — fading — and 3 s — nothing — into listening, in
@@ -197,6 +209,95 @@ no screen-recording permission).
 `--neo-capturable` is a debug flag that leaves the window visible to screen
 capture in every shape (Ghost Mode and the always-private panel included), so
 `screencapture` of the notch strip shows what the user sees; in memory only.
+
+### NEO needs an OK: Allow and Cancel under the notch
+
+When NEO stages a confirmation — its core's `confirm` event, or the one
+still pending in the `hello` when NotchHub connects — the island drops just
+far enough under the notch for **two buttons, Allow and Cancel**, and
+nothing else: no title, no words about the action, no chat
+(`NeoConfirmModel`, `NeoConfirmLayout`, `NeoConfirmView`;
+`shots/notch-confirm.png`). The surface is the notch's width plus the fox's
+dock on each side (253×72 on a 14-inch MacBook Pro: one 40-pt row under the
+32-pt strip), so the fox keeps its exact place beside the notch, in its
+"!" pose. What the action is, NEO says — once, in one short line — and
+VoiceOver is told ("Neo needs your OK: move report.pdf to the Trash"); the
+buttons are labelled Allow and Cancel, with the action as their hint.
+
+- **Why it keys off the event, not NEO's state.** The chat panel used to
+  open when NEO's *state* became `confirming`. The core sets that state only
+  when its agent session owns the question; a tool Gemini Live's model calls
+  itself (forget, close, type, a click…) stages the card and the state goes
+  speaking → listening, so nothing showed — and the page that would have
+  asked to be seen sits in a web view that is off screen. The `confirm`
+  event is sent on every path.
+- **It outranks everything** the island shows: the idle island, any
+  activity, the dashboard, an app panel, a call's controls and NotchHub's own
+  panels — the camera preview among them (its session is left running
+  untouched and the picture is back the moment the question is answered).
+  The one exception is **NEO's own chat panel**: there the page shows its
+  confirm card, and the buttons are never drawn twice. If the panel closes
+  with the card still pending, the buttons come up then.
+- **It stays** until answered here, or until the core's `confirm_done`
+  (answered by voice or in NEO's page, superseded, or expired after NEO's
+  two minutes), or the core goes away. A newer confirmation replaces the one
+  showing. The buttons are drawn *over* the island's state, never in its
+  place (`currentIslandState` over `underlyingIslandState`), so the island
+  then springs back to exactly what was there.
+- **The chat does not open for it.** `confirming` no longer opens NEO's
+  panel, and the page's own request to be seen is declined while a card
+  waits (a panel the page got opened a moment *before* the card reached the
+  island — two sockets, either order — folds again). A panel you opened
+  yourself stays, with the page's card in it.
+- **Clicks.** The buttons are drawn and hit-tested from the same layout, and
+  they own every click on the surface: a click on one answers; a click
+  beside them gives the surface the keyboard and does nothing else — it
+  never opens the chat or the dashboard by accident.
+- **Keys.** Return (or Enter) = Allow, Esc = Cancel — while the island has
+  the keyboard: after a click on the surface, or when one of NotchHub's own
+  panels already had it. The surface does **not** take the keyboard as it
+  appears and captures no key globally: a Return meant for the app you are
+  typing in must never become an Allow. A key still auto-repeating from
+  before is nobody's answer.
+- **No accidental Allow.** Allow — clicked or keyed — counts only once the
+  buttons have been up **0.6 s** (`NeoConfirmModel.allowGuard`); Cancel
+  always counts.
+- **The answer** is the command NEO's own page sends from its card,
+  `{"cmd":"confirm","yes":true|false,"action_id":"…"}`, over the listener's
+  host connection; the buttons go at once and the core's `confirm_done`
+  follows. Nothing is sent while the core is away.
+- **Noticing it.** One cue: the island's own spring "pop" as the buttons
+  come out (`DesignTokens.confirmPop`: quicker and bouncier than an ordinary
+  expand; a plain 0.2 s ease under Reduce Motion) and the fox's "!". No
+  sound — NotchHub plays none anywhere, and this does not invent one.
+- **Ghost Mode** hides the buttons with the rest of the island. They are not
+  an always-private surface: they show nothing of NEO's but that it asks.
+
+### The first click
+
+A button in NEO's panel used to need two or three clicks, and so would any
+surface that comes up on its own. Three things, all fixed:
+
+- The window lets clicks through unless the cursor is on the island, and
+  that was decided from the last *hover* it had heard of. A surface that
+  came up under a cursor that was not moving was "not hovered": the window
+  still ignored the mouse and the click went to the app underneath, until
+  the mouse moved. It is now decided from the island's frame and the
+  cursor's real position (`IslandHitRegion`, `NotchWindow.syncMouseCapture`)
+  — the hit region is the surface's **final** frame from the moment it is
+  presented, while the spring is still settling.
+- The island's window is not key when NEO's panel opens by itself, and
+  NotchHub is not the active app, so AppKit spent the first click on
+  activating — a plain `WKWebView` does not accept first mouse. NEO's page
+  now lives in a `NeoWebView` that does, as do the island's own views
+  (`IslandContainerView`, `IslandHostingView`).
+- NEO's Allow / Cancel are drawn controls routed by position, so they need
+  no key window at all.
+
+`--selftest` checks all three on the real window and views. To see it:
+have NEO ask for an OK, keep the mouse still where Allow will appear, and
+click once after the buttons have been up a moment; or open NEO's panel by
+a click on the island and click Send or a card's button once.
 
 ### NEO's panel
 
@@ -214,16 +315,17 @@ slim header (a small orb, NEO, its state), quiet bubbles and tool pills,
 the cards as compact rows, the input bar at the bottom.
 
 The panel is **compact** — 340×300 under the notch strip
-(`NeoPanelLayout.standard`), what a click or a "Needs your OK" opens — and
+(`NeoPanelLayout.standard`), what a click opens — and
 grows only when the page asks because its content needs it: the camera or
 song card a little taller, the browser card up to 60% of the screen's width
 and 70% of its height (at most 1000×800), never more. The island decides
 the frame; the page lays itself out for whatever it is given.
 
 - NEO thinking, working, searching or speaking **never opens it**: a voice
-  answer is the fox's alone, posing in the notch. It opens only when NEO
-  needs you — "Needs your OK", a card opening (the browser, the camera, a
-  song), NEO's page asking to be seen (a login page, a question) — or when
+  answer is the fox's alone, posing in the notch. Nor does "Needs your
+  OK": that is Allow and Cancel under the notch (above). It opens only for
+  a card opening (the browser, the camera, a song), NEO's page asking to
+  be seen (a login page, a question) — or when
   you ask: a click anywhere on the island (the fox included) while NEO is
   active, or NEO summoned by hand (⌘⇧Space, its menu-bar item: the core's
   `woke` event, which the wake word never sends). The panel draws no fox:
@@ -237,9 +339,10 @@ the frame; the page lays itself out for whatever it is given.
   shows a quiet "Reconnecting to NEO…" line and the panel waits 15 s
   (`NeoPanelModel.reconnectGrace`) for the core to come back before it
   folds. A closed panel stays closed.
-- Clicks on the panel reach the page without the island being key; the first
-  click into it (or the click on the island that opened it) makes the window
-  key and tells the page (`neo://show`) so typing lands in NEO's input — NEO
+- Clicks on the panel reach the page without the island being key, the
+  very first one included (see "The first click"); the first click into it
+  (or the click on the island that opened it) also makes the window key and
+  tells the page (`neo://show`) so typing lands in NEO's input — NEO
   starting to talk never steals what you are typing.
 - It is never shown to screen capture, as NEO's own window is not
   (`GhostMode.alwaysPrivate`), and Ghost Mode hides the fox with the rest.

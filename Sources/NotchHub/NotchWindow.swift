@@ -81,27 +81,32 @@ final class IslandContainerView: NSView {
 
     private var trackingArea: NSTrackingArea?
 
-    /// Where the cursor opens the island: the notch while idle (not the pet's
-    /// dock), otherwise the island's whole frame — with a little slop so the
-    /// compact pill is easy to catch.
-    private var hoverRegion: CGRect {
-        (isIdle ? idleNotchFrame : islandFrame).insetBy(dx: -8, dy: -8)
+    /// A surface whose every click is its own drawn controls' (NEO's Allow /
+    /// Cancel): clicks on it reach `mouseDown` here even while a panel with
+    /// real controls holds the window key underneath, and never fall through
+    /// to the hosted view.
+    var ownsClicks = false
+
+    /// Where the island catches the mouse: its frame as it is NOW in the
+    /// model — the final frame of whatever it is springing to, from the
+    /// moment the surface is presented (see `IslandHitRegion`).
+    var hitRegion: IslandHitRegion {
+        IslandHitRegion(islandFrame: islandFrame, idleNotchFrame: idleNotchFrame, idlePetFrame: idlePetFrame, isIdle: isIdle)
     }
 
-    func isOverIdlePet(_ point: NSPoint) -> Bool {
-        isIdle && (idlePetFrame?.insetBy(dx: -3, dy: -3).contains(point) ?? false)
-    }
+    func isOverIdlePet(_ point: NSPoint) -> Bool { hitRegion.isOverIdlePet(point) }
 
     /// Whether the mouse at `point` belongs to the island (hover or click).
-    func catchesMouse(at point: NSPoint) -> Bool {
-        hoverRegion.contains(point) || isOverIdlePet(point)
-    }
+    func catchesMouse(at point: NSPoint) -> Bool { hitRegion.catchesMouse(at: point) }
 
     /// Whether the cursor at `point` opens the island. Pointing at the resting
     /// pet does not — the pet notices it instead.
-    func opensIsland(at point: NSPoint) -> Bool {
-        hoverRegion.contains(point) && !isOverIdlePet(point)
-    }
+    func opensIsland(at point: NSPoint) -> Bool { hitRegion.opensIsland(at: point) }
+
+    /// The island's window is never key while it merely shows something, and
+    /// NotchHub is not the active app: without this AppKit would spend the
+    /// first click on activating, and a drawn button would need a second one.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     /// Only the island catches the mouse; everything else passes through.
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -116,6 +121,9 @@ final class IslandContainerView: NSView {
         // display without one the same region is ordinary menu bar, so let the
         // click through instead of swallowing it.
         if isIdle && !hasNotch { return nil }
+        // A surface of drawn controls only (NEO's Allow / Cancel): its clicks
+        // are routed by position in `mouseDown`, whatever is underneath.
+        if ownsClicks { return self }
         // An interactive surface (settings) must reach its controls, so defer to
         // the normal hit test and let the SwiftUI hosting view handle the click.
         if needsInteraction { return super.hitTest(point) }
@@ -274,6 +282,14 @@ final class IslandContainerView: NSView {
     }
 }
 
+/// The hosting view for the island's SwiftUI content: one that takes the
+/// first click, like the container it sits in (see
+/// `IslandContainerView.acceptsFirstMouse`) — a panel's real controls must not
+/// need one click to wake the window and another to act.
+final class IslandHostingView: NSHostingView<IslandRootView> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 /// The borderless, transparent window that hosts the island.
 ///
 /// It sits above the menu bar, has no chrome of its own, and is sized to the
@@ -398,6 +414,10 @@ final class NotchWindow: NSPanel {
     /// `interactiveFrame`, before the click is delivered.
     var onInteractiveClick: (() -> Void)?
 
+    /// A key went down while the window is key: (key code, is an auto-repeat).
+    /// Returns whether it was taken (it then goes no further).
+    var onKeyDown: ((UInt16, Bool) -> Bool)?
+
     /// A click inside the interactive region of a non-key window (NEO's
     /// panel, opened on its own) makes the window key first — the app
     /// activates and the panel can take typing — then the click lands on
@@ -407,6 +427,11 @@ final class NotchWindow: NSPanel {
            let interactive = container.interactiveFrame, interactive.contains(event.locationInWindow) {
             needsInteraction = true
             onInteractiveClick?()
+        }
+        // NEO's Allow / Cancel take Return and Esc while they have the
+        // keyboard (the window is key): before any panel underneath does.
+        if event.type == .keyDown, onKeyDown?(event.keyCode, event.isARepeat) == true {
+            return
         }
         // Esc with NEO's panel open closes it, as it closes any panel. The
         // web view is first responder then and keeps the key to itself, so
@@ -516,6 +541,10 @@ final class NotchWindow: NSPanel {
         set { container.rightClickMenu = newValue }
     }
 
+    /// Whether the island's own view takes the first click in a window that
+    /// is not key — for the self-test.
+    var acceptsFirstClick: Bool { container.acceptsFirstMouse(for: nil) }
+
     /// Installs the SwiftUI island as a subview filling the container.
     func installContent(_ view: NSView) {
         view.frame = container.bounds
@@ -558,6 +587,8 @@ final class NotchWindow: NSPanel {
         container.islandFrame = localFrame(for: state, content: content)
         // NEO's panel takes clicks without being key (see `interactiveFrame`).
         container.interactiveFrame = state == .neoPanel ? container.islandFrame : nil
+        // NEO's Allow / Cancel are drawn controls, and every click on them is theirs.
+        container.ownsClicks = state == .neoConfirm
         container.idleNotchFrame = localFrame(for: .idle, content: .default)
         container.isIdle = (state == .idle)
         container.hasNotch = geometry.hasNotch
@@ -570,14 +601,23 @@ final class NotchWindow: NSPanel {
 
     /// Re-derives mouse capture from where the cursor is now — after a change of
     /// shape or pet the cursor did not move for.
+    ///
+    /// From the cursor's real position against the island's new frame, not
+    /// from the last hover the window heard of: a surface that comes up under
+    /// a still cursor (NEO's Allow / Cancel, its panel) was otherwise "not
+    /// hovered", the window went on ignoring the mouse, and the first click —
+    /// made without moving the mouse — went to the app underneath.
     func syncMouseCapture() {
-        guard !needsInteraction else {
-            ignoresMouseEvents = false
-            return
-        }
         let screen = NSEvent.mouseLocation
         let point = NSPoint(x: screen.x - frame.minX, y: screen.y - frame.minY)
-        ignoresMouseEvents = !(container.isMouseInside || container.isOverIdlePet(point))
+        ignoresMouseEvents = container.hitRegion.windowIgnoresMouse(cursorAt: point, interactive: needsInteraction)
+            && !container.isMouseInside
+    }
+
+    /// Whether a click at `point` (window coordinates) would reach the island
+    /// right now — for the self-test.
+    func takesClick(at point: NSPoint) -> Bool {
+        container.hitTest(point) != nil
     }
 
     /// A panel opened by clicking the resting pet: the cursor is already on it.
