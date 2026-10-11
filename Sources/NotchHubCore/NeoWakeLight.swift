@@ -119,6 +119,99 @@ public enum NeoWakeLight {
     public static let headLead: Double = 0.035
     public static let headTail: Double = 0.17
 
+    // MARK: - The atmosphere: the glow round the line
+
+    /// The line: one device pixel on the Retina screens a notch comes on,
+    /// lying just outside the black (its inner edge is the silhouette).
+    public static let hairline: Double = 0.5
+    /// The line's brightness over the light's own (`Stop.alpha`), capped
+    /// at fully lit: the horizon is the brightest thing in the picture.
+    public static let lineLevel: Double = 1.45
+    /// The near glow hugging the line, outside the island: a narrow
+    /// Gaussian falloff (`nearRadius`, points, from the silhouette) at
+    /// `nearLevel` × the light, laid down one device pixel at a time
+    /// (`nearProfile`) — at pixel scale a row per pixel IS the smooth curve.
+    public static let nearRadius: Double = 0.75
+    public static let nearLevel: Double = 0.6
+    /// The haze — the atmosphere — bleeding outward into the desktop: the
+    /// island's half, in the palette's deeper blue, grown `hazeLift` points
+    /// and blurred (`hazeRadius`, a true Gaussian), seen only outside the
+    /// silhouette — so a soft plateau that fades smoothly to nothing: about
+    /// 0.8 × `hazeLevel` of the light at the line, half that 5 pt out, under
+    /// a tenth by 11 pt.
+    public static let hazeRadius: Double = 5
+    public static let hazeLift: Double = 5
+    public static let hazeLevel: Double = 0.85
+    /// The rim light just inside the black, so the edge looks lit from
+    /// behind: a short Gaussian falloff into the black (`innerRadius`) at
+    /// `innerLevel` × the light, a device pixel at a time, kept off the
+    /// hardware notch (`Stop.clear`).
+    public static let innerRadius: Double = 0.5
+    public static let innerLevel: Double = 0.35
+    /// How far beyond the silhouette any of it reaches before it is below
+    /// one 8-bit step even at full brightness (the haze 2.6 standard
+    /// deviations past its lift, where its tail is under 0.5 %): the room
+    /// the window keeps round the island must be at least this.
+    public static var glowReach: Double { hazeLift + hazeRadius * 2.6 }
+
+    /// How the haze is drawn: blurred frame by frame (on the GPU), or from
+    /// a mask made once per island shape, which costs a fraction as much
+    /// but takes its light from the rim undiffused — fine for the settled
+    /// light's soft features, not for the wake's sharp sweep. This is the
+    /// masked share, 0 … 1: none during the wake, all once settled, and
+    /// crossfaded over the wake's last `hazeHandover` seconds (as the bloom
+    /// fades), since the two differ by a few per cent where the light is
+    /// brightest and a switch in one frame would flick.
+    public static func hazeMasked(_ phase: Phase) -> Double {
+        guard let wake = phase.wake, !phase.reduceMotion else { return 1 }
+        return smoothstep(enterDuration - hazeHandover, enterDuration, wake)
+    }
+    public static let hazeHandover: TimeInterval = 0.3
+
+    /// The near glow's light in each device-pixel row outside the line
+    /// (from the first row past it), at full brightness: a Gaussian of the
+    /// row's centre's distance from the silhouette, to the last row worth
+    /// an 8-bit step.
+    public static var nearProfile: [Double] {
+        rows(level: nearLevel, radius: nearRadius, first: 1.5 * hairline, count: 3)
+    }
+
+    /// The rim light's in each device-pixel row inside the black, from the
+    /// silhouette in.
+    public static var innerProfile: [Double] {
+        rows(level: innerLevel, radius: innerRadius, first: 0.5 * hairline, count: 2)
+    }
+
+    /// At most `count` rows: each is a fill a frame, and these radii put
+    /// the next row under 2 % of the light.
+    static func rows(level: Double, radius: Double, first: Double, count: Int) -> [Double] {
+        var profile: [Double] = []
+        var d = first
+        while profile.count < count {
+            let value = level * exp(-d * d / (2 * radius * radius))
+            if value < 1.5 / 255 { break }
+            profile.append(value)
+            d += hairline
+        }
+        return profile
+    }
+
+    /// Opacities for nested bands that all start at the silhouette — band
+    /// `k` reaching through row `k` — so that, drawn one over another,
+    /// row `k` shows `profile[k]` of the light. Nested rather than side by
+    /// side so no seam can open between neighbours: every band's inner edge
+    /// is the same curve.
+    public static func nestedAlphas(_ profile: [Double]) -> [Double] {
+        var alphas = Array(repeating: 0.0, count: profile.count)
+        var beyond = 0.0 // the light the bands past row k already give it
+        for k in profile.indices.reversed() {
+            let target = clamp(profile[k])
+            alphas[k] = target <= beyond ? 0 : 1 - (1 - target) / (1 - beyond)
+            beyond = target
+        }
+        return alphas
+    }
+
     // MARK: - Activation (entrance / exit progress)
 
     /// Entrance or exit progress `seconds` after listening began
@@ -155,10 +248,16 @@ public enum NeoWakeLight {
 
     // MARK: - The light along the rim
 
-    /// How finely each half's gradient is sampled. The softest feature (the
-    /// highlight) spans ten or more samples; the sweep's sharp front and the
-    /// glow's fade beside the notch get extra ones.
-    public static let samples = 48
+    /// How finely each half's gradient is sampled: down the side, where the
+    /// light rises out of the dark at the top end, and along the bottom,
+    /// where the softest feature (the highlight, a tenth of the island's
+    /// width either side of its crest) spans eight or more samples. The
+    /// wake samples both twice as finely, and its sweep's sharp front and
+    /// the glow's fade beside the notch get extra ones. Every stop is a
+    /// colour in each of the light's gradients, every frame — so as few as
+    /// draw the same light.
+    public static let sideSamples = 8
+    public static let bottomSamples = 18
     /// How far beside the hardware notch the glow has faded in again, in points.
     public static let notchFeather: Double = 18
 
@@ -183,9 +282,13 @@ public enum NeoWakeLight {
     /// coordinates: the halves meet under its middle, and the glow keeps
     /// off it.
     public static func stops(half: Half, size: CGSize, phase: Phase, notch: CGRect? = nil) -> [Stop] {
-        var locations = (0...samples).map { Double($0) / Double(samples) }
         let width = max(1, Double(size.width)), height = max(1, Double(size.height))
         let reach = reach(half: half, size: size, split: split(size: size, notch: notch))
+        let corner = height / reach
+        let fine = phase.wake != nil && !phase.reduceMotion ? 2 : 1
+        let side = sideSamples * fine, bottom = bottomSamples * fine
+        var locations = (0...side).map { corner * Double($0) / Double(side) }
+            + (1...bottom).map { corner + (1 - corner) * Double($0) / Double(bottom) }
         if let wake = phase.wake, !phase.reduceMotion {
             // The sweep's sharp front: sample it finely wherever it is.
             let head = headPosition(wake: wake)
@@ -234,7 +337,7 @@ public enum NeoWakeLight {
         }
 
         if phase.reduceMotion {
-            return Stop(location: location, alpha: clamp(reduceMotionLevel * base * phase.fade), white: 0.18, clear: clear)
+            return Stop(location: location, alpha: clamp(reduceMotionLevel * base * phase.fade), white: restWhite, clear: clear)
         }
 
         let clock = phase.clock
@@ -267,10 +370,11 @@ public enum NeoWakeLight {
             head = 0.95 * grown * spent * shape
         }
         let alpha = clamp((rest + shimmer + head) * phase.fade)
-        // The hot core pales towards white at the highlight and the sweep —
-        // but never all the way: a white line would vanish on a white
-        // wallpaper just when it should shine.
-        let white = min(0.65, 0.15 + 0.3 * sheen * min(1, shimmer / shimmerLevel) + 0.5 * head)
+        // The line pales towards white at the highlight and the sweep — but
+        // only a little (`maxWhite`): the light is blue, and a white line
+        // would vanish on a white wallpaper just when it should shine.
+        let heat = clamp(0.6 * sheen * min(1, shimmer / shimmerLevel) + head)
+        let white = restWhite + (maxWhite - restWhite) * heat
         return Stop(location: location, alpha: alpha, white: white, clear: clear)
     }
 

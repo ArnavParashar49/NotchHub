@@ -3,6 +3,7 @@
 
     python3 scripts/outline_gif.py FRAMEDIR [-o OUT.gif] [--fps 30] [--margin 40]
                                    [--max-mb 6] [--hold 0.4] [--speed 1] [--no-resample]
+                                   [--dither [LEVELS]]
 
 FRAMEDIR is a frame folder written by `NotchHub --neo-outline-frames` or
 `--neo-outline-morph` (e.g. shots/neo-outline/current/wings/grey/episode): its
@@ -16,7 +17,11 @@ NNN.png files plus the frames.json beside them, which gives each frame's time
 - The island is cropped tight with --margin points (40) around it, from the
   top of the screen; without a frames.json the frames are used whole.
 - One palette is built from frames across the whole sequence and applied to
-  every frame without dithering, so colours never flicker between frames.
+  every frame without error diffusion, so colours never flicker between
+  frames. --dither adds an ORDERED (8×8 Bayer) dither of ±LEVELS/2 (default
+  6) before the mapping: a soft glow's gradient then has no bands, and since
+  the pattern is fixed to the pixel grid, still areas stay still (Floyd–
+  Steinberg would crawl from frame to frame). Needs numpy.
 - If the GIF is over --max-mb (6 MB) it is scaled down until it fits.
 
 Default output: the folder's name with .gif, beside it
@@ -100,7 +105,17 @@ def schedule(times: list[float] | None, count: int, meta: dict, fps: float, spee
     return out
 
 
-def build(files: list[Path], box, plan, scale: float) -> bytes:
+def bayer(width: int, height: int):
+    """The 8×8 Bayer matrix tiled over width × height, as offsets in -0.5 ..< 0.5."""
+    import numpy as np
+    m = np.array([[0]])
+    while m.shape[0] < 8:
+        m = np.block([[4 * m, 4 * m + 2], [4 * m + 3, 4 * m + 1]])
+    m = (m + 0.5) / m.size - 0.5
+    return np.tile(m, (height // 8 + 1, width // 8 + 1))[:height, :width]
+
+
+def build(files: list[Path], box, plan, scale: float, dither: float = 0) -> bytes:
     used = sorted({i for i, _ in plan})
     frames: dict[int, Image.Image] = {}
     for i in used:
@@ -115,6 +130,15 @@ def build(files: list[Path], box, plan, scale: float) -> bytes:
     for row, i in enumerate(picks):
         montage.paste(frames[i], (0, row * first.height))
     palette = montage.quantize(colors=255, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
+    if dither > 0:
+        import numpy as np
+        offsets = bayer(first.width, first.height)[..., None] * dither
+
+        def dithered(image: Image.Image) -> Image.Image:
+            pixels = np.asarray(image, dtype=np.float32) + offsets
+            return Image.fromarray(np.clip(pixels + 0.5, 0, 255).astype(np.uint8), "RGB")
+
+        frames = {i: dithered(f) for i, f in frames.items()}
     indexed = {i: f.quantize(palette=palette, dither=Image.Dither.NONE) for i, f in frames.items()}
     sequence = [indexed[i] for i, _ in plan]
     durations = [d for _, d in plan]
@@ -135,6 +159,8 @@ def main() -> None:
                         help="seconds to hold the last frame (default 0 for a loop, 0.4 otherwise)")
     parser.add_argument("--speed", type=float, default=1, help="playback speed (0.25 = four times slower)")
     parser.add_argument("--no-resample", action="store_true", help="show each frame once for 1/fps")
+    parser.add_argument("--dither", type=float, nargs="?", const=6, default=0,
+                        help="ordered dither of ±LEVELS/2 against banding in soft glows (default 6 when given)")
     args = parser.parse_args()
 
     folder = args.folder.resolve()
@@ -149,7 +175,7 @@ def main() -> None:
     limit = args.max_mb * 1024 * 1024
     scale = 1.0
     while True:
-        data = build(files, box, plan, scale)
+        data = build(files, box, plan, scale, args.dither)
         if len(data) <= limit or scale < 0.3:
             break
         scale *= 0.85

@@ -13,8 +13,9 @@ import UniformTypeIdentifiers
 /// appears on screen; SwiftUI still animates it on the display's clock, and
 /// the hosting view is sampled with `cacheDisplay` every 1/60 s. Each change
 /// goes through the same spring the app would pick (`IslandMotion.between`).
-/// Samples are composed on the grey menu-bar backdrop with the physical notch
-/// in black (and a red x-ray of the notch in `xray/`), into DIR/LABEL/morph:
+/// Samples are composed on the grey menu-bar backdrop (or another variant's
+/// with `--outline-backdrop dark|white|grey`) with the physical notch in
+/// black (and a red x-ray of the notch in `xray/`), into DIR/LABEL/morph:
 ///
 /// - `NAME/NNN.png` + `frames.json` (t = real seconds since the change) and
 ///   `NAME-sheet.png` for each change: idle ⇄ wings, idle → compact,
@@ -67,6 +68,8 @@ enum NeoOutlineMorph {
         let window: NSWindow
         let host: NSHostingView<IslandRootView>
         var queue: [Change]
+        /// The wallpaper and menu bar the samples are composed on.
+        var backdrop = NeoOutlineFrames.variants[0]
         // The change being sampled.
         var samples: [(TimeInterval, CGImage)] = []
         var start = Date()
@@ -80,6 +83,11 @@ enum NeoOutlineMorph {
         /// CPU seconds per second, the island at rest without and with the light.
         var idleCPU = 0.0
         var litCPU = 0.0
+        /// Instructions retired per second, the island at rest without and
+        /// with the light: unlike CPU time, the same on a performance or an
+        /// efficiency core and at any clock speed.
+        var idleInstructions = 0.0
+        var litInstructions = 0.0
         /// The memory footprint at rest, without and with the light, in MB.
         var idleFootprint = 0.0
         var litFootprint = 0.0
@@ -119,12 +127,26 @@ enum NeoOutlineMorph {
         let pacingOnly = arguments.contains("--outline-pacing-only")
         let run = Run(root: root, geometry: geometry, region: region, queue: pacingOnly ? [] : changes)
         run.quietSeconds = pacingOnly ? 4 : 1
+        // `--outline-quiet SECONDS`: how long the lit measurement runs (two
+        // runs of different lengths, differenced, give the settled light's
+        // own cost with everything else cancelled out).
+        if let index = arguments.firstIndex(of: "--outline-quiet"), index + 1 < arguments.count,
+           let seconds = Double(arguments[index + 1]) {
+            run.quietSeconds = seconds
+        }
+        if let index = arguments.firstIndex(of: "--outline-backdrop"), index + 1 < arguments.count,
+           let variant = NeoOutlineFrames.variants.first(where: { $0.name == arguments[index + 1] }) {
+            run.backdrop = variant
+        }
         run.window.isOpaque = false
         run.window.backgroundColor = .clear
         run.window.hasShadow = false
         run.window.alphaValue = 0
         run.window.ignoresMouseEvents = true
         run.window.collectionBehavior = [.transient, .ignoresCycle]
+        // Above ordinary windows, so nothing on screen can occlude it: AppKit
+        // stops drawing an occluded window, and the probe would read as free.
+        run.window.level = .statusBar
         run.host.frame = CGRect(origin: .zero, size: region.size)
         run.window.contentView = run.host
         run.window.orderFrontRegardless()
@@ -212,11 +234,11 @@ enum NeoOutlineMorph {
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
               let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
                                       space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        let grey = NeoOutlineFrames.variants[0]
+        let backdrop = run.backdrop
         let notchHeight = run.geometry.notchFrame.height
-        context.setFillColor(grey.desktop)
+        context.setFillColor(backdrop.desktop)
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
-        context.setFillColor(grey.menuBar)
+        context.setFillColor(backdrop.menuBar)
         context.fill(CGRect(x: 0, y: CGFloat(height) - notchHeight * scale, width: CGFloat(width), height: notchHeight * scale))
         context.draw(island, in: CGRect(x: 0, y: 0, width: width, height: height))
         context.saveGState()
@@ -294,17 +316,21 @@ enum NeoOutlineMorph {
         // the light's own frame count meanwhile.
         later(0.6) {
             let idleStart = (Date(), cpuTime())
+            let idleCount = instructions()
             later(1.0) {
                 run.idleCPU = (cpuTime() - idleStart.1) / Date().timeIntervalSince(idleStart.0)
+                run.idleInstructions = Double(instructions() - idleCount) / Date().timeIntervalSince(idleStart.0)
                 run.idleFootprint = footprint()
                 apply(Pose(row: wings), run: run, animation: nil)
                 later(2.0) { // past the wake, into the settled light
                     let quietStart = (Date(), cpuTime())
+                    let quietCount = instructions()
                     run.drawnAtStart = NeoWakeOutlineView.framesDrawn
                     later(run.quietSeconds) {
                         let seconds = Date().timeIntervalSince(quietStart.0)
                         run.drawnRate = Double(NeoWakeOutlineView.framesDrawn - run.drawnAtStart) / seconds
                         run.litCPU = (cpuTime() - quietStart.1) / seconds
+                        run.litInstructions = Double(instructions() - quietCount) / seconds
                         run.litFootprint = footprint()
                         // …then what snapshots can see.
                         run.start = Date()
@@ -325,6 +351,17 @@ enum NeoOutlineMorph {
             }
         }
         return result == KERN_SUCCESS ? Double(info.phys_footprint) / 1_048_576 : 0
+    }
+
+    /// Instructions this process has retired so far.
+    static func instructions() -> UInt64 {
+        var info = rusage_info_v4()
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) {
+                proc_pid_rusage(getpid(), RUSAGE_INFO_V4, $0)
+            }
+        }
+        return result == 0 ? info.ri_instructions : 0
     }
 
     /// This process's user + system CPU time so far, in seconds.
@@ -363,12 +400,15 @@ enum NeoOutlineMorph {
             frames of light computed by its TimelineView over a quiet second: %.0f per second
               (the wake and the exit run at the display's rate; settled, the light asks for 60 — see NeoWakeOutlineView.settledInterval)
             process CPU at rest: %.1f %% without the light, %.1f %% with it → about %.2f ms of CPU per frame of light
+            instructions retired: %.1f M/s without the light, %.1f M/s with it → %.2f M per frame of light
             memory footprint: %.1f MB without the light, %.1f MB with it, %.1f MB 2 s after it went out
             snapshots taken: %d in %.2f s (each cacheDisplay is slow, so this caps what they can see)
             distinct snapshots: %d → %.0f per second (median gap %.1f ms)
 
             """, screenHz, run.drawnRate, run.idleCPU * 100, run.litCPU * 100,
             run.drawnRate > 0 ? (run.litCPU - run.idleCPU) * 1000 / run.drawnRate : 0,
+            run.idleInstructions / 1e6, run.litInstructions / 1e6,
+            run.drawnRate > 0 ? (run.litInstructions - run.idleInstructions) / 1e6 / run.drawnRate : 0,
             run.idleFootprint, run.litFootprint, afterFootprint, sampled.count, t, stamps.count, Double(max(0, stamps.count - 1)) / t, median * 1000)
         print(report, terminator: "")
         try? report.write(to: run.root.appendingPathComponent("pacing.txt"), atomically: true, encoding: .utf8)

@@ -11,14 +11,15 @@ import UniformTypeIdentifiers
 /// For each island shape — `idle` (the fox docked), `notch` (the fox hiding
 /// in the notch, so the island is exactly the hardware notch), `wings`,
 /// `compact` (the song bar) and `expanded` (music) — and each variant — `grey` (a mid-grey
-/// menu bar), `white` (a bright white wallpaper) and `xray` (grey, with the
+/// menu bar), `white` (a bright white wallpaper), `dark` (a near-black
+/// wallpaper, 0.04 grey — space behind a horizon) and `xray` (grey, with the
 /// physical notch a translucent red instead of black, to show whatever is
 /// drawn underneath it) — it writes, into DIR/LABEL (or DIR without a label):
 ///
 /// - `SHAPE/VARIANT/loop/` — one full loop of the resting light, `loopFrames` frames;
 /// - `SHAPE/VARIANT/enter/`, `exit/` — the wake and the exit at 30 fps,
 ///   through the live view's own progress curves (`NeoWakeLight.activation`);
-/// - `SHAPE/VARIANT/episode/` (grey and white) — a whole listen in real time
+/// - `SHAPE/VARIANT/episode/` (grey, white and dark) — a whole listen in real time
 ///   at 30 fps: enter, one loop, exit — for `scripts/outline_gif.py`;
 /// - `SHAPE-VARIANT-sheet.png` — the loop, entrance and exit tiled, each
 ///   frame labelled with its t;
@@ -37,7 +38,8 @@ import UniformTypeIdentifiers
 /// `--outline-variants grey,xray` render a subset; `--outline-tint RRGGBB`
 /// tints the outline as a pet glow setting would (default: no glow set, the
 /// "Blue" setting); `--outline-motion reduced` renders it as Reduce Motion
-/// shows it.
+/// shows it; `--outline-fps 120` samples the entrance, exit and episode
+/// more finely (30 by default) — for slow motion that is not stepped.
 @MainActor
 enum NeoOutlineFrames {
 
@@ -70,7 +72,7 @@ enum NeoOutlineFrames {
     static let scale: CGFloat = 2
     static let margin: CGFloat = 40
     static let loopFrames = 48
-    static let fps: Double = 30
+    static var fps: Double = 30
     /// The light's clock when listening starts: live, it counts from the
     /// wake, so an entrance always starts at 0.
     static let enterClock: TimeInterval = 0
@@ -112,6 +114,12 @@ enum NeoOutlineFrames {
         Variant(name: "white",
                 desktop: CGColor(srgbRed: 0.98, green: 0.98, blue: 0.99, alpha: 1),
                 menuBar: CGColor(srgbRed: 0.93, green: 0.93, blue: 0.95, alpha: 1),
+                notch: .black, episode: true),
+        // A near-black wallpaper, as space is behind the horizon in the
+        // photo this light is modelled on: where the glow reads most.
+        Variant(name: "dark",
+                desktop: CGColor(srgbRed: 0.04, green: 0.04, blue: 0.04, alpha: 1),
+                menuBar: CGColor(srgbRed: 0.05, green: 0.05, blue: 0.055, alpha: 1),
                 notch: .black, episode: true),
         Variant(name: "xray",
                 desktop: CGColor(srgbRed: 0.36, green: 0.37, blue: 0.40, alpha: 1),
@@ -187,6 +195,7 @@ enum NeoOutlineFrames {
         let onlyVariants = options["--outline-variants"].map { Set($0.split(separator: ",").map(String.init)) }
         let glow = options["--outline-tint"].flatMap { UInt32($0.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) }
         reducedMotion = options["--outline-motion"] == "reduced"
+        if let rate = options["--outline-fps"].flatMap(Double.init), rate >= 1 { fps = rate }
 
         var root = URL(fileURLWithPath: directory, isDirectory: true)
         if let label { root.appendPathComponent(label, isDirectory: true) }
@@ -266,7 +275,15 @@ enum NeoOutlineFrames {
             "rest_level": NeoWakeLight.restLevel, "shimmer_level": NeoWakeLight.shimmerLevel,
             "shimmer_reach": NeoWakeLight.shimmerReach, "shimmer_width": NeoWakeLight.shimmerWidth,
             "hairline_pt": NeoWakeOutlineView.hairline,
-            "glow_bands": NeoWakeOutlineView.glowBands.map { ["depth_pt": $0.depth, "alpha": $0.alpha] },
+            "line_level": NeoWakeLight.lineLevel,
+            "near_radius_pt": NeoWakeLight.nearRadius, "near_level": NeoWakeLight.nearLevel,
+            "near_rows": NeoWakeLight.nearProfile,
+            "haze_radius_pt": NeoWakeLight.hazeRadius, "haze_lift_pt": NeoWakeLight.hazeLift, "haze_level": NeoWakeLight.hazeLevel,
+            "inner_radius_pt": NeoWakeLight.innerRadius, "inner_level": NeoWakeLight.innerLevel,
+            "inner_rows": NeoWakeLight.innerProfile,
+            "glow_reach_pt": NeoWakeLight.glowReach,
+            "max_white": NeoWakeLight.maxWhite,
+            "palette": paletteHex(glow),
             "reduce_motion": reducedMotion,
             "enter_clock_s": enterClock, "exit_clock_s": exitClock,
             "tint": tintName,
@@ -274,6 +291,15 @@ enum NeoOutlineFrames {
         ], to: root.appendingPathComponent("manifest.json"))
         print(String(format: "%d frames in %.1f s → %@", written, Date().timeIntervalSince(started), root.path))
         return 0
+    }
+
+    /// The light's palette for a glow setting (`nil`: the token's blue), as hex.
+    static func paletteHex(_ glow: UInt32?) -> [String: String] {
+        let palette = NeoWakeLight.palette(tint: NeoWakeLight.Colour(NeoWakeOutlineView.components(glow)))
+        let hex = { (c: NeoWakeLight.Colour) in String(format: "#%06X", c.hex) }
+        return ["tint": hex(NeoWakeLight.Colour(NeoWakeOutlineView.components(glow))), "line": hex(palette.line),
+                "line_hottest": hex(palette.line.whitened(NeoWakeLight.maxWhite)),
+                "near": hex(palette.near), "haze": hex(palette.haze), "inner": hex(palette.inner)]
     }
 
     // MARK: - Rendering
@@ -444,10 +470,12 @@ enum NeoOutlineFrames {
         let bottom = drawnBottom(shape: shape, geometry: geometry, region: region, island: island, glow: glow)
         // Crops in points within the region: the corner with 32 pt of bottom
         // edge and 22 pt of side; the flare end with the top 20 pt; the
-        // middle of the bottom edge.
-        let cornerCrop = CGRect(x: island.minX - 14, y: bottom - 26, width: 48, height: 32)
-        let flareCrop = CGRect(x: island.minX - flare - 18, y: 0, width: 48, height: 20)
-        let centreCrop = CGRect(x: island.midX - 24, y: bottom - 26, width: 48, height: 32)
+        // middle of the bottom edge — each with the glow's whole reach
+        // outside the black.
+        let reach = CGFloat(NeoWakeLight.glowReach).rounded(.up)
+        let cornerCrop = CGRect(x: island.minX - reach - 2, y: bottom - 22, width: 32 + reach + 2, height: 22 + reach + 2)
+        let flareCrop = CGRect(x: island.minX - flare - reach - 4, y: 0, width: 48 + reach - 14, height: 20)
+        let centreCrop = CGRect(x: island.midX - 24, y: bottom - 22, width: 48, height: 22 + reach + 2)
         let moments: [(String, CGRect, [(String, Frame)])] = [
             ("bottom-left corner", cornerCrop, [
                 ("settled, the highlight far", far),

@@ -164,14 +164,7 @@ struct NeoWakeOutlineView: View {
     @State private var settled = false
 
     /// The line: one device pixel on the Retina screens a notch comes on.
-    static let hairline: CGFloat = 0.5
-    /// The glow inside the line, as nested bands from the edge inward, each
-    /// with its own opacity. They overlap, so the glow is brightest at the
-    /// edge and falls away into the black — about 75, 48, 27, 12 and 5 % of
-    /// the line's light in successive device pixels (the last ones two and
-    /// three pixels deep) — and every band shares the silhouette as its
-    /// outer edge, so no seam can show between them.
-    static let glowBands: [(depth: CGFloat, alpha: Double)] = [(0.5, 0.519), (1, 0.288), (2, 0.171), (3.5, 0.074), (5, 0.05)]
+    static var hairline: CGFloat { CGFloat(NeoWakeLight.hairline) }
 
     static var loopDuration: TimeInterval { NeoWakeLight.loopDuration }
     static var enterDuration: TimeInterval { NeoWakeLight.enterDuration }
@@ -218,7 +211,7 @@ struct NeoWakeOutlineView: View {
             TimelineView(.animation(minimumInterval: settled ? Self.settledInterval : nil,
                                     paused: now != nil || paused || !running)) { context in
                 NeoWakeRim(size: proxy.size, shape: shape, notch: notch,
-                           phase: phase(at: now ?? context.date), tint: Self.components(tint))
+                           phase: phase(at: now ?? context.date), tint: Self.components(tint), offscreen: now != nil)
             }
         }
         .opacity(visible ? 1 : 0)
@@ -320,25 +313,51 @@ struct NeoWakeOutlineView: View {
 /// whose gradients followed that frame would slide along the rim mid-morph
 /// and break at the bottom centre where its two halves meet.)
 ///
-/// ONE CANVAS: everything is drawn in a single `Canvas` in absolute points
-/// — the gradients' ends included — from just above and left of the
-/// island's top-left (`margin`, so the line's ends at the flares are
-/// inside it). One recorded drawing per frame, rendered on the GPU with the
-/// rest of the island. Measured against the alternatives
-/// (`--neo-outline-morph`): gradient-filled shapes are rasterised on the
-/// CPU, layer by layer, at about twice the cost; gradient masks over a
-/// fixed frame rasterise the whole frame. The GPU keeps its render cache
-/// resident while the light animates (about 95 MB of graphics memory) and
-/// gives it back within a couple of seconds of the light going out.
+/// ONE CANVAS, back to front, in absolute points from just above and left
+/// of the island's top-left (`margin`), each part one gradient per half of
+/// the rim (`NeoWakeLight.stops`) in its own colour of the palette:
+///
+/// 1. the HAZE — the atmosphere: each half of the island, grown a few
+///    points, filled with its light in the palette's deep blue, blurred (a
+///    true Gaussian) and clipped to OUTSIDE the island. What is left is the
+///    blur's soft shoulder beyond the silhouette: light bleeding out into
+///    the desktop like the air over a horizon seen from orbit, strongest at
+///    the line and fading smoothly to nothing. The clip is what keeps it
+///    off the black — the island never grows, never darkens. At rest the
+///    blur is a mask made once per island shape (`NeoWakeHaze`) that the
+///    light along the rim is multiplied by — a blur pass every frame cost
+///    a third more than design C's whole light; with the mask the settled
+///    light costs what C's did (`--neo-outline-morph`: about 2.4 M
+///    instructions a frame). While the island springs, every frame is a
+///    new shape, and during the 1.5 s wake the sweep's sharp front needs
+///    the blur to soften it, so then the light is blurred on the GPU
+///    (handing over to the mask as the wake ends: `NeoWakeLight.hazeMasked`).
+/// 2. the NEAR GLOW — a narrow saturated band hugging the line outside,
+///    and 3. the RIM LIGHT just inside the black (kept off the hardware
+///    notch): both a Gaussian falloff laid down one device pixel per row
+///    (`NeoWakeLight.nearProfile`, `.innerProfile`) as nested bands that all
+///    share the silhouette as one edge — at pixel scale, a row per pixel is
+///    the smooth curve itself, with no blur pass to pay for;
+/// 4. the LINE — crisp, one device pixel, its inner edge the silhouette.
 private struct NeoWakeRim: View, Animatable {
     var size: CGSize
     var shape: NotchShape
     var notch: CGRect?
     let phase: NeoWakeLight.Phase
     let tint: (red: Double, green: Double, blue: Double)
+    /// Rendered offscreen (`--neo-outline-frames`): the island never moves,
+    /// so the haze's mask is made at once.
+    var offscreen = false
 
-    /// How far the canvas reaches beyond the island on every side.
-    static let margin: CGFloat = 8
+    @Environment(\.displayScale) private var displayScale
+
+    /// How far the canvas reaches beyond the island on every side: past
+    /// where the haze has faded out (`NeoWakeLight.glowReach`), so the blur
+    /// is never cut by the canvas's edge.
+    static let margin: CGFloat = CGFloat(NeoWakeLight.glowReach).rounded(.up) + 2
+    /// The nested bands' opacities, outside (the near glow) and inside.
+    static let nearAlphas = NeoWakeLight.nestedAlphas(NeoWakeLight.nearProfile)
+    static let innerAlphas = NeoWakeLight.nestedAlphas(NeoWakeLight.innerProfile)
 
     var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, AnimatablePair<NotchShape.AnimatableData, CGFloat>> {
         get {
@@ -352,38 +371,135 @@ private struct NeoWakeRim: View, Animatable {
         }
     }
 
+    /// One half's drawing for this frame.
+    private struct Half {
+        /// The haze's source: the island's half, flare to meeting point,
+        /// grown `hazeLift` to be blurred, or as far as the haze reaches to
+        /// be masked — each only when this frame draws it.
+        let blurSource: Path?
+        let maskSource: Path?
+        /// The near glow's and the rim light's nested bands, from the
+        /// narrowest out (or in).
+        let near: [Path]
+        let inner: [Path]
+        let line: Path
+        let hazeGradient: Gradient
+        let nearGradient: Gradient
+        let innerGradient: Gradient
+        let lineGradient: Gradient
+        let start: CGPoint
+        let end: CGPoint
+    }
+
     var body: some View {
         let m = Self.margin
         let island = CGRect(origin: CGPoint(x: m, y: m), size: size)
         let split = CGFloat(NeoWakeLight.split(size: size, notch: notch))
+        let palette = Self.palette(NeoWakeLight.Colour(tint))
+        let rim = NotchRimGeometry(shape, in: island)
+        let row = NeoWakeOutlineView.hairline
+        let canvas = CGSize(width: max(1, size.width) + m * 2, height: max(1, size.height) + m * 2)
+        // The haze's shape, once the island holds still (see `NeoWakeHaze`)
+        // — but not during the wake's sweep (`NeoWakeLight.hazeMasked`): the
+        // masked haze takes its light from the rim along the gradients' 45°
+        // axes, undiffused, so the sweep's sharp front would cast a hard
+        // dark wedge into the haze under the meeting point; blurred, the
+        // light itself is softened with it, as the haze of a horizon is.
+        let masked = NeoWakeLight.hazeMasked(phase)
+        let mask = masked > 0
+            ? NeoWakeHaze.mask(for: NeoWakeHaze.Key(canvas: canvas, island: island, shape: shape, scale: displayScale),
+                               shape: shape, always: offscreen)
+            : nil
+        // The share drawn from the mask; the rest is blurred.
+        let maskWeight = mask == nil ? 0 : masked
         // Everything this frame needs, computed here from the in-between
         // geometry and captured by the canvas.
-        let halves: [(path: [Path], line: Path, glow: Gradient, lineGradient: Gradient, start: CGPoint, end: CGPoint)] =
-            NeoWakeLight.Half.allCases.map { half in
-                let stops = NeoWakeLight.stops(half: half, size: size, phase: phase, notch: notch)
-                let axis = self.axis(half: half)
-                let bands = NeoWakeOutlineView.glowBands.map {
-                    NotchRimBand(shape: shape, island: island, half: half, split: split, inner: -$0.depth, outer: 0).path(in: .zero)
-                }
-                let line = NotchRimBand(shape: shape, island: island, half: half, split: split,
-                                        inner: 0, outer: NeoWakeOutlineView.hairline).path(in: .zero)
-                // The line leans to white where it is brightest (a hot
-                // core); the glow keeps more of the tint, and keeps off the
-                // notch.
-                return (bands, line, gradient(stops, whiten: 0.35, glow: true), gradient(stops, whiten: 1), axis.start, axis.end)
+        let halves: [Half] = NeoWakeLight.Half.allCases.map { half in
+            let stops = NeoWakeLight.stops(half: half, size: size, phase: phase, notch: notch)
+            let axis = self.axis(half: half)
+            func band(_ inner: CGFloat, _ outer: CGFloat) -> Path {
+                NotchRimBand(shape: shape, island: island, half: half, split: split, inner: inner, outer: outer).path(in: .zero)
             }
+            return Half(
+                // Blurred, the haze's light is the island grown by the lift;
+                // masked, it covers all the haze can reach.
+                blurSource: maskWeight < 1
+                    ? NeoWakeHaze.region(rim, half: half, split: split, grown: CGFloat(NeoWakeLight.hazeLift)) : nil,
+                maskSource: maskWeight > 0
+                    ? NeoWakeHaze.region(rim, half: half, split: split, grown: CGFloat(NeoWakeLight.glowReach + 1)) : nil,
+                near: Self.nearAlphas.indices.map { band(0, row * CGFloat($0 + 2)) },
+                inner: Self.innerAlphas.indices.map { band(-row * CGFloat($0 + 1), 0) },
+                line: band(0, row),
+                // The haze is blurred over points: a third of the samples do.
+                hazeGradient: gradient(Self.thinned(stops, every: 3), colour: palette.haze, level: NeoWakeLight.hazeLevel),
+                nearGradient: gradient(stops, colour: palette.near, level: 1),
+                innerGradient: gradient(stops, colour: palette.inner, level: 1, keepOffNotch: true),
+                lineGradient: gradient(stops, colour: palette.line, level: NeoWakeLight.lineLevel, whiten: true),
+                start: axis.start, end: axis.end
+            )
+        }
+        let silhouette = shape.path(in: island)
         return Canvas(opaque: false, rendersAsynchronously: false) { context, _ in
-            for half in halves {
-                for (index, band) in half.path.enumerated() {
-                    var layer = context
-                    layer.opacity = NeoWakeOutlineView.glowBands[index].alpha
-                    layer.fill(band, with: .linearGradient(half.glow, startPoint: half.start, endPoint: half.end))
+            func shade(_ gradient: Gradient, _ half: Half) -> GraphicsContext.Shading {
+                .linearGradient(gradient, startPoint: half.start, endPoint: half.end)
+            }
+            // The haze, outside the island.
+            var outside = context
+            outside.clip(to: silhouette, options: .inverse)
+            if maskWeight < 1 {
+                // Springing, or waking: the light, blurred on the GPU.
+                var blurred = outside
+                blurred.opacity = 1 - maskWeight
+                blurred.drawLayer { layer in
+                    layer.addFilter(.blur(radius: CGFloat(NeoWakeLight.hazeRadius)))
+                    for half in halves { if let source = half.blurSource { layer.fill(source, with: shade(half.hazeGradient, half)) } }
                 }
-                context.fill(half.line, with: .linearGradient(half.lineGradient, startPoint: half.start, endPoint: half.end))
+            }
+            if let mask, maskWeight > 0 {
+                // At rest: the light along the rim, times the haze's shape
+                // (drawn pixel for pixel, at the size it was made).
+                var masking = outside
+                masking.opacity = maskWeight
+                masking.drawLayer { layer in
+                    for half in halves { if let source = half.maskSource { layer.fill(source, with: shade(half.hazeGradient, half)) } }
+                    layer.blendMode = .destinationIn
+                    layer.draw(Image(decorative: mask, scale: displayScale),
+                               in: CGRect(x: 0, y: 0, width: CGFloat(mask.width) / displayScale, height: CGFloat(mask.height) / displayScale))
+                }
+            }
+            for half in halves {
+                // The near glow over it, and the rim light inside.
+                for (band, alpha) in zip(half.near, Self.nearAlphas) {
+                    var layer = context
+                    layer.opacity = alpha
+                    layer.fill(band, with: shade(half.nearGradient, half))
+                }
+                for (band, alpha) in zip(half.inner, Self.innerAlphas) {
+                    var layer = context
+                    layer.opacity = alpha
+                    layer.fill(band, with: shade(half.innerGradient, half))
+                }
+                // The line, crisp, on top.
+                context.fill(half.line, with: shade(half.lineGradient, half))
             }
         }
-        .frame(width: max(1, size.width) + m * 2, height: max(1, size.height) + m * 2)
+        .frame(width: canvas.width, height: canvas.height)
         .offset(x: -m, y: -m)
+    }
+
+    /// The palette for a tint, kept for the next frame: a tint changes only
+    /// when the user picks another glow colour.
+    private static var lastPalette: (tint: NeoWakeLight.Colour, palette: NeoWakeLight.Palette)?
+    static func palette(_ tint: NeoWakeLight.Colour) -> NeoWakeLight.Palette {
+        if let last = lastPalette, last.tint == tint { return last.palette }
+        let palette = NeoWakeLight.palette(tint: tint)
+        lastPalette = (tint, palette)
+        return palette
+    }
+
+    /// Every `n`th stop, and the last.
+    static func thinned(_ stops: [NeoWakeLight.Stop], every n: Int) -> [NeoWakeLight.Stop] {
+        stops.indices.filter { $0 % n == 0 || $0 == stops.count - 1 }.map { stops[$0] }
     }
 
     /// One half's gradient axis, in the canvas's points: laid diagonally
@@ -397,14 +513,17 @@ private struct NeoWakeRim: View, Animatable {
                 CGPoint(x: m + (half == .leading ? reach : width - reach), y: m + reach))
     }
 
-    /// A half's light as gradient stops in the tint. `glow`: for the glow,
-    /// which keeps off the notch; not for the line.
-    private func gradient(_ stops: [NeoWakeLight.Stop], whiten: Double, glow: Bool = false) -> Gradient {
+    /// A half's light as gradient stops in `colour` at `level` × its
+    /// brightness. `keepOffNotch`: for the rim light inside, which the
+    /// hardware notch would cover. `whiten`: for the line, which pales a
+    /// little at its hottest (`Stop.white`, at most `NeoWakeLight.maxWhite`).
+    private func gradient(_ stops: [NeoWakeLight.Stop], colour: NeoWakeLight.Colour, level: Double,
+                          keepOffNotch: Bool = false, whiten: Bool = false) -> Gradient {
         Gradient(stops: stops.map { stop in
-            let w = stop.white * whiten
+            let c = whiten ? colour.whitened(stop.white) : colour
             return Gradient.Stop(
-                color: Color(.sRGB, red: tint.red + (1 - tint.red) * w, green: tint.green + (1 - tint.green) * w,
-                             blue: tint.blue + (1 - tint.blue) * w, opacity: stop.alpha * (glow ? stop.clear : 1)),
+                color: Color(.sRGB, red: c.red, green: c.green, blue: c.blue,
+                             opacity: min(1, stop.alpha * level * (keepOffNotch ? stop.clear : 1))),
                 location: stop.location
             )
         })

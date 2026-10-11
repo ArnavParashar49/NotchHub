@@ -169,4 +169,47 @@ struct NeoWakeLightTests {
             #expect(NeoWakeLight.stops(half: half, size: expanded.size, phase: settled, notch: expanded.notch).allSatisfy { $0.clear == 1 })
         }
     }
+
+    @Test("the atmosphere: a pale line, a saturated glow and a deeper haze, all from one tint")
+    func palette() {
+        let blue = NeoWakeLight.palette(tint: NeoWakeLight.Colour(DesignTokens.wakeLightRGB))
+        let line = NeoWakeLight.OKLCH(blue.line), near = NeoWakeLight.OKLCH(blue.near), haze = NeoWakeLight.OKLCH(blue.haze)
+        #expect(line.l > near.l && near.l > haze.l, "the line is the brightest, the haze the deepest")
+        #expect(near.c > line.c && haze.c > line.c, "the glow and the haze are more saturated than the line")
+        // Blue, not white: even the line at its hottest keeps blue well above red.
+        let hottest = blue.line.whitened(NeoWakeLight.maxWhite)
+        #expect(hottest.blue - hottest.red > 0.35, "\(String(format: "%06X", hottest.hex))")
+        // Every glow setting keeps its own hue (a violet stays violet).
+        let violet = NeoWakeLight.Colour(hex: 0xB18CFF)
+        let violetHaze = NeoWakeLight.OKLCH(NeoWakeLight.palette(tint: violet).haze)
+        #expect(abs(NeoWakeLight.angle(violetHaze.h, NeoWakeLight.OKLCH(violet).h)) < 8)
+    }
+
+    @Test("nested bands, drawn one over another, give each row its share of the light")
+    func nestedBands() {
+        for profile in [NeoWakeLight.nearProfile, NeoWakeLight.innerProfile] {
+            #expect(!profile.isEmpty)
+            let alphas = NeoWakeLight.nestedAlphas(profile)
+            for row in profile.indices {
+                // Row `row` is covered by bands row…last, composited source-over.
+                let shown = alphas[row...].reduce(0.0) { $0 + $1 * (1 - $0) }
+                #expect(abs(shown - profile[row]) < 1e-9, "row \(row): \(shown) for \(profile[row])")
+            }
+        }
+    }
+
+    @Test("the haze is blurred through the wake's sweep and masked once settled, crossfaded between")
+    func hazeHandover() {
+        #expect(NeoWakeLight.hazeMasked(NeoWakeLight.Phase(clock: 0, wake: 0)) == 0)
+        #expect(NeoWakeLight.hazeMasked(NeoWakeLight.Phase(clock: 0.66, wake: 0.66)) == 0)
+        #expect(NeoWakeLight.hazeMasked(settled) == 1)
+        #expect(NeoWakeLight.hazeMasked(NeoWakeLight.Phase(clock: 0.2, wake: 0.2, reduceMotion: true)) == 1)
+        var last = 0.0
+        for step in 0...60 {
+            let t = NeoWakeLight.enterDuration * Double(step) / 60
+            let m = NeoWakeLight.hazeMasked(NeoWakeLight.Phase(clock: t, wake: t))
+            #expect(m >= last && m - last < 0.2, "a step of \(m - last) at \(t) s")
+            last = m
+        }
+    }
 }
