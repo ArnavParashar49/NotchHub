@@ -231,9 +231,10 @@ public final class SystemMonitor {
         entries.compactMap { $0.listener as? NeoListener }.forEach { $0.setCameraVisible(visible) }
     }
 
-    /// Stops NEO's camera capture when its native notch surface closes.
-    public func neoCameraStop() {
-        entries.compactMap { $0.listener as? NeoListener }.forEach { $0.stopCamera() }
+    /// Stops NEO's camera capture when its native notch surface closes,
+    /// naming the session (`sid`) when it is known.
+    public func neoCameraStop(sid: String? = nil) {
+        entries.compactMap { $0.listener as? NeoListener }.forEach { $0.stopCamera(sid: sid) }
     }
 
     /// Asks the meeting listener to read the call's state again soon.

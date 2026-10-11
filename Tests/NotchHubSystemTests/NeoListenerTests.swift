@@ -111,13 +111,41 @@ struct NeoListenerParsingTests {
     func cards() {
         #expect(NeoListener.facts(in: #"{"type":"browser_open","data":{"sid":"s","job":"j"},"ts":1}"#) == [.card(.browser, open: true)])
         #expect(NeoListener.facts(in: #"{"type":"browser_close","data":{"sid":"s","reason":"done"},"ts":1}"#) == [.card(.browser, open: false)])
-        #expect(NeoListener.facts(in: #"{"type":"camera_open","data":{"sid":"c"},"ts":1}"#) == [.card(.camera, open: true)])
+        // The camera's session first (its "starting", which NEO says next
+        // anyway), then the opening: the island knows which one it shows.
+        #expect(NeoListener.facts(in: #"{"type":"camera_open","data":{"sid":"c","reason":"look"},"ts":1}"#)
+            == [.cameraCard(NeoCameraCardState(sid: "c", status: "starting")), .card(.camera, open: true)])
+        #expect(NeoListener.facts(in: #"{"type":"camera_open","data":{},"ts":1}"#) == [.card(.camera, open: true)])
         #expect(NeoListener.facts(in: #"{"type":"camera_close","data":{"sid":"c","reason":"stopped"},"ts":1}"#) == [.card(.camera, open: false)])
         #expect(NeoListener.facts(in: #"{"type":"song_open","data":{"sid":"m"},"ts":1}"#) == [
             .songCard(NeoSongCardState(sid: "m", status: "listening")),
             .card(.song, open: true),
         ])
         #expect(NeoListener.facts(in: #"{"type":"song_close","data":{"sid":"m"},"ts":1}"#) == [.card(.song, open: false)])
+    }
+
+    @Test("a camera already on when NotchHub connects comes back from the hello: its state, then its opening")
+    func helloCameraLive() {
+        let live = #"{"sid":"cam-9","status":"analysing","labels":["mug"],"boxes":[{"id":1,"x":0.1,"y":0.1,"w":0.2,"h":0.2,"label":"mug","score":0.8}],"popout":false,"reason":"look"}"#
+        let facts = NeoListener.facts(in: #"{"type":"hello","data":{"state":"thinking","recent":[],"camera":{"live":\#(live)}},"ts":1}"#)
+        #expect(facts == [
+            .state(.thinking),
+            .cameraCard(NeoCameraCardState(sid: "cam-9", status: "analysing", labels: ["mug"],
+                                           boxes: [NeoCameraBox(id: 1, x: 0.1, y: 0.1, w: 0.2, h: 0.2, label: "mug", score: 0.8)])),
+            .card(.camera, open: true),
+        ])
+        // Off, or a hello from a core without a camera: nothing to recover.
+        #expect(NeoListener.facts(in: #"{"type":"hello","data":{"state":"idle","recent":[],"camera":{"live":null}},"ts":1}"#) == [.state(.idle)])
+        #expect(NeoListener.facts(in: #"{"type":"hello","data":{"state":"idle","recent":[],"camera":{"live":{"status":"live"}}},"ts":1}"#) == [.state(.idle)])
+    }
+
+    @Test("closing NEO's camera here stops that session by name, so a late stop never ends a newer one")
+    func cameraStopNamesTheSession() throws {
+        let named = NeoListener.cameraStopCommand(sid: "Ab-_09")
+        let object = try #require(try JSONSerialization.jsonObject(with: Data(named.utf8)) as? [String: String])
+        #expect(object == ["cmd": "camera_stop", "sid": "Ab-_09"])
+        #expect(NeoListener.cameraStopCommand(sid: nil) == NeoListener.cameraStopCommand)
+        #expect(NeoListener.cameraStopCommand(sid: "") == NeoListener.cameraStopCommand)
     }
 
     @Test("NEO summoned by hand (the hotkey, the tray) is a fact for the panel")
@@ -269,7 +297,7 @@ struct NeoListenerStubTests {
         return condition()
     }
 
-    @Test("connects with the token, sends only camera_view off, and relays the island's facts", .enabled(if: NeoListenerStubTests.available))
+    @Test("connects with the token, sends camera_view off and song_hello and nothing else, and relays the island's facts", .enabled(if: NeoListenerStubTests.available))
     func connectAndRelay() async throws {
         let stub = try Stub(drop: false)
         defer { stub.stop() }

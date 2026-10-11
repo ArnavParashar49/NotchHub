@@ -129,7 +129,9 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     /// NEO's camera frames are short-lived UI data, held only while the native
     /// camera surface is visible. They are never written to disk.
     let neoCameraStream = NeoCameraStream()
-    var neoCameraState: NeoCameraCardState?
+    /// Which NEO camera session the native panel shows, and the one the user
+    /// let go of (`NeoCameraSurface`). See `+Neo`.
+    var neoCameraSurface = NeoCameraSurface()
     var neoCameraExpanded = false
     var neoCameraMirrored = true
     /// One native island activity carries NEO's song meter/result without

@@ -218,12 +218,23 @@ public final class NeoListener: NSObject, SystemListener {
         }
     }
 
-    /// Stops NEO's camera session when the user closes its native notch card.
-    public func stopCamera() {
+    /// Stops NEO's camera session when the user closes its native notch card
+    /// (or another panel covers it). Naming the session means a stop that
+    /// arrives late never stops a newer one: the core ignores a stop for a
+    /// session that is not its current one.
+    public func stopCamera(sid: String? = nil) {
         queue.async { [self] in
             guard isRunning, isConnected, let task else { return }
-            task.send(.string(Self.cameraStopCommand)) { _ in }
+            task.send(.string(Self.cameraStopCommand(sid: sid))) { _ in }
         }
+    }
+
+    /// `camera_stop`, naming the session when it is known.
+    static func cameraStopCommand(sid: String?) -> String {
+        guard let sid, !sid.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: ["cmd": "camera_stop", "sid": sid], options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else { return cameraStopCommand }
+        return text
     }
 
     private func connect() {
@@ -370,11 +381,14 @@ public final class NeoListener: NSObject, SystemListener {
             if let pending = (payload["confirm"] as? [String: Any]).flatMap(NeoConfirmCard.init(payload:)) {
                 facts.append(.confirm(pending))
             }
+            // A camera NEO already has on (NotchHub connected after it
+            // opened): its state, then its opening — the session first, so
+            // the island knows which one it is before it shows it.
             if let camera = payload["camera"] as? [String: Any],
                let live = camera["live"] as? [String: Any],
                let card = cameraCard(live) {
-                facts.append(.card(.camera, open: true))
                 facts.append(.cameraCard(card))
+                facts.append(.card(.camera, open: true))
             }
             return facts
         case "state":
@@ -392,8 +406,12 @@ public final class NeoListener: NSObject, SystemListener {
         case "browser_open": return [.card(.browser, open: true)]
         case "browser_close": return [.card(.browser, open: false)]
         case "camera_open":
-            var facts: [NeoFact] = [.card(.camera, open: true)]
-            if let card = cameraCard(payload) { facts.append(.cameraCard(card)) }
+            // The new session's first state ("starting", which NEO says next
+            // anyway), then the opening: the island learns which session
+            // opens before it opens it.
+            var facts: [NeoFact] = []
+            if let card = cameraCard(payload, status: "starting") { facts.append(.cameraCard(card)) }
+            facts.append(.card(.camera, open: true))
             return facts
         case "camera_state": return cameraCard(payload).map { [.cameraCard($0)] } ?? []
         case "camera_close": return [.card(.camera, open: false)]
@@ -419,9 +437,11 @@ public final class NeoListener: NSObject, SystemListener {
         }
     }
 
-    private static func cameraCard(_ payload: [String: Any]) -> NeoCameraCardState? {
+    /// A camera card's state; `status` stands in when the payload has none
+    /// (`camera_open` carries only the session and its reason).
+    private static func cameraCard(_ payload: [String: Any], status fallback: String? = nil) -> NeoCameraCardState? {
         guard let sid = payload["sid"] as? String, !sid.isEmpty,
-              let status = payload["status"] as? String else { return nil }
+              let status = payload["status"] as? String ?? fallback else { return nil }
         let labels = (payload["labels"] as? [String] ?? []).prefix(8).map { String($0.prefix(40)) }
         let boxes = ((payload["boxes"] as? [[String: Any]]) ?? []).prefix(20).enumerated().compactMap { index, raw -> NeoCameraBox? in
             guard let x = (raw["x"] as? NSNumber)?.doubleValue,
