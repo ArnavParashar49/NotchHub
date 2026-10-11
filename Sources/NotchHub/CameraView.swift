@@ -171,7 +171,11 @@ struct CameraView: View {
 
 /// The streamed NEO preview updates independently of the island layout. A
 /// frame no longer asks NotchHub to rebuild the whole notch surface.
-private struct NeoCameraStreamPreview: View {
+///
+/// NEO streams the camera's own, unmirrored picture, and its boxes are in
+/// that picture's coordinates. Mirrored (the default) flips the picture and
+/// the boxes together, so a box stays on the thing it found.
+struct NeoCameraStreamPreview: View {
     @ObservedObject var stream: NeoCameraStream
     let mirrored: Bool
 
@@ -185,6 +189,9 @@ private struct NeoCameraStreamPreview: View {
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                         .frame(width: geometry.size.width, height: geometry.size.height)
+                        // Mirrored the way you expect to see yourself — the
+                        // picture only; `detectionBox` flips the boxes to match.
+                        .scaleEffect(x: mirrored ? -1 : 1, y: 1)
                         .clipped()
 
                     ForEach(stream.boxes) { box in
