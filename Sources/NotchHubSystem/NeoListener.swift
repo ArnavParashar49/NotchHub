@@ -486,7 +486,9 @@ public final class NeoListener: NSObject, SystemListener {
             title: (result["title"] as? String).map { String($0.prefix(120)) },
             artist: (result["artist"] as? String).map { String($0.prefix(120)) },
             album: (result["album"] as? String).map { String($0.prefix(120)) },
-            year: result["year"].map { String(describing: $0).prefix(12).description },
+            // NEO sends the year as text, or null when it has none: only text
+            // is a year (a null used to show as "<null>").
+            year: (result["year"] as? String).map { String($0.prefix(12)) },
             cover: imageDataURI(result["cover"] as? String)
         )
     }

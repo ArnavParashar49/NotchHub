@@ -148,6 +148,44 @@ struct NeoListenerParsingTests {
         #expect(NeoListener.cameraStopCommand(sid: "") == NeoListener.cameraStopCommand)
     }
 
+    @Test("a song's state: its result trimmed, a null year is no year, and only a modest image data URI is a cover")
+    func songState() throws {
+        func song(_ result: String) -> NeoSongCardState? {
+            let facts = NeoListener.facts(in: #"{"type":"song_state","data":{"sid":"m1","status":"found","level":1.7,"elapsed_s":-3,"result":\#(result)},"ts":1}"#)
+            guard case let .songCard(state)? = facts.first, facts.count == 1 else { return nil }
+            return state
+        }
+        let found = try #require(song(#"{"title":"Midnight City","artist":"M83","album":"Hurry Up, We're Dreaming","year":"2011"}"#))
+        #expect(found.sid == "m1" && found.status == "found")
+        #expect(found.title == "Midnight City" && found.artist == "M83" && found.album == "Hurry Up, We're Dreaming")
+        #expect(found.year == "2011")
+        // The meter is clamped to 0…1 and the clock never runs backwards.
+        #expect(found.level == 1 && found.elapsed == 0)
+        // NEO sends null when it has no year: no "<null>" on the island.
+        #expect(try #require(song(#"{"title":"t","year":null}"#)).year == nil)
+        #expect(try #require(song(#"{"title":"t"}"#)).year == nil)
+        #expect(try #require(song(#"{"title":"t","year":2011}"#)).year == nil)
+        #expect(try #require(song(#"{"title":"t","year":"\#(String(repeating: "9", count: 40))"}"#)).year?.count == 12)
+        #expect(try #require(song(#"{"title":"\#(String(repeating: "x", count: 400))"}"#)).title?.count == 120)
+
+        // The cover: an image data URI, decoded; anything else, nothing.
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        let uri = "data:image/png;base64,\(png.base64EncodedString())"
+        #expect(try #require(song(#"{"title":"t","cover":"\#(uri)"}"#)).cover == png)
+        for bad in ["https://example.com/cover.png", "data:text/html;base64,\(png.base64EncodedString())",
+                    "data:image/png;base64,not base64!", "data:image/png;base64"] {
+            #expect(try #require(song(#"{"title":"t","cover":"\#(bad)"}"#)).cover == nil, "\(bad)")
+        }
+        // Past 1.5 MB of base64 it is dropped unread.
+        let huge = "data:image/jpeg;base64," + String(repeating: "A", count: 1_500_004)
+        #expect(try #require(song(#"{"title":"t","cover":"\#(huge)"}"#)).cover == nil)
+        let justUnder = "data:image/jpeg;base64," + String(repeating: "A", count: 1_500_000)
+        #expect(try #require(song(#"{"title":"t","cover":"\#(justUnder)"}"#)).cover?.count == 1_125_000)
+        // No session, or no status: no state.
+        #expect(NeoListener.facts(in: #"{"type":"song_state","data":{"status":"found"},"ts":1}"#).isEmpty)
+        #expect(NeoListener.facts(in: #"{"type":"song_state","data":{"sid":"m1"},"ts":1}"#).isEmpty)
+    }
+
     @Test("NEO summoned by hand (the hotkey, the tray) is a fact for the panel")
     func woke() {
         #expect(NeoListener.facts(in: #"{"type":"woke","data":{"source":"ui"},"ts":1}"#) == [.woke])
