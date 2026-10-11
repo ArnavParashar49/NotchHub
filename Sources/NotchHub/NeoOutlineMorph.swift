@@ -14,7 +14,8 @@ import UniformTypeIdentifiers
 /// the hosting view is sampled with `cacheDisplay` every 1/60 s. Each change
 /// goes through the same spring the app would pick (`IslandMotion.between`).
 /// Samples are composed on the grey menu-bar backdrop (or another variant's
-/// with `--outline-backdrop dark|white|grey`) with the physical notch in
+/// with `--outline-backdrop dark|white|grey`; `--outline-haze shaped|mask`
+/// draws the settled haze one way only) with the physical notch in
 /// black (and a red x-ray of the notch in `xray/`), into DIR/LABEL/morph:
 ///
 /// - `NAME/NNN.png` + `frames.json` (t = real seconds since the change) and
@@ -133,6 +134,11 @@ enum NeoOutlineMorph {
         if let index = arguments.firstIndex(of: "--outline-quiet"), index + 1 < arguments.count,
            let seconds = Double(arguments[index + 1]) {
             run.quietSeconds = seconds
+        }
+        // `--outline-haze shaped|mask`: the settled haze drawn one way only
+        // (as `--neo-outline-frames` does), to compare the two live.
+        if let index = arguments.firstIndex(of: "--outline-haze"), index + 1 < arguments.count {
+            NeoWakeHaze.forced = NeoWakeHaze.Way(rawValue: arguments[index + 1])
         }
         if let index = arguments.firstIndex(of: "--outline-backdrop"), index + 1 < arguments.count,
            let variant = NeoOutlineFrames.variants.first(where: { $0.name == arguments[index + 1] }) {

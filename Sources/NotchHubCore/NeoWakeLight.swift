@@ -154,19 +154,96 @@ public enum NeoWakeLight {
     /// the window keeps round the island must be at least this.
     public static var glowReach: Double { hazeLift + hazeRadius * 2.6 }
 
-    /// How the haze is drawn: blurred frame by frame (on the GPU), or from
-    /// a mask made once per island shape, which costs a fraction as much
-    /// but takes its light from the rim undiffused — fine for the settled
-    /// light's soft features, not for the wake's sharp sweep. This is the
-    /// masked share, 0 … 1: none during the wake, all once settled, and
-    /// crossfaded over the wake's last `hazeHandover` seconds (as the bloom
-    /// fades), since the two differ by a few per cent where the light is
-    /// brightest and a switch in one frame would flick.
+    /// How the haze is drawn: from the light itself blurred (on the GPU),
+    /// or from the light along the rim times the haze's SHAPE — the island
+    /// grown and blurred. The second is what the settled light uses: its
+    /// shape is a mask made once per island shape, at a fraction of a blur
+    /// pass's cost, but it takes the light from the rim undiffused — fine
+    /// for the settled light's soft features, not for the wake's sharp
+    /// sweep. This is the shaped share, 0 … 1: none during the wake, all
+    /// once settled, and crossfaded over the wake's last `hazeHandover`
+    /// seconds (as the bloom fades), since the two differ by a few per cent
+    /// where the light is brightest and a switch in one frame would flick.
     public static func hazeMasked(_ phase: Phase) -> Double {
         guard let wake = phase.wake, !phase.reduceMotion else { return 1 }
         return smoothstep(enterDuration - hazeHandover, enterDuration, wake)
     }
     public static let hazeHandover: TimeInterval = 0.3
+
+    /// How long the haze takes to hand over from the shape blurred on the
+    /// GPU to the shape's mask, once the island holds still
+    /// (`HazeSettling`).
+    public static let hazeSettle: TimeInterval = 0.25
+
+    /// The haze's three ways of being drawn, as shares of it that add up
+    /// to 1: `diffused`, the light itself blurred (the wake); `shaped`, the
+    /// light times the haze's shape blurred on the GPU (at rest while the
+    /// island springs, when every frame is a new shape, or while its mask
+    /// is being made); `mask`, the light times the shape's mask.
+    public struct HazeShares: Equatable, Sendable {
+        public var diffused: Double
+        public var shaped: Double
+        public var mask: Double
+
+        public init(diffused: Double, shaped: Double, mask: Double) {
+            self.diffused = diffused
+            self.shaped = shaped
+            self.mask = mask
+        }
+    }
+
+    /// The shares at `phase`, with the mask ready to take `maskShare` of
+    /// the shaped haze (`HazeSettling.maskShare`).
+    public static func hazeShares(phase: Phase, maskShare: Double) -> HazeShares {
+        let shaped = hazeMasked(phase), mask = clamp(maskShare)
+        return HazeShares(diffused: 1 - shaped, shaped: shaped * (1 - mask), mask: shaped * mask)
+    }
+
+    /// One view's account of whether its island holds still, and how far
+    /// its haze has handed over to the island's mask.
+    ///
+    /// The mask is the GPU's blurred shape made once, on the CPU; the two
+    /// agree to about 1 %, but a switch from one to the other in a single
+    /// frame — the frame the island stops after a spring — can still be
+    /// seen, so the mask's share rises over `hazeSettle` instead. Per view,
+    /// not shared: two islands drawn in turn (two screens, or an offscreen
+    /// render beside the live view) would otherwise each see the other's
+    /// as the last island drawn, and neither would ever hold still.
+    public struct HazeSettling<Key: Equatable> {
+        private var seen: (key: Key, time: TimeInterval)?
+        private var isStill = false
+        private var readySince: TimeInterval?
+
+        public init() {}
+
+        /// Notes the island drawn at `time` (the frame's time); whether it
+        /// holds still: the same island as a frame drawn EARLIER — not
+        /// merely drawn twice in one frame, as a spring's frame may be —
+        /// and still so for as long as it stays.
+        public mutating func still(_ key: Key, at time: TimeInterval) -> Bool {
+            guard let seen, seen.key == key else {
+                seen = (key, time)
+                isStill = false
+                readySince = nil
+                return false
+            }
+            if time > seen.time { isStill = true }
+            return isStill
+        }
+
+        /// How much of the shaped haze the mask takes at `time`: none
+        /// until it is `ready` for the still island, then rising from that
+        /// frame to all of it over `hazeSettle` (smoothly at both ends).
+        public mutating func maskShare(ready: Bool, at time: TimeInterval) -> Double {
+            guard ready else {
+                readySince = nil
+                return 0
+            }
+            let since = readySince ?? time
+            readySince = since
+            return smoothstep(0, hazeSettle, time - since)
+        }
+    }
 
     /// The near glow's light in each device-pixel row outside the line
     /// (from the first row past it), at full brightness: a Gaussian of the
@@ -269,6 +346,31 @@ public enum NeoWakeLight {
         return min(width - 0.5, max(0.5, Double(notch.midX)))
     }
 
+    /// `notch` moved sideways — by at most half a device pixel at `scale` —
+    /// so that the halves meet (`split`) on a device-pixel boundary.
+    ///
+    /// The halves are separate fills that abut at the meeting point. Where
+    /// that falls inside a device pixel, each fill's antialiasing covers
+    /// part of it and the two parts, composited one over the other, add to
+    /// less than the light — a one-pixel column 6–10/255 darker, seen on
+    /// the expanded island at 514.08 pt (its notch's middle 257.04 pt in).
+    /// On a pixel boundary each half covers whole pixels and nothing is
+    /// lost. The boundary is the light's own canvas's (the light is drawn
+    /// in the island's coordinates, from a whole number of points outside
+    /// it): its renderers rasterize it there and place it whole pixels at a
+    /// time, as the seam's column showed. (Overlapping the halves instead
+    /// would double the light wherever a fill is translucent.) Under half a
+    /// pixel off the notch's middle is invisible, and the glow's clearance
+    /// from the notch moves with it by as little.
+    public static func pixelAligned(notch: CGRect?, size: CGSize, scale: Double) -> CGRect? {
+        guard let notch, scale > 0 else { return notch }
+        let split = split(size: size, notch: notch)
+        let aligned = (split * scale).rounded() / scale
+        let width = max(1, Double(size.width))
+        let kept = aligned > 0 && aligned < width ? aligned : split
+        return kept == split ? notch : notch.offsetBy(dx: CGFloat(kept - split), dy: 0)
+    }
+
     /// How far a half runs, in points of Manhattan distance: down its side
     /// and along the bottom to the meeting point.
     public static func reach(half: Half, size: CGSize, split: Double) -> Double {
@@ -300,6 +402,36 @@ public enum NeoWakeLight {
             locations += (0...6).map { (height + edge - notchFeather * Double($0) / 6) / reach }
         }
         locations = locations.filter { $0 >= 0 && $0 <= 1 }.sorted()
+        return locations.map { sample(at: $0, half: half, size: size, phase: phase, notch: notch) }
+    }
+
+    /// The light along one half for the HAZE, as gradient stops: the same
+    /// light as `stops`, sampled on one FIXED grid — `sideSamples` down the
+    /// side and `bottomSamples` along the bottom, whatever the phase — plus,
+    /// through the wake, the samples round the sweep's head that keep its
+    /// front sharp (once the sweep has met itself they sit still, at the
+    /// meeting point, until the wake ends).
+    ///
+    /// Not `stops` itself (nor every third of them, as it once was): that
+    /// grid doubles through the wake and halves when it ends, and a soft
+    /// haze drawn from a coarse grid is a polygon of the light — off by up
+    /// to 14/255 at the highlight — so the haze stepped by 6–9/255 the
+    /// moment the wake ended. On this grid, linear between stops as a
+    /// gradient draws it, the haze is within about 3/255 of the light
+    /// everywhere, and when the wake ends only the head's samples go,
+    /// changing it by under 1/255.
+    public static func hazeStops(half: Half, size: CGSize, phase: Phase, notch: CGRect? = nil) -> [Stop] {
+        let height = max(1, Double(size.height))
+        let reach = reach(half: half, size: size, split: split(size: size, notch: notch))
+        let corner = height / reach
+        var locations = (0...sideSamples).map { corner * Double($0) / Double(sideSamples) }
+            + (1...bottomSamples).map { corner + (1 - corner) * Double($0) / Double(bottomSamples) }
+        if let wake = phase.wake, !phase.reduceMotion {
+            let head = headPosition(wake: wake)
+            locations += (-6...6).map { head + Double($0) * headLead * 0.5 }
+            locations = locations.filter { $0 >= 0 && $0 <= 1 }.sorted()
+            locations = locations.enumerated().filter { $0.offset == 0 || $0.element - locations[$0.offset - 1] > 1e-9 }.map(\.element)
+        }
         return locations.map { sample(at: $0, half: half, size: size, phase: phase, notch: notch) }
     }
 

@@ -70,6 +70,11 @@ extension NeoWakeLight {
     public static let maxWhite = 0.15
     public static let restWhite = 0.03
 
+    /// The chroma from which a tint counts as fully coloured (a pastel's):
+    /// below it, the extra saturation the glow and the haze are given fades
+    /// out with the tint's own (`palette(tint:)`).
+    public static let neutralChroma = 0.04
+
     /// The palette for `tint`.
     public static func palette(tint: Colour) -> Palette {
         let t = OKLCH(tint)
@@ -78,9 +83,20 @@ extension NeoWakeLight {
         // cyan line (h ≈ 210°) to a deep blue atmosphere (h ≈ 257°); other
         // hues keep their own all the way.
         let blueness = max(0, 1 - abs(angle(t.h, 245)) / 70)
-        let line = OKLCH(l: min(0.85, max(t.l + 0.15, 0.76)), c: t.c * 0.95, h: t.h - 18 * blueness)
-        let near = OKLCH(l: min(0.76, max(t.l + 0.04, 0.64)), c: t.c * 1.15 + 0.02, h: t.h - 8 * blueness)
-        let haze = OKLCH(l: min(0.62, max(t.l - 0.06, 0.54)), c: t.c * 1.15 + 0.03, h: t.h + 4 * blueness)
+        // How coloured the tint is: 0 for a white or a grey, 1 from a pastel
+        // up. The glow and the haze are made a little richer than the tint
+        // by ADDING chroma — but a neutral tint's hue is noise (atan2 of two
+        // near-zeros: about 90°, yellow, for a pure grey), so added chroma
+        // would turn a white glow khaki. It fades out with the tint's own.
+        let colourful = min(1, t.c / neutralChroma)
+        // The line is the tint lifted, capped at 0.85 so that a coloured
+        // line keeps its colour (sRGB has little chroma left near white).
+        // A neutral tint has no colour to keep: a light one may light a
+        // near-white line rather than a grey one.
+        let lineCap = 0.85 + (1 - colourful) * max(0, min(0.95, t.l) - 0.85)
+        let line = OKLCH(l: min(lineCap, max(t.l + 0.15, 0.76)), c: t.c * 0.95, h: t.h - 18 * blueness)
+        let near = OKLCH(l: min(0.76, max(t.l + 0.04, 0.64)), c: t.c * 1.15 + 0.02 * colourful, h: t.h - 8 * blueness)
+        let haze = OKLCH(l: min(0.62, max(t.l - 0.06, 0.54)), c: t.c * 1.15 + 0.03 * colourful, h: t.h + 4 * blueness)
         let inner = OKLCH(l: min(0.80, max(t.l + 0.08, 0.68)), c: t.c, h: t.h - 14 * blueness)
         return Palette(line: line.srgb, near: near.srgb, haze: haze.srgb, inner: inner.srgb)
     }

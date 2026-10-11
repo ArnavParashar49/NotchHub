@@ -95,6 +95,32 @@ struct NeoWakeLightTests {
         #expect(NeoWakeLight.split(size: CGSize(width: 300, height: 32), notch: nil) == 150)
     }
 
+    @Test("the halves meet on a device-pixel boundary of the light's canvas, so no seam opens where they abut")
+    func pixelAlignedMeeting() {
+        // The expanded island is often a fraction of a point wide (514.08 pt
+        // centred under the notch puts the notch's middle at 257.04): there
+        // the two halves' antialiased ends shared a device pixel and left it
+        // 6-10/255 darker.
+        let cases: [(CGSize, CGRect)] = [
+            (CGSize(width: 514.08, height: 98), CGRect(x: 164.54, y: 0, width: 185, height: 32)),
+            (CGSize(width: 423.3, height: 32), CGRect(x: 119.15, y: 0, width: 185, height: 32)),
+            (CGSize(width: 253, height: 32), CGRect(x: 34, y: 0, width: 185, height: 32)),
+            (CGSize(width: 185, height: 32), CGRect(x: 0, y: 0, width: 185, height: 32)),
+        ]
+        for scale in [1.0, 2.0, 3.0] {
+            for (size, notch) in cases {
+                let aligned = NeoWakeLight.pixelAligned(notch: notch, size: size, scale: scale)!
+                let split = NeoWakeLight.split(size: size, notch: aligned)
+                #expect(abs(split * scale - (split * scale).rounded()) < 1e-9, "\(size) at \(scale)x: meets at \(split)")
+                #expect(abs(aligned.midX - notch.midX) <= 0.5 / scale + 1e-9 && aligned.size == notch.size && aligned.minY == notch.minY)
+            }
+        }
+        // Already on the grid: untouched. No notch: nothing to move.
+        let notch = CGRect(x: 34, y: 0, width: 185, height: 32)
+        #expect(NeoWakeLight.pixelAligned(notch: notch, size: CGSize(width: 253, height: 32), scale: 2) == notch)
+        #expect(NeoWakeLight.pixelAligned(notch: nil, size: CGSize(width: 253, height: 32), scale: 2) == nil)
+    }
+
     @Test("the wake: dark at first, one sweep from the top ends to the meeting, then exactly the settled light")
     func wake() {
         let island = islands[1]
@@ -185,6 +211,57 @@ struct NeoWakeLightTests {
         #expect(abs(NeoWakeLight.angle(violetHaze.h, NeoWakeLight.OKLCH(violet).h)) < 8)
     }
 
+    @Test("the default blue's palette is exactly the one the light was designed in")
+    func defaultPalettePinned() {
+        let blue = NeoWakeLight.palette(tint: NeoWakeLight.Colour(DesignTokens.wakeLightRGB))
+        #expect([blue.line.hex, blue.near.hex, blue.haze.hex, blue.inner.hex] == [0x7DC5FF, 0x3E9EFF, 0x2670FF, 0x4EAEFF],
+                "\([blue.line, blue.near, blue.haze, blue.inner].map { String(format: "%06X", $0.hex) })")
+        // Every coloured swatch keeps its palette too (only neutral tints changed).
+        let swatches: [(UInt32, [UInt32])] = [
+            (0x3FD8C2, [0x62E8D0, 0x00CDB5, 0x009C8A, 0x42D9C1]),
+            (0x6FA8FF, [0xA1D4FF, 0x73B5FF, 0x407FF7, 0x84C4FF]),
+            (0xB18CFF, [0xCEC5FF, 0xB79EFF, 0x995CF6, 0xC1B0FF]),
+            (0xFF7FA8, [0xFFB6CA, 0xFF83AA, 0xE5367D, 0xFF9BB8]),
+            (0xFFC24D, [0xFDC357, 0xE4A400, 0xAE7C00, 0xEEB239]),
+        ]
+        for (tint, expected) in swatches {
+            let p = NeoWakeLight.palette(tint: NeoWakeLight.Colour(hex: tint))
+            #expect([p.line.hex, p.near.hex, p.haze.hex, p.inner.hex] == expected, "\(String(format: "%06X", tint))")
+        }
+    }
+
+    @Test("a neutral glow (white, a cool white, a grey) stays neutral: no yellow cast, and a white lights a near-white line")
+    func neutralTints() {
+        // A pure white or grey has no hue: its OKLCH hue is noise (about 90°,
+        // yellow), so any chroma the palette adds at that hue turns it khaki.
+        for tint: UInt32 in [0xFFFFFF, 0x808080] {
+            let p = NeoWakeLight.palette(tint: NeoWakeLight.Colour(hex: tint))
+            for (name, c) in [("line", p.line), ("near", p.near), ("haze", p.haze), ("inner", p.inner)] {
+                let spread = max(c.red, c.green, c.blue) - min(c.red, c.green, c.blue)
+                #expect(spread <= 1.0 / 255, "\(String(format: "%06X", tint)) \(name) is tinted: \(String(format: "%06X", c.hex))")
+            }
+        }
+        // The cool white keeps its own faint blue — never warmer than neutral,
+        // and only a little more saturated than itself.
+        let coolTint = NeoWakeLight.Colour(hex: 0xF2F6FF)
+        let cool = NeoWakeLight.palette(tint: coolTint)
+        for (name, c) in [("line", cool.line), ("near", cool.near), ("haze", cool.haze), ("inner", cool.inner)] {
+            #expect(c.blue >= c.red && c.blue >= c.green, "F2F6FF \(name) leans warm: \(String(format: "%06X", c.hex))")
+            let oklch = NeoWakeLight.OKLCH(c)
+            #expect(oklch.c < 0.035, "F2F6FF \(name) too saturated: \(oklch.c)")
+            #expect(abs(NeoWakeLight.angle(oklch.h, NeoWakeLight.OKLCH(coolTint).h)) < 25, "F2F6FF \(name) hue \(oklch.h)")
+        }
+        // A white glow lights a near-white line, still the brightest part;
+        // a mid grey's line is as bright as a coloured tint's.
+        let white = NeoWakeLight.palette(tint: NeoWakeLight.Colour(hex: 0xFFFFFF))
+        let line = NeoWakeLight.OKLCH(white.line), near = NeoWakeLight.OKLCH(white.near), haze = NeoWakeLight.OKLCH(white.haze)
+        #expect(line.l >= 0.94, "white's line only \(line.l)")
+        #expect(line.l > near.l && near.l > haze.l)
+        #expect(NeoWakeLight.OKLCH(cool.line).l > 0.9)
+        let grey = NeoWakeLight.OKLCH(NeoWakeLight.palette(tint: NeoWakeLight.Colour(hex: 0x808080)).line)
+        #expect(abs(grey.l - 0.76) < 0.005)
+    }
+
     @Test("nested bands, drawn one over another, give each row its share of the light")
     func nestedBands() {
         for profile in [NeoWakeLight.nearProfile, NeoWakeLight.innerProfile] {
@@ -194,6 +271,55 @@ struct NeoWakeLightTests {
                 // Row `row` is covered by bands row…last, composited source-over.
                 let shown = alphas[row...].reduce(0.0) { $0 + $1 * (1 - $0) }
                 #expect(abs(shown - profile[row]) < 1e-9, "row \(row): \(shown) for \(profile[row])")
+            }
+        }
+    }
+
+    /// A gradient's value at `location`: linear between its stops, as drawn.
+    func drawn(_ stops: [NeoWakeLight.Stop], at location: Double) -> Double {
+        guard let next = stops.firstIndex(where: { $0.location >= location }) else { return stops.last!.alpha }
+        guard next > 0 else { return stops[0].alpha }
+        let a = stops[next - 1], b = stops[next]
+        return a.alpha + (b.alpha - a.alpha) * (location - a.location) / max(1e-12, b.location - a.location)
+    }
+
+    @Test("the haze's light is sampled on one fixed grid, fine enough to be the light, so it never steps when the wake ends")
+    func hazeGrid() {
+        for island in islands {
+            for half in NeoWakeLight.Half.allCases {
+                let rest = NeoWakeLight.hazeStops(half: half, size: island.size, phase: settled, notch: island.notch)
+                let grid = rest.map(\.location)
+                // The same places through the wake as after it (and, through
+                // the wake, a few more round the sweep's head).
+                for wake in stride(from: 0.0, to: NeoWakeLight.enterDuration, by: 0.03) {
+                    let waking = NeoWakeLight.hazeStops(half: half, size: island.size, phase: .init(clock: wake, wake: wake), notch: island.notch)
+                    let locations = Set(waking.map(\.location))
+                    #expect(grid.allSatisfy(locations.contains), "\(island.name) \(half) at \(wake) s: grid moved")
+                }
+                for clock in [0.0, 3.1, 7.7] {
+                    #expect(NeoWakeLight.hazeStops(half: half, size: island.size, phase: .init(clock: clock), notch: island.notch).map(\.location) == grid)
+                }
+                // No step when the wake ends and the head's stops go: under
+                // an 8-bit step, drawn.
+                let end = NeoWakeLight.enterDuration - 1e-6
+                let before = NeoWakeLight.hazeStops(half: half, size: island.size, phase: .init(clock: end, wake: end), notch: island.notch)
+                let after = NeoWakeLight.hazeStops(half: half, size: island.size, phase: .init(clock: end), notch: island.notch)
+                for x in stride(from: 0.0, through: 1, by: 0.002) {
+                    let step = abs(drawn(before, at: x) - drawn(after, at: x)) * NeoWakeLight.hazeLevel
+                    #expect(step < 1.0 / 255, "\(island.name) \(half): a step of \(step * 255)/255 at \(x)")
+                }
+                // Drawn as a gradient, the resting haze is within an 8-bit step
+                // or so of the light itself everywhere along the rim.
+                for clock in stride(from: 0.0, to: NeoWakeLight.loopDuration, by: 0.4) {
+                    let phase = NeoWakeLight.Phase(clock: clock)
+                    let stops = NeoWakeLight.hazeStops(half: half, size: island.size, phase: phase, notch: island.notch)
+                    var worst = 0.0
+                    for x in stride(from: 0.0, through: 1, by: 0.001) {
+                        let truth = NeoWakeLight.sample(at: x, half: half, size: island.size, phase: phase, notch: island.notch).alpha
+                        worst = max(worst, abs(drawn(stops, at: x) - truth) * NeoWakeLight.hazeLevel)
+                    }
+                    #expect(worst < 4.0 / 255, "\(island.name) \(half) at \(clock) s: off the light by \(worst * 255)/255")
+                }
             }
         }
     }
@@ -210,6 +336,77 @@ struct NeoWakeLightTests {
             let m = NeoWakeLight.hazeMasked(NeoWakeLight.Phase(clock: t, wake: t))
             #expect(m >= last && m - last < 0.2, "a step of \(m - last) at \(t) s")
             last = m
+        }
+    }
+
+    @Test("the haze hands over to its mask only once the island holds still, and then gently, over a quarter second")
+    func hazeSettling() {
+        var view = NeoWakeLight.HazeSettling<Int>()
+        // Springing: a new island every frame, at 120 Hz — never still, and
+        // the mask takes none of the haze.
+        var t = 0.0
+        for shape in 0..<60 {
+            let still = view.still(shape, at: t)
+            let share = view.maskShare(ready: false, at: t)
+            #expect(!still && share == 0)
+            t += 1.0 / 120
+        }
+        // The same island drawn twice in one frame is not yet still; the
+        // same island a frame later is, and stays so while it holds.
+        let twiceInOneFrame = view.still(59, at: t - 1.0 / 120)
+        let aFrameLater = view.still(59, at: t)
+        let drawnAgain = view.still(59, at: t)
+        #expect(!twiceInOneFrame && aFrameLater && drawnAgain)
+        // The mask's share: none until the mask is ready, then rising from
+        // the first frame it is — smoothly, a 60 Hz frame at a time.
+        let notReady = view.maskShare(ready: false, at: t)
+        #expect(notReady == 0)
+        let ready = t + 0.004
+        var last = 0.0
+        for step in 0...20 {
+            let now = ready + Double(step) / 60
+            let still = view.still(59, at: now)
+            let share = view.maskShare(ready: true, at: now)
+            #expect(still && share >= last && share - last < 0.13, "a jump of \(share - last) at \(now - ready) s")
+            if step == 0 { #expect(share == 0) }
+            last = share
+        }
+        let half = view.maskShare(ready: true, at: ready + NeoWakeLight.hazeSettle / 2)
+        let whole = view.maskShare(ready: true, at: ready + NeoWakeLight.hazeSettle)
+        #expect(abs(half - 0.5) < 1e-9 && whole == 1)
+        // A move hands the haze back at once, and the next rest ramps again.
+        let moved = ready + 1
+        let moving = view.still(60, at: moved)
+        let movingShare = view.maskShare(ready: false, at: moved)
+        let resting = view.still(60, at: moved + 0.01)
+        let restingShare = view.maskShare(ready: true, at: moved + 0.01)
+        let rested = view.maskShare(ready: true, at: moved + 0.01 + NeoWakeLight.hazeSettle)
+        #expect(!moving && movingShare == 0 && resting && restingShare == 0 && rested == 1)
+
+        // Per view: two islands drawn in turn (two screens, or a render
+        // beside the live one) each hold still. One shared "last island"
+        // saw them as moving every frame.
+        var a = NeoWakeLight.HazeSettling<Int>(), b = NeoWakeLight.HazeSettling<Int>()
+        for frame in 0..<4 {
+            let now = Double(frame) / 60
+            let aStill = a.still(1, at: now), bStill = b.still(2, at: now)
+            #expect(aStill == (frame > 0) && bStill == (frame > 0), "frame \(frame)")
+        }
+    }
+
+    @Test("the haze's three ways of being drawn always add up to the whole of it")
+    func hazeShares() {
+        // Waking: diffused (the light itself blurred); at rest: the mask,
+        // once ready; at rest while the island springs or its mask is still
+        // being made: the same shape blurred on the GPU.
+        #expect(NeoWakeLight.hazeShares(phase: .init(clock: 0.2, wake: 0.2), maskShare: 0) == .init(diffused: 1, shaped: 0, mask: 0))
+        #expect(NeoWakeLight.hazeShares(phase: settled, maskShare: 1) == .init(diffused: 0, shaped: 0, mask: 1))
+        #expect(NeoWakeLight.hazeShares(phase: settled, maskShare: 0) == .init(diffused: 0, shaped: 1, mask: 0))
+        for wake in stride(from: 0.0, through: NeoWakeLight.enterDuration, by: 0.05) {
+            for share in [0.0, 0.3, 1.0] {
+                let s = NeoWakeLight.hazeShares(phase: .init(clock: wake, wake: wake), maskShare: share)
+                #expect(abs(s.diffused + s.shaped + s.mask - 1) < 1e-12 && min(s.diffused, s.shaped, s.mask) >= 0)
+            }
         }
     }
 }
