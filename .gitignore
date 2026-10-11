@@ -12,3 +12,6 @@ dist/
 
 # Claude Code (per-user settings)
 .claude/settings.local.json
+
+# Wake-light render frames (scripts/outline_gif.py, --neo-outline-frames): large, regenerated on demand
+shots/neo-outline/
