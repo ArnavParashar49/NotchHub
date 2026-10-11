@@ -95,6 +95,32 @@ struct NeoWakeLightTests {
         #expect(NeoWakeLight.split(size: CGSize(width: 300, height: 32), notch: nil) == 150)
     }
 
+    @Test("the halves meet on a device-pixel boundary of the light's canvas, so no seam opens where they abut")
+    func pixelAlignedMeeting() {
+        // The expanded island is often a fraction of a point wide (514.08 pt
+        // centred under the notch puts the notch's middle at 257.04): there
+        // the two halves' antialiased ends shared a device pixel and left it
+        // 6-10/255 darker.
+        let cases: [(CGSize, CGRect)] = [
+            (CGSize(width: 514.08, height: 98), CGRect(x: 164.54, y: 0, width: 185, height: 32)),
+            (CGSize(width: 423.3, height: 32), CGRect(x: 119.15, y: 0, width: 185, height: 32)),
+            (CGSize(width: 253, height: 32), CGRect(x: 34, y: 0, width: 185, height: 32)),
+            (CGSize(width: 185, height: 32), CGRect(x: 0, y: 0, width: 185, height: 32)),
+        ]
+        for scale in [1.0, 2.0, 3.0] {
+            for (size, notch) in cases {
+                let aligned = NeoWakeLight.pixelAligned(notch: notch, size: size, scale: scale)!
+                let split = NeoWakeLight.split(size: size, notch: aligned)
+                #expect(abs(split * scale - (split * scale).rounded()) < 1e-9, "\(size) at \(scale)x: meets at \(split)")
+                #expect(abs(aligned.midX - notch.midX) <= 0.5 / scale + 1e-9 && aligned.size == notch.size && aligned.minY == notch.minY)
+            }
+        }
+        // Already on the grid: untouched. No notch: nothing to move.
+        let notch = CGRect(x: 34, y: 0, width: 185, height: 32)
+        #expect(NeoWakeLight.pixelAligned(notch: notch, size: CGSize(width: 253, height: 32), scale: 2) == notch)
+        #expect(NeoWakeLight.pixelAligned(notch: nil, size: CGSize(width: 253, height: 32), scale: 2) == nil)
+    }
+
     @Test("the wake: dark at first, one sweep from the top ends to the meeting, then exactly the settled light")
     func wake() {
         let island = islands[1]

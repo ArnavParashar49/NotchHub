@@ -269,6 +269,31 @@ public enum NeoWakeLight {
         return min(width - 0.5, max(0.5, Double(notch.midX)))
     }
 
+    /// `notch` moved sideways — by at most half a device pixel at `scale` —
+    /// so that the halves meet (`split`) on a device-pixel boundary.
+    ///
+    /// The halves are separate fills that abut at the meeting point. Where
+    /// that falls inside a device pixel, each fill's antialiasing covers
+    /// part of it and the two parts, composited one over the other, add to
+    /// less than the light — a one-pixel column 6–10/255 darker, seen on
+    /// the expanded island at 514.08 pt (its notch's middle 257.04 pt in).
+    /// On a pixel boundary each half covers whole pixels and nothing is
+    /// lost. The boundary is the light's own canvas's (the light is drawn
+    /// in the island's coordinates, from a whole number of points outside
+    /// it): its renderers rasterize it there and place it whole pixels at a
+    /// time, as the seam's column showed. (Overlapping the halves instead
+    /// would double the light wherever a fill is translucent.) Under half a
+    /// pixel off the notch's middle is invisible, and the glow's clearance
+    /// from the notch moves with it by as little.
+    public static func pixelAligned(notch: CGRect?, size: CGSize, scale: Double) -> CGRect? {
+        guard let notch, scale > 0 else { return notch }
+        let split = split(size: size, notch: notch)
+        let aligned = (split * scale).rounded() / scale
+        let width = max(1, Double(size.width))
+        let kept = aligned > 0 && aligned < width ? aligned : split
+        return kept == split ? notch : notch.offsetBy(dx: CGFloat(kept - split), dy: 0)
+    }
+
     /// How far a half runs, in points of Manhattan distance: down its side
     /// and along the bottom to the meeting point.
     public static func reach(half: Half, size: CGSize, split: Double) -> Double {

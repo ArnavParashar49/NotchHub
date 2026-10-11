@@ -394,6 +394,9 @@ private struct NeoWakeRim: View, Animatable {
     var body: some View {
         let m = Self.margin
         let island = CGRect(origin: CGPoint(x: m, y: m), size: size)
+        // The notch nudged (under half a device pixel) so that the halves
+        // meet on a pixel boundary: no seam where they abut.
+        let notch = NeoWakeLight.pixelAligned(notch: notch, size: size, scale: Double(displayScale))
         let split = CGFloat(NeoWakeLight.split(size: size, notch: notch))
         let palette = Self.palette(NeoWakeLight.Colour(tint))
         let rim = NotchRimGeometry(shape, in: island)
@@ -416,7 +419,7 @@ private struct NeoWakeRim: View, Animatable {
         // geometry and captured by the canvas.
         let halves: [Half] = NeoWakeLight.Half.allCases.map { half in
             let stops = NeoWakeLight.stops(half: half, size: size, phase: phase, notch: notch)
-            let axis = self.axis(half: half)
+            let axis = self.axis(half: half, split: split)
             func band(_ inner: CGFloat, _ outer: CGFloat) -> Path {
                 NotchRimBand(shape: shape, island: island, half: half, split: split, inner: inner, outer: outer).path(in: .zero)
             }
@@ -503,9 +506,9 @@ private struct NeoWakeRim: View, Animatable {
     /// across its half of the island from the top end (`D` = 0) to the
     /// meeting point (`D` = 1) — the 45° axis whose projection is the
     /// Manhattan distance from the top end.
-    private func axis(half: NeoWakeLight.Half) -> (start: CGPoint, end: CGPoint) {
+    private func axis(half: NeoWakeLight.Half, split: CGFloat) -> (start: CGPoint, end: CGPoint) {
         let width = max(1, size.width), m = Self.margin
-        let reach = CGFloat(NeoWakeLight.reach(half: half, size: size, split: NeoWakeLight.split(size: size, notch: notch))) / 2
+        let reach = CGFloat(NeoWakeLight.reach(half: half, size: size, split: Double(split))) / 2
         return (CGPoint(x: m + (half == .leading ? 0 : width), y: m),
                 CGPoint(x: m + (half == .leading ? reach : width - reach), y: m + reach))
     }
