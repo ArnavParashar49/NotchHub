@@ -154,19 +154,96 @@ public enum NeoWakeLight {
     /// the window keeps round the island must be at least this.
     public static var glowReach: Double { hazeLift + hazeRadius * 2.6 }
 
-    /// How the haze is drawn: blurred frame by frame (on the GPU), or from
-    /// a mask made once per island shape, which costs a fraction as much
-    /// but takes its light from the rim undiffused — fine for the settled
-    /// light's soft features, not for the wake's sharp sweep. This is the
-    /// masked share, 0 … 1: none during the wake, all once settled, and
-    /// crossfaded over the wake's last `hazeHandover` seconds (as the bloom
-    /// fades), since the two differ by a few per cent where the light is
-    /// brightest and a switch in one frame would flick.
+    /// How the haze is drawn: from the light itself blurred (on the GPU),
+    /// or from the light along the rim times the haze's SHAPE — the island
+    /// grown and blurred. The second is what the settled light uses: its
+    /// shape is a mask made once per island shape, at a fraction of a blur
+    /// pass's cost, but it takes the light from the rim undiffused — fine
+    /// for the settled light's soft features, not for the wake's sharp
+    /// sweep. This is the shaped share, 0 … 1: none during the wake, all
+    /// once settled, and crossfaded over the wake's last `hazeHandover`
+    /// seconds (as the bloom fades), since the two differ by a few per cent
+    /// where the light is brightest and a switch in one frame would flick.
     public static func hazeMasked(_ phase: Phase) -> Double {
         guard let wake = phase.wake, !phase.reduceMotion else { return 1 }
         return smoothstep(enterDuration - hazeHandover, enterDuration, wake)
     }
     public static let hazeHandover: TimeInterval = 0.3
+
+    /// How long the haze takes to hand over from the shape blurred on the
+    /// GPU to the shape's mask, once the island holds still
+    /// (`HazeSettling`).
+    public static let hazeSettle: TimeInterval = 0.25
+
+    /// The haze's three ways of being drawn, as shares of it that add up
+    /// to 1: `diffused`, the light itself blurred (the wake); `shaped`, the
+    /// light times the haze's shape blurred on the GPU (at rest while the
+    /// island springs, when every frame is a new shape, or while its mask
+    /// is being made); `mask`, the light times the shape's mask.
+    public struct HazeShares: Equatable, Sendable {
+        public var diffused: Double
+        public var shaped: Double
+        public var mask: Double
+
+        public init(diffused: Double, shaped: Double, mask: Double) {
+            self.diffused = diffused
+            self.shaped = shaped
+            self.mask = mask
+        }
+    }
+
+    /// The shares at `phase`, with the mask ready to take `maskShare` of
+    /// the shaped haze (`HazeSettling.maskShare`).
+    public static func hazeShares(phase: Phase, maskShare: Double) -> HazeShares {
+        let shaped = hazeMasked(phase), mask = clamp(maskShare)
+        return HazeShares(diffused: 1 - shaped, shaped: shaped * (1 - mask), mask: shaped * mask)
+    }
+
+    /// One view's account of whether its island holds still, and how far
+    /// its haze has handed over to the island's mask.
+    ///
+    /// The mask is the GPU's blurred shape made once, on the CPU; the two
+    /// agree to about 1 %, but a switch from one to the other in a single
+    /// frame — the frame the island stops after a spring — can still be
+    /// seen, so the mask's share rises over `hazeSettle` instead. Per view,
+    /// not shared: two islands drawn in turn (two screens, or an offscreen
+    /// render beside the live view) would otherwise each see the other's
+    /// as the last island drawn, and neither would ever hold still.
+    public struct HazeSettling<Key: Equatable> {
+        private var seen: (key: Key, time: TimeInterval)?
+        private var isStill = false
+        private var readySince: TimeInterval?
+
+        public init() {}
+
+        /// Notes the island drawn at `time` (the frame's time); whether it
+        /// holds still: the same island as a frame drawn EARLIER — not
+        /// merely drawn twice in one frame, as a spring's frame may be —
+        /// and still so for as long as it stays.
+        public mutating func still(_ key: Key, at time: TimeInterval) -> Bool {
+            guard let seen, seen.key == key else {
+                seen = (key, time)
+                isStill = false
+                readySince = nil
+                return false
+            }
+            if time > seen.time { isStill = true }
+            return isStill
+        }
+
+        /// How much of the shaped haze the mask takes at `time`: none
+        /// until it is `ready` for the still island, then rising from that
+        /// frame to all of it over `hazeSettle` (smoothly at both ends).
+        public mutating func maskShare(ready: Bool, at time: TimeInterval) -> Double {
+            guard ready else {
+                readySince = nil
+                return 0
+            }
+            let since = readySince ?? time
+            readySince = since
+            return smoothstep(0, hazeSettle, time - since)
+        }
+    }
 
     /// The near glow's light in each device-pixel row outside the line
     /// (from the first row past it), at full brightness: a Gaussian of the

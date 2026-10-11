@@ -4,20 +4,24 @@ import NotchHubCore
 import SwiftUI
 
 /// The shape of the wake light's haze round one island, as a mask: how much
-/// of the haze each device pixel of the light's canvas shows, 0 … 1 — the
-/// island grown `NeoWakeLight.hazeLift` and blurred by a true Gaussian
+/// of the haze each pixel of the light's canvas shows, 0 … 1 — the island
+/// grown `NeoWakeLight.hazeLift` and blurred by a true Gaussian
 /// (`hazeRadius`); the light clips the island itself out, as a vector, in
-/// either case. It is the same blur the springing path draws on the GPU
-/// (`NeoWakeRim`), made once on the CPU (vImage) and kept, so that the
-/// settled light — which changes every frame but whose island does not —
-/// needs no blur pass a frame: it fills its light along the rim and
-/// multiplies it by this. (The difference from blurring the light itself:
-/// the light's colour along the rim is not smeared sideways by 5 pt — at
-/// the highlight's breadth, a tenth of the island, invisible.)
+/// either case. The light at rest fills its colour along the rim and
+/// multiplies it by this, so it needs no blur pass a frame. While the
+/// island springs every frame is a new island, so the light blurs the same
+/// shape on the GPU instead (`blurRadius` makes that the same Gaussian), and
+/// once the island holds still it hands over to the mask gently
+/// (`NeoWakeLight.HazeSettling`, kept per view by a `Tracker`).
 ///
-/// While the island springs between shapes every frame is a new island, so
-/// the light blurs on the GPU instead (`mask(for:)` returns `nil` until the
-/// island has held still for a frame); offscreen renders always use the mask.
+/// MADE OFF THE MAIN THREAD, AT HALF RESOLUTION: the mask is asked for the
+/// first frame the island holds still, and made on a background task —
+/// the light keeps the GPU's blur until it is ready (a few milliseconds),
+/// rather than holding up that frame for it. It is made at half the
+/// display's resolution (`maskResolution`): under a blur of 10 device
+/// pixels its pixels are invisible, and it costs a quarter as much to make,
+/// keep and draw. Offscreen renders, whose island never moves, make it at
+/// once (`maskNow`).
 @MainActor
 enum NeoWakeHaze {
 
@@ -36,32 +40,101 @@ enum NeoWakeHaze {
         }
     }
 
+    /// The mask's pixels per device pixel.
+    static let maskResolution: CGFloat = 0.5
+
+    /// `--neo-outline-frames … --outline-haze shaped|mask`: the settled
+    /// haze drawn only from the GPU's blurred shape, or only from the mask,
+    /// so that the two can be compared. `nil` (always, live): as the light
+    /// decides.
+    enum Way: String { case shaped, mask }
+    static var forced: Way?
+
     /// The masks made, newest last: one per shape the island rests in.
     private static var cache: [(key: Key, image: CGImage)] = []
     private static let capacity = 6
-    /// The island the last frame was drawn round.
-    private static var previous: Key?
+    /// The masks being made, so each is made once.
+    private static var pending: [Key] = []
 
-    /// For the light drawn round `key`: the mask, made now if the island
-    /// has held still since the last frame (or `always`, offscreen), or
-    /// `nil` while it is moving.
-    static func mask(for key: Key, shape: NotchShape, always: Bool) -> CGImage? {
-        defer { previous = key }
-        if let index = cache.firstIndex(where: { $0.key == key }) {
-            let entry = cache.remove(at: index)
-            cache.append(entry)
-            return entry.image
+    /// The radius to ask SwiftUI's blur for so that it is the mask's
+    /// Gaussian — standard deviation `hazeRadius` — and the GPU's haze and
+    /// the mask's can be swapped without the haze changing. SwiftUI's blur
+    /// is a Gaussian, but not of standard deviation `radius` exactly, nor
+    /// the same in every renderer: fitted to a blurred hard edge at 2×, its
+    /// standard deviation is 0.99 × radius drawn live (on screen, and as
+    /// `cacheDisplay` samples it) and 0.934 × radius in an `ImageRenderer`
+    /// (the offscreen frames). Asked for 5, the offscreen haze was 7 %
+    /// narrower than the mask's.
+    static func blurRadius(offscreen: Bool) -> CGFloat {
+        CGFloat(NeoWakeLight.hazeRadius / (offscreen ? 0.934 : 0.99))
+    }
+
+    /// One view's haze: whether its island holds still, and how far it has
+    /// handed over to the mask. Kept by the view (in `@State`), so two
+    /// islands drawn in turn never take each other for a move.
+    final class Tracker {
+        private var settling = NeoWakeLight.HazeSettling<Key>()
+
+        /// The mask for the island drawn at `time` (the frame's time) and
+        /// its share of the settled haze — or `nil` while the island moves
+        /// or its mask is being made (and asks for it the first frame the
+        /// island holds still).
+        @MainActor
+        func mask(for key: Key, shape: NotchShape, at time: TimeInterval) -> (image: CGImage, share: Double)? {
+            guard settling.still(key, at: time) else {
+                _ = settling.maskShare(ready: false, at: time)
+                return nil
+            }
+            guard let image = NeoWakeHaze.cached(key) else {
+                NeoWakeHaze.request(key, shape: shape)
+                _ = settling.maskShare(ready: false, at: time)
+                return nil
+            }
+            return (image, settling.maskShare(ready: true, at: time))
         }
-        guard always || previous == key, let image = make(key, shape: shape) else { return nil }
-        cache.append((key, image))
-        if cache.count > capacity { cache.removeFirst(cache.count - capacity) }
+    }
+
+    /// The mask for `key` if it has been made (and keeps it the newest).
+    static func cached(_ key: Key) -> CGImage? {
+        guard let index = cache.firstIndex(where: { $0.key == key }) else { return nil }
+        let entry = cache.remove(at: index)
+        cache.append(entry)
+        return entry.image
+    }
+
+    /// Offscreen: the mask for `key`, made now if need be.
+    static func maskNow(for key: Key, shape: NotchShape) -> CGImage? {
+        if let image = cached(key) { return image }
+        guard let image = make(source(key, shape: shape), canvas: key.canvas, scale: key.scale * maskResolution) else { return nil }
+        keep(image, for: key)
         return image
     }
 
-    /// Draws the island grown by the lift and blurs it.
-    static func make(_ key: Key, shape: NotchShape) -> CGImage? {
-        let scale = key.scale
-        let width = Int((key.canvas.width * scale).rounded(.up)), height = Int((key.canvas.height * scale).rounded(.up))
+    /// Asks for the mask for `key`, made on a background task.
+    static func request(_ key: Key, shape: NotchShape) {
+        guard !pending.contains(key) else { return }
+        pending.append(key)
+        let path = source(key, shape: shape)
+        let canvas = key.canvas, scale = key.scale * maskResolution
+        Task.detached(priority: .userInitiated) {
+            let image = make(path, canvas: canvas, scale: scale)
+            await MainActor.run {
+                pending.removeAll { $0 == key }
+                if let image { keep(image, for: key) }
+            }
+        }
+    }
+
+    private static func keep(_ image: CGImage, for key: Key) {
+        cache.removeAll { $0.key == key }
+        cache.append((key, image))
+        if cache.count > capacity { cache.removeFirst(cache.count - capacity) }
+    }
+
+    /// Draws `source` (in the canvas's points, top-left origin) at `scale`
+    /// pixels a point and blurs it.
+    nonisolated static func make(_ source: CGPath, canvas: CGSize, scale: CGFloat) -> CGImage? {
+        let width = Int((canvas.width * scale).rounded(.up)), height = Int((canvas.height * scale).rounded(.up))
         // Drawn and blurred as coverage alone, one byte a pixel…
         guard width > 0, height > 0,
               let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
@@ -72,7 +145,7 @@ enum NeoWakeHaze {
         context.translateBy(x: 0, y: CGFloat(height))
         context.scaleBy(x: scale, y: -scale)
         context.setFillColor(gray: 0, alpha: 1)
-        context.addPath(source(key, shape: shape).cgPath)
+        context.addPath(source)
         context.fillPath()
 
         // The blur: a separable Gaussian, out to 3.5 standard deviations.
@@ -106,14 +179,25 @@ enum NeoWakeHaze {
         return rgba.makeImage()
     }
 
-    /// The haze's source: the island grown by the lift, both halves.
-    static func source(_ key: Key, shape: NotchShape) -> Path {
-        let rim = NotchRimGeometry(shape, in: key.island)
-        let split = key.island.width / 2
+    /// The haze's shape before the blur, for the mask.
+    static func source(_ key: Key, shape: NotchShape) -> CGPath {
+        coverage(NotchRimGeometry(shape, in: key.island), grown: CGFloat(NeoWakeLight.hazeLift)).cgPath
+    }
+
+    /// The whole island grown `grown` points, up to just above the screen's
+    /// top edge: ONE contour — down the leading half, round the bottom, up
+    /// the trailing half and back across the top — so no edge runs through
+    /// it to leave a line of lower coverage where two pieces would abut.
+    static func coverage(_ rim: NotchRimGeometry, grown: CGFloat) -> Path {
+        let leading = rim.half(.leading, offset: grown)
+        let trailing = rim.half(.trailing, offset: grown)
         var path = Path()
-        for half in NeoWakeLight.Half.allCases {
-            path.addPath(region(rim, half: half, split: split, grown: CGFloat(NeoWakeLight.hazeLift)))
-        }
+        NotchRimGeometry.add(leading, to: &path, moving: true)
+        NotchRimGeometry.add(trailing.reversed().map(\.reversed), to: &path, moving: false)
+        let top = rim.rect.minY - 1
+        path.addLine(to: CGPoint(x: trailing.first?.start.x ?? rim.rect.maxX, y: top))
+        path.addLine(to: CGPoint(x: leading.first?.start.x ?? rim.rect.minX, y: top))
+        path.closeSubpath()
         return path
     }
 

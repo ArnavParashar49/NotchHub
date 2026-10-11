@@ -119,8 +119,10 @@ struct NeoListeningGlowView: View {
 /// springs between shapes the light is drawn round exactly the black that
 /// is on screen.
 ///
-/// CHEAP: one `Canvas` — a dozen filled paths, four gradients — a frame;
-/// no mask, no blur, no offscreen group. The timeline runs at the
+/// CHEAP: one `Canvas` — a dozen filled paths, four gradients and, at
+/// rest, a mask made once per island shape (`NeoWakeHaze`) — a frame; a
+/// blur pass only while the island springs or the light wakes. The
+/// timeline runs at the
 /// display's own rate (120 Hz on ProMotion) through the wake and the exit,
 /// eases to 60 Hz once the light has settled (`settledInterval` says why),
 /// and is paused whenever nothing moves: while NEO is not listening, once
@@ -162,6 +164,8 @@ struct NeoWakeOutlineView: View {
     /// Whether the wake is over and the light has settled into its slow
     /// drift — when it no longer needs the display's full rate.
     @State private var settled = false
+    /// This view's haze: whether its island holds still (`NeoWakeHaze`).
+    @State private var haze = NeoWakeHaze.Tracker()
 
     /// The line: one device pixel on the Retina screens a notch comes on.
     static var hairline: CGFloat { CGFloat(NeoWakeLight.hairline) }
@@ -210,8 +214,10 @@ struct NeoWakeOutlineView: View {
         GeometryReader { proxy in
             TimelineView(.animation(minimumInterval: settled ? Self.settledInterval : nil,
                                     paused: now != nil || paused || !running)) { context in
+                let date = now ?? context.date
                 NeoWakeRim(size: proxy.size, shape: shape, notch: notch,
-                           phase: phase(at: now ?? context.date), tint: Self.components(tint), offscreen: now != nil)
+                           phase: phase(at: date), tint: Self.components(tint),
+                           time: date.timeIntervalSinceReferenceDate, haze: now == nil ? haze : nil, offscreen: now != nil)
             }
         }
         .opacity(visible ? 1 : 0)
@@ -324,14 +330,16 @@ struct NeoWakeOutlineView: View {
 ///    the desktop like the air over a horizon seen from orbit, strongest at
 ///    the line and fading smoothly to nothing. The clip is what keeps it
 ///    off the black — the island never grows, never darkens. At rest the
-///    blur is a mask made once per island shape (`NeoWakeHaze`) that the
-///    light along the rim is multiplied by — a blur pass every frame cost
-///    a third more than design C's whole light; with the mask the settled
-///    light costs what C's did (`--neo-outline-morph`: about 2.4 M
-///    instructions a frame). While the island springs, every frame is a
-///    new shape, and during the 1.5 s wake the sweep's sharp front needs
-///    the blur to soften it, so then the light is blurred on the GPU
-///    (handing over to the mask as the wake ends: `NeoWakeLight.hazeMasked`).
+///    light along the rim is multiplied by the haze's SHAPE, the island
+///    grown and blurred: a mask made once per island shape (`NeoWakeHaze`)
+///    — a blur pass every frame cost a third more than design C's whole
+///    light; with the mask the settled light costs what C's did
+///    (`--neo-outline-morph`: about 2.1 M instructions a frame, release).
+///    While the island springs every frame is a new shape, so the same
+///    shape is blurred on the GPU instead, into the same Gaussian, and the
+///    mask takes over gently once the island holds still. During the 1.5 s
+///    wake the sweep's sharp front needs the light itself blurred to soften
+///    it (handing over as the wake ends: `NeoWakeLight.hazeShares`).
 /// 2. the NEAR GLOW — a narrow saturated band hugging the line outside,
 ///    and 3. the RIM LIGHT just inside the black (kept off the hardware
 ///    notch): both a Gaussian falloff laid down one device pixel per row
@@ -345,8 +353,14 @@ private struct NeoWakeRim: View, Animatable {
     var notch: CGRect?
     let phase: NeoWakeLight.Phase
     let tint: (red: Double, green: Double, blue: Double)
-    /// Rendered offscreen (`--neo-outline-frames`): the island never moves,
-    /// so the haze's mask is made at once.
+    /// The frame's time (seconds, any epoch): how long the island has held
+    /// still, for the haze's handover to its mask.
+    var time: TimeInterval = 0
+    /// The view's haze (live): whether its island holds still. `nil`
+    /// offscreen, where it never moves and the mask is made at once.
+    var haze: NeoWakeHaze.Tracker?
+    /// Rendered offscreen (`--neo-outline-frames`): an `ImageRenderer`,
+    /// whose blur is narrower for the same radius (`NeoWakeHaze.blurRadius`).
     var offscreen = false
 
     @Environment(\.displayScale) private var displayScale
@@ -402,19 +416,32 @@ private struct NeoWakeRim: View, Animatable {
         let rim = NotchRimGeometry(shape, in: island)
         let row = NeoWakeOutlineView.hairline
         let canvas = CGSize(width: max(1, size.width) + m * 2, height: max(1, size.height) + m * 2)
-        // The haze's shape, once the island holds still (see `NeoWakeHaze`)
-        // — but not during the wake's sweep (`NeoWakeLight.hazeMasked`): the
-        // masked haze takes its light from the rim along the gradients' 45°
-        // axes, undiffused, so the sweep's sharp front would cast a hard
-        // dark wedge into the haze under the meeting point; blurred, the
-        // light itself is softened with it, as the haze of a horizon is.
+        // The haze, three ways (`NeoWakeLight.hazeShares`). Waking, the
+        // light itself is blurred: the haze's other two ways take the light
+        // from the rim along the gradients' 45° axes, undiffused, so the
+        // sweep's sharp front would cast a hard dark wedge into the haze
+        // under the meeting point; blurred, the light is softened with it,
+        // as the haze of a horizon is. At rest, the light times the haze's
+        // shape: its mask once the island holds still (`NeoWakeHaze`), the
+        // same shape blurred on the GPU while it springs.
+        let key = NeoWakeHaze.Key(canvas: canvas, island: island, shape: shape, scale: displayScale)
         let masked = NeoWakeLight.hazeMasked(phase)
-        let mask = masked > 0
-            ? NeoWakeHaze.mask(for: NeoWakeHaze.Key(canvas: canvas, island: island, shape: shape, scale: displayScale),
-                               shape: shape, always: offscreen)
-            : nil
-        // The share drawn from the mask; the rest is blurred.
-        let maskWeight = mask == nil ? 0 : masked
+        var mask: (image: CGImage, share: Double)?
+        if masked > 0 {
+            if let haze {
+                mask = haze.mask(for: key, shape: shape, at: time)
+            } else if let image = NeoWakeHaze.maskNow(for: key, shape: shape) {
+                // Offscreen the island never moves: the mask, at once.
+                mask = (image, 1)
+            }
+        }
+        var shares = NeoWakeLight.hazeShares(phase: phase, maskShare: mask?.share ?? 0)
+        if let forced = NeoWakeHaze.forced, masked == 1 {
+            // `--outline-haze`: the settled haze drawn one way only.
+            shares = forced == .shaped || mask == nil ? .init(diffused: 0, shaped: 1, mask: 0) : .init(diffused: 0, shaped: 0, mask: 1)
+        }
+        let blurRadius = NeoWakeHaze.blurRadius(offscreen: offscreen)
+        let coverage = shares.shaped > 0 ? NeoWakeHaze.coverage(rim, grown: CGFloat(NeoWakeLight.hazeLift)) : nil
         // Everything this frame needs, computed here from the in-between
         // geometry and captured by the canvas.
         let halves: [Half] = NeoWakeLight.Half.allCases.map { half in
@@ -424,11 +451,11 @@ private struct NeoWakeRim: View, Animatable {
                 NotchRimBand(shape: shape, island: island, half: half, split: split, inner: inner, outer: outer).path(in: .zero)
             }
             return Half(
-                // Blurred, the haze's light is the island grown by the lift;
-                // masked, it covers all the haze can reach.
-                blurSource: maskWeight < 1
+                // Diffused, the haze's light is the island grown by the lift,
+                // blurred; shaped, it covers all the haze can reach.
+                blurSource: shares.diffused > 0
                     ? NeoWakeHaze.region(rim, half: half, split: split, grown: CGFloat(NeoWakeLight.hazeLift)) : nil,
-                maskSource: maskWeight > 0
+                maskSource: shares.shaped > 0 || shares.mask > 0
                     ? NeoWakeHaze.region(rim, half: half, split: split, grown: CGFloat(NeoWakeLight.glowReach + 1)) : nil,
                 near: Self.nearAlphas.indices.map { band(0, row * CGFloat($0 + 2)) },
                 inner: Self.innerAlphas.indices.map { band(-row * CGFloat($0 + 1), 0) },
@@ -448,28 +475,49 @@ private struct NeoWakeRim: View, Animatable {
             func shade(_ gradient: Gradient, _ half: Half) -> GraphicsContext.Shading {
                 .linearGradient(gradient, startPoint: half.start, endPoint: half.end)
             }
-            // The haze, outside the island.
+            // The haze, outside the island: each of its ways in its share,
+            // the later ones ADDED to the first (plus-lighter), so that a
+            // crossfade between two that agree draws exactly the same haze
+            // all through. (Composited one over the other at partial
+            // opacities, the haze dipped by 12 % halfway through the wake's
+            // handover.)
             var outside = context
             outside.clip(to: silhouette, options: .inverse)
-            if maskWeight < 1 {
-                // Springing, or waking: the light, blurred on the GPU.
-                var blurred = outside
-                blurred.opacity = 1 - maskWeight
-                blurred.drawLayer { layer in
-                    layer.addFilter(.blur(radius: CGFloat(NeoWakeLight.hazeRadius)))
-                    for half in halves { if let source = half.blurSource { layer.fill(source, with: shade(half.hazeGradient, half)) } }
-                }
+            var first = true
+            func composite(_ share: Double, _ draw: (inout GraphicsContext) -> Void) {
+                guard share > 0 else { return }
+                var layer = outside
+                layer.opacity = share
+                if !first { layer.blendMode = .plusLighter }
+                first = false
+                layer.drawLayer { draw(&$0) }
             }
-            if let mask, maskWeight > 0 {
-                // At rest: the light along the rim, times the haze's shape
-                // (drawn pixel for pixel, at the size it was made).
-                var masking = outside
-                masking.opacity = maskWeight
-                masking.drawLayer { layer in
+            // Waking: the light itself, blurred.
+            composite(shares.diffused) { layer in
+                layer.addFilter(.blur(radius: blurRadius))
+                for half in halves { if let source = half.blurSource { layer.fill(source, with: shade(half.hazeGradient, half)) } }
+            }
+            // At rest, springing: the light along the rim times the haze's
+            // shape, blurred on the GPU into the mask's own Gaussian.
+            if let coverage {
+                composite(shares.shaped) { layer in
                     for half in halves { if let source = half.maskSource { layer.fill(source, with: shade(half.hazeGradient, half)) } }
                     layer.blendMode = .destinationIn
-                    layer.draw(Image(decorative: mask, scale: displayScale),
-                               in: CGRect(x: 0, y: 0, width: CGFloat(mask.width) / displayScale, height: CGFloat(mask.height) / displayScale))
+                    layer.drawLayer { shape in
+                        shape.addFilter(.blur(radius: blurRadius))
+                        shape.fill(coverage, with: .color(.white))
+                    }
+                }
+            }
+            // At rest, still: the light along the rim times the mask (made
+            // at half resolution, smoothly scaled up).
+            if let mask {
+                composite(shares.mask) { layer in
+                    for half in halves { if let source = half.maskSource { layer.fill(source, with: shade(half.hazeGradient, half)) } }
+                    layer.blendMode = .destinationIn
+                    let pixels = displayScale * NeoWakeHaze.maskResolution
+                    layer.draw(Image(decorative: mask.image, scale: pixels).interpolation(.high),
+                               in: CGRect(x: 0, y: 0, width: CGFloat(mask.image.width) / pixels, height: CGFloat(mask.image.height) / pixels))
                 }
             }
             for half in halves {

@@ -338,4 +338,75 @@ struct NeoWakeLightTests {
             last = m
         }
     }
+
+    @Test("the haze hands over to its mask only once the island holds still, and then gently, over a quarter second")
+    func hazeSettling() {
+        var view = NeoWakeLight.HazeSettling<Int>()
+        // Springing: a new island every frame, at 120 Hz — never still, and
+        // the mask takes none of the haze.
+        var t = 0.0
+        for shape in 0..<60 {
+            let still = view.still(shape, at: t)
+            let share = view.maskShare(ready: false, at: t)
+            #expect(!still && share == 0)
+            t += 1.0 / 120
+        }
+        // The same island drawn twice in one frame is not yet still; the
+        // same island a frame later is, and stays so while it holds.
+        let twiceInOneFrame = view.still(59, at: t - 1.0 / 120)
+        let aFrameLater = view.still(59, at: t)
+        let drawnAgain = view.still(59, at: t)
+        #expect(!twiceInOneFrame && aFrameLater && drawnAgain)
+        // The mask's share: none until the mask is ready, then rising from
+        // the first frame it is — smoothly, a 60 Hz frame at a time.
+        let notReady = view.maskShare(ready: false, at: t)
+        #expect(notReady == 0)
+        let ready = t + 0.004
+        var last = 0.0
+        for step in 0...20 {
+            let now = ready + Double(step) / 60
+            let still = view.still(59, at: now)
+            let share = view.maskShare(ready: true, at: now)
+            #expect(still && share >= last && share - last < 0.13, "a jump of \(share - last) at \(now - ready) s")
+            if step == 0 { #expect(share == 0) }
+            last = share
+        }
+        let half = view.maskShare(ready: true, at: ready + NeoWakeLight.hazeSettle / 2)
+        let whole = view.maskShare(ready: true, at: ready + NeoWakeLight.hazeSettle)
+        #expect(abs(half - 0.5) < 1e-9 && whole == 1)
+        // A move hands the haze back at once, and the next rest ramps again.
+        let moved = ready + 1
+        let moving = view.still(60, at: moved)
+        let movingShare = view.maskShare(ready: false, at: moved)
+        let resting = view.still(60, at: moved + 0.01)
+        let restingShare = view.maskShare(ready: true, at: moved + 0.01)
+        let rested = view.maskShare(ready: true, at: moved + 0.01 + NeoWakeLight.hazeSettle)
+        #expect(!moving && movingShare == 0 && resting && restingShare == 0 && rested == 1)
+
+        // Per view: two islands drawn in turn (two screens, or a render
+        // beside the live one) each hold still. One shared "last island"
+        // saw them as moving every frame.
+        var a = NeoWakeLight.HazeSettling<Int>(), b = NeoWakeLight.HazeSettling<Int>()
+        for frame in 0..<4 {
+            let now = Double(frame) / 60
+            let aStill = a.still(1, at: now), bStill = b.still(2, at: now)
+            #expect(aStill == (frame > 0) && bStill == (frame > 0), "frame \(frame)")
+        }
+    }
+
+    @Test("the haze's three ways of being drawn always add up to the whole of it")
+    func hazeShares() {
+        // Waking: diffused (the light itself blurred); at rest: the mask,
+        // once ready; at rest while the island springs or its mask is still
+        // being made: the same shape blurred on the GPU.
+        #expect(NeoWakeLight.hazeShares(phase: .init(clock: 0.2, wake: 0.2), maskShare: 0) == .init(diffused: 1, shaped: 0, mask: 0))
+        #expect(NeoWakeLight.hazeShares(phase: settled, maskShare: 1) == .init(diffused: 0, shaped: 0, mask: 1))
+        #expect(NeoWakeLight.hazeShares(phase: settled, maskShare: 0) == .init(diffused: 0, shaped: 1, mask: 0))
+        for wake in stride(from: 0.0, through: NeoWakeLight.enterDuration, by: 0.05) {
+            for share in [0.0, 0.3, 1.0] {
+                let s = NeoWakeLight.hazeShares(phase: .init(clock: wake, wake: wake), maskShare: share)
+                #expect(abs(s.diffused + s.shaped + s.mask - 1) < 1e-12 && min(s.diffused, s.shaped, s.mask) >= 0)
+            }
+        }
+    }
 }

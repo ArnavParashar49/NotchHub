@@ -39,7 +39,10 @@ import UniformTypeIdentifiers
 /// tints the outline as a pet glow setting would (default: no glow set, the
 /// "Blue" setting); `--outline-motion reduced` renders it as Reduce Motion
 /// shows it; `--outline-fps 120` samples the entrance, exit and episode
-/// more finely (30 by default) — for slow motion that is not stepped.
+/// more finely (30 by default) — for slow motion that is not stepped;
+/// `--outline-haze shaped` or `mask` draws the settled haze only from the
+/// GPU's blurred shape (as while the island springs) or only from its mask
+/// (as at rest), to compare the two.
 @MainActor
 enum NeoOutlineFrames {
 
@@ -195,6 +198,7 @@ enum NeoOutlineFrames {
         let onlyVariants = options["--outline-variants"].map { Set($0.split(separator: ",").map(String.init)) }
         let glow = options["--outline-tint"].flatMap { UInt32($0.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) }
         reducedMotion = options["--outline-motion"] == "reduced"
+        NeoWakeHaze.forced = options["--outline-haze"].flatMap(NeoWakeHaze.Way.init(rawValue:))
         if let rate = options["--outline-fps"].flatMap(Double.init), rate >= 1 { fps = rate }
 
         var root = URL(fileURLWithPath: directory, isDirectory: true)
