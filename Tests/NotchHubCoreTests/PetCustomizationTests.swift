@@ -69,7 +69,7 @@ struct PetCustomizationTests {
         #expect(settings.look == .silver && settings.hat == .witch)
         let defaults = PetSettings()
         #expect(settings.usesCustomFur == false && settings.customFur == defaults.customFur)
-        #expect(settings.glow == .teal && settings.glowColor == nil)
+        #expect(settings.glow == .blue && settings.glowColor == nil)
         #expect(settings.accessory == .none && settings.accessory.accessory == nil)
         #expect(settings.size == .normal && settings.home == .right && settings.energy == .normal)
         #expect(settings.sleepsAtNight == false && settings.night == nil)
@@ -91,7 +91,7 @@ struct PetCustomizationTests {
         let defaults = PetSettings()
         #expect(settings.showPet == false)
         #expect(settings.look == .fox && settings.hat == .seasonal)
-        #expect(settings.glow == .teal && settings.accessory == .none)
+        #expect(settings.glow == .blue && settings.accessory == .none)
         #expect(settings.size == .normal && settings.home == .right && settings.energy == .normal)
         #expect(settings.usesCustomFur == false && settings.customFur == defaults.customFur)
         #expect(settings.sleepsAtNight == false)
@@ -212,10 +212,10 @@ struct PetCustomizationTests {
         #expect(PetColor.hsl(0.4, 0.7, 0) == 0x000000 && PetColor.hsl(0.4, 0.7, 1) == 0xFFFFFF)
     }
 
-    @Test("the listening glow: teal is the design token's, the presets are bright, and “match fur” follows the fur")
+    @Test("the listening glow: blue is the design token's, the presets are bright, and “match fur” follows the fur")
     func glowColours() {
-        #expect(PetGlowColor.teal.rgb(palette: .fox) == nil)
-        for glow in PetGlowColor.allCases where glow != .teal {
+        #expect(PetGlowColor.blue.rgb(palette: .fox) == nil)
+        for glow in PetGlowColor.allCases where glow != .blue {
             for look in PetLook.allCases {
                 let rgb = glow.rgb(palette: .look(look))
                 #expect(rgb != nil)

@@ -177,8 +177,15 @@ public struct PetPalette: Equatable, Sendable {
 
 /// The tint for NEO's wake outline, kept under its old settings name for saved preferences.
 public enum PetGlowColor: String, CaseIterable, Codable, Sendable {
-    /// The design system's cyan-teal (`DesignTokens.listeningGlow`).
-    case teal
+    /// The design system's cool blue (`DesignTokens.wakeLight`): the default.
+    ///
+    /// Stored as "teal": the default used to be titled Teal while the
+    /// outline drew a blue, so settings saved then (the default is saved
+    /// like any other value) keep the blue they were showing.
+    case blue = "teal"
+    /// A true teal, green of the blues. A new stored name, since "teal"
+    /// already means the default.
+    case teal = "trueTeal"
     case sky
     case violet
     case rose
@@ -189,6 +196,7 @@ public enum PetGlowColor: String, CaseIterable, Codable, Sendable {
 
     public var title: String {
         switch self {
+        case .blue: return "Blue"
         case .teal: return "Teal"
         case .sky: return "Sky"
         case .violet: return "Violet"
@@ -200,10 +208,11 @@ public enum PetGlowColor: String, CaseIterable, Codable, Sendable {
     }
 
     /// The glow's colour with a fox drawn in `palette`; `nil` is the design
-    /// token's teal, untouched.
+    /// token's blue (`DesignTokens.wakeLight`), untouched.
     public func rgb(palette: PetPalette) -> UInt32? {
         switch self {
-        case .teal: return nil
+        case .blue: return nil
+        case .teal: return 0x3FD8C2
         case .sky: return 0x6FA8FF
         case .violet: return 0xB18CFF
         case .rose: return 0xFF7FA8

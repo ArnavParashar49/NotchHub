@@ -15,15 +15,16 @@ import UniformTypeIdentifiers
 /// physical notch a translucent red instead of black, to show whatever is
 /// drawn underneath it) — it writes, into DIR/LABEL (or DIR without a label):
 ///
-/// - `SHAPE/VARIANT/loop/` — one full loop of the beams, `loopFrames` frames;
-/// - `SHAPE/VARIANT/enter/`, `exit/` — the light appearing and leaving,
-///   `fadeFrames` frames at 30 fps, through the live fade;
+/// - `SHAPE/VARIANT/loop/` — one full loop of the resting light, `loopFrames` frames;
+/// - `SHAPE/VARIANT/enter/`, `exit/` — the wake and the exit at 30 fps,
+///   through the live view's own progress curves (`NeoWakeLight.activation`);
 /// - `SHAPE/VARIANT/episode/` (grey and white) — a whole listen in real time
 ///   at 30 fps: enter, one loop, exit — for `scripts/outline_gif.py`;
 /// - `SHAPE-VARIANT-sheet.png` — the loop, entrance and exit tiled, each
 ///   frame labelled with its t;
-/// - `SHAPE-VARIANT-zoom.png` — the bottom-left corner and the top-left
-///   flare end at three moments, device pixels enlarged 4× (nearest);
+/// - `SHAPE-VARIANT-zoom.png` — the bottom-left corner, the top-left flare
+///   end and the bottom centre at three moments each, device pixels enlarged
+///   4× (nearest);
 /// - `manifest.json`, and a `frames.json` in every frame folder.
 ///
 /// Frames are 2× (device pixels on a Retina display), cropped to the island
@@ -35,7 +36,8 @@ import UniformTypeIdentifiers
 /// Options after LABEL: `--outline-shapes idle,wings` and
 /// `--outline-variants grey,xray` render a subset; `--outline-tint RRGGBB`
 /// tints the outline as a pet glow setting would (default: no glow set, the
-/// "Teal" setting).
+/// "Blue" setting); `--outline-motion reduced` renders it as Reduce Motion
+/// shows it.
 @MainActor
 enum NeoOutlineFrames {
 
@@ -68,13 +70,25 @@ enum NeoOutlineFrames {
     static let scale: CGFloat = 2
     static let margin: CGFloat = 40
     static let loopFrames = 48
-    static let fadeFrames = 18
     static let fps: Double = 30
-    /// The outline's clock when listening starts (its loop phase, ×loop): the
-    /// live view starts wherever the wall clock happens to be.
+    /// The light's clock when listening starts: live, it counts from the
+    /// wake, so an entrance always starts at 0.
     static let enterClock: TimeInterval = 0
-    /// The outline's clock when listening ends in the `exit` sequence.
-    static let exitClock: TimeInterval = 1.2
+    /// The light's clock when listening ends in the `exit` sequence (it keeps
+    /// running through the fade, as live).
+    static let exitClock: TimeInterval = 6
+    /// Renders as Reduce Motion shows the light (`--outline-motion reduced`).
+    static var reducedMotion = false
+
+    /// How long the entrance and the exit run, as the live view times them.
+    static var enterDuration: TimeInterval { reducedMotion ? NeoWakeLight.reduceMotionFade : NeoWakeLight.enterDuration }
+    static var exitDuration: TimeInterval { reducedMotion ? NeoWakeLight.reduceMotionFade : NeoWakeLight.exitDuration }
+    /// Frames to cover each, at `fps`, with one to spare at the end.
+    static var enterFrames: Int { Int((enterDuration * fps).rounded(.up)) + 2 }
+    static var exitFrames: Int { Int((exitDuration * fps).rounded(.up)) + 3 }
+    static func progress(_ seconds: TimeInterval, appearing: Bool) -> Double {
+        NeoWakeLight.activation(seconds: seconds, appearing: appearing, reduceMotion: reducedMotion)
+    }
     static let zoom: CGFloat = 4
 
     static var shapes: [Shape] {
@@ -116,37 +130,35 @@ enum NeoOutlineFrames {
     }
 
     static var enter: [Frame] {
-        (0..<fadeFrames).map { i in
+        (0..<enterFrames).map { i in
             let t = Double(i) / fps
-            return Frame(t: t, clock: enterClock + t, activation: NeoWakeOutlineView.liveActivation(seconds: t, appearing: true))
+            return Frame(t: t, clock: enterClock + t, activation: progress(t, appearing: true))
         }
     }
 
-    /// Live, the outline's timeline pauses when listening ends, so anything
-    /// still drawn holds still while it fades. The first frame is the last
-    /// one lit; listening ends right after it.
+    /// The first frame is the last one lit; listening ends right after it.
+    /// Live, the light's clock keeps running through the fade, so the
+    /// highlight keeps drifting while it goes.
     static var exit: [Frame] {
-        (0..<fadeFrames).map { i in
+        (0..<exitFrames).map { i in
             guard i > 0 else { return Frame(t: 0, clock: exitClock, activation: 1) }
             let t = Double(i - 1) / fps
-            return Frame(t: Double(i) / fps, clock: exitClock,
-                         activation: NeoWakeOutlineView.liveActivation(seconds: t, appearing: false), listening: false)
+            return Frame(t: Double(i) / fps, clock: exitClock + t,
+                         activation: progress(t, appearing: false), listening: false)
         }
     }
 
-    /// A whole listen in real time: the entrance's frames, one full loop,
-    /// then the exit's — continuous on one clock, at `fps`.
+    /// A whole listen in real time: the wake, the rest of one full loop of
+    /// the settled light, then the exit — continuous on one clock, at `fps`.
     static var episode: [Frame] {
-        let fade = Double(fadeFrames) / fps
-        let end = fade + NeoWakeOutlineView.loopDuration
-        let count = Int(((end + fade) * fps).rounded())
+        let end = enterDuration + NeoWakeOutlineView.loopDuration
+        let count = Int(((end + exitDuration) * fps).rounded()) + 2
         return (0..<count).map { k in
             let t = Double(k) / fps
             if t < end {
-                return Frame(t: t, clock: enterClock + t, activation: NeoWakeOutlineView.liveActivation(seconds: t, appearing: true))
+                return Frame(t: t, clock: enterClock + t, activation: progress(t, appearing: true))
             }
-            return Frame(t: t, clock: enterClock + end,
-                         activation: NeoWakeOutlineView.liveActivation(seconds: t - end, appearing: false), listening: false)
+            return Frame(t: t, clock: enterClock + t, activation: progress(t - end, appearing: false), listening: false)
         }
     }
 
@@ -174,6 +186,7 @@ enum NeoOutlineFrames {
         let only = options["--outline-shapes"].map { Set($0.split(separator: ",").map(String.init)) }
         let onlyVariants = options["--outline-variants"].map { Set($0.split(separator: ",").map(String.init)) }
         let glow = options["--outline-tint"].flatMap { UInt32($0.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) }
+        reducedMotion = options["--outline-motion"] == "reduced"
 
         var root = URL(fileURLWithPath: directory, isDirectory: true)
         if let label { root.appendPathComponent(label, isDirectory: true) }
@@ -218,6 +231,7 @@ enum NeoOutlineFrames {
                     writeJSON([
                         "shape": shape.name, "variant": variant.name, "sequence": name,
                         "fps": name == "loop" ? Double(loopFrames) / NeoWakeOutlineView.loopDuration : fps,
+                        "reduce_motion": reducedMotion,
                         "scale": scale, "margin_pt": margin,
                         "island_px": rectArray(island, scale: scale), "notch_px": rectArray(notch, scale: scale),
                         "loops": name == "loop",
@@ -244,12 +258,18 @@ enum NeoOutlineFrames {
                 "contour_length_pt": contour.length,
             ])
         }
+        let tintName: String = glow.map { String(format: "%06X", $0) } ?? "none (Blue setting: DesignTokens.wakeLight)"
         writeJSON([
             "label": label ?? "", "scale": scale, "margin_pt": margin,
-            "loop_duration_s": NeoWakeOutlineView.loopDuration, "beam_length_fraction": NeoWakeOutlineView.beamLength,
-            "fade_duration_s": NeoWakeOutlineView.fadeDuration,
+            "loop_duration_s": NeoWakeOutlineView.loopDuration, "breath_period_s": NeoWakeLight.breathPeriod,
+            "enter_duration_s": enterDuration, "arrival_s": NeoWakeLight.arrival, "exit_duration_s": exitDuration,
+            "rest_level": NeoWakeLight.restLevel, "shimmer_level": NeoWakeLight.shimmerLevel,
+            "shimmer_reach": NeoWakeLight.shimmerReach, "shimmer_width": NeoWakeLight.shimmerWidth,
+            "hairline_pt": NeoWakeOutlineView.hairline,
+            "glow_bands": NeoWakeOutlineView.glowBands.map { ["depth_pt": $0.depth, "alpha": $0.alpha] },
+            "reduce_motion": reducedMotion,
             "enter_clock_s": enterClock, "exit_clock_s": exitClock,
-            "tint": glow.map { String(format: "%06X", $0) } ?? "none (Teal setting: DesignTokens.accent)",
+            "tint": tintName,
             "shapes": manifestShapes,
         ], to: root.appendingPathComponent("manifest.json"))
         print(String(format: "%d frames in %.1f s → %@", written, Date().timeIntervalSince(started), root.path))
@@ -272,7 +292,7 @@ enum NeoOutlineFrames {
         let scene = NeoSnapshots.scene(
             shape.row, geometry: geometry, regionMinX: region.minX, regionSize: region.size,
             outlineClock: Date(timeIntervalSinceReferenceDate: frame.clock), outlineActivation: frame.activation,
-            outlineActive: frame.listening, glow: glow, background: nil
+            outlineActive: frame.listening, glow: glow, outlineReduceMotion: reducedMotion, background: nil
         )
         let renderer = ImageRenderer(content: scene.view)
         renderer.scale = scale
@@ -377,14 +397,19 @@ enum NeoOutlineFrames {
                 }
             }
         }
-        let loopCaption = String(format: "loop — one cycle of %.1f s, %d frames (%.3f s apart)",
+        let loopCaption = String(format: "loop — one cycle of the resting light, %.1f s (the highlight swings out and back, the rim breathes twice), %d frames (%.3f s apart)",
                                  NeoWakeOutlineView.loopDuration, loopFrames, NeoWakeOutlineView.loopDuration / Double(loopFrames))
-        let fadeCaption = String(format: "%d frames at %.0f fps; the live fade is .easeOut(%.2f s)", fadeFrames, fps, NeoWakeOutlineView.fadeDuration)
+        let enterCaption = reducedMotion
+            ? String(format: "entrance (Reduce Motion) — a %.2f s fade of the still rim, %.0f fps", enterDuration, fps)
+            : String(format: "entrance — the wake: a sweep from both top ends meets at the bottom centre at %.2f s and blooms into the highlight; settled at %.1f s; %.0f fps",
+                     NeoWakeLight.arrival, enterDuration, fps)
+        let exitCaption = String(format: "exit — listening ends after the first frame (\"off\"); the rim fades over %.2f s (as progress²) while its clock runs on; %.0f fps",
+                                 exitDuration, fps)
         let sheet = VStack(alignment: .leading, spacing: 18) {
             Text(title).font(.system(size: 18, weight: .bold)).foregroundStyle(.white)
             section("loop", loopCaption)
-            section("enter", "entrance — \(fadeCaption); the beams start at clock \(enterClock) s")
-            section("exit", "exit — \(fadeCaption); listening ends after the first frame (\"off\"): the live view drops the blue at once and fades what is left")
+            section("enter", enterCaption)
+            section("exit", exitCaption)
         }
         .padding(16)
         .background(Color(.sRGB, red: 0.1, green: 0.1, blue: 0.11))
@@ -393,46 +418,65 @@ enum NeoOutlineFrames {
         return renderer.cgImage
     }
 
-    /// The bottom-left corner and the top-left flare end, at three moments
-    /// each: no beam near, a beam centred there, and a beam's tail leaving.
-    /// Device pixels (2×) are enlarged `zoom`× with no smoothing.
+    /// The bottom-left corner, the top-left flare end and the bottom centre,
+    /// each at three moments of the light: settled (with the highlight far
+    /// and near), in the wake's sweep, and fading out. Device pixels (2×)
+    /// are enlarged `zoom`× with no smoothing.
     static func zoomSheet(shape: Shape, geometry: NotchGeometry, region: CGRect, island: CGRect, sites: Sites,
                           variant: Variant, glow: UInt32?, label: String?) -> CGImage? {
-        let length = Double(NeoWakeOutlineView.beamLength)
-        let period = NeoWakeOutlineView.loopDuration
-        func time(phase: Double) -> TimeInterval {
-            var p = phase.truncatingRemainder(dividingBy: 1)
-            if p < 0 { p += 1 }
-            return p * period
+        let loop = NeoWakeOutlineView.loopDuration
+        let arrival = NeoWakeLight.arrival
+        let notchInIsland = CGRect(x: geometry.notchFrame.minX - region.minX - island.minX, y: 0,
+                                   width: geometry.notchFrame.width, height: geometry.notchFrame.height)
+        let corner = NeoWakeLight.cornerLocation(size: island.size, notch: notchInIsland)
+        /// The wake with its sweep's head at `location` along a half.
+        func wake(at location: Double) -> Frame {
+            let t = NeoWakeLight.wakeTime(headAt: location)
+            return Frame(t: t, clock: t, activation: t / NeoWakeLight.enterDuration)
         }
+        func settled(_ clock: TimeInterval) -> Frame { Frame(t: clock, clock: clock, activation: 1) }
+        let far = settled(arrival + loop / 4)        // the highlight at its right-hand turn
+        let near = settled(arrival + loop * 3 / 4)   // …at its left-hand turn
+        let fading = Frame(t: 0.1, clock: exitClock + 0.1, activation: progress(0.1, appearing: false), listening: false)
         let flare = DesignTokens.radiusNotchTopFlare
+        // Where the black really ends: content can make the surface taller
+        // than its frame (the expanded music island draws 98 pt, not 88).
+        let bottom = drawnBottom(shape: shape, geometry: geometry, region: region, island: island, glow: glow)
         // Crops in points within the region: the corner with 32 pt of bottom
-        // edge and 22 pt of side; the flare end with the top 20 pt.
-        let cornerCrop = CGRect(x: island.minX - 14, y: island.maxY - 26, width: 48, height: 32)
+        // edge and 22 pt of side; the flare end with the top 20 pt; the
+        // middle of the bottom edge.
+        let cornerCrop = CGRect(x: island.minX - 14, y: bottom - 26, width: 48, height: 32)
         let flareCrop = CGRect(x: island.minX - flare - 18, y: 0, width: 48, height: 20)
-        let moments: [(String, CGRect, [(String, TimeInterval)])] = [
+        let centreCrop = CGRect(x: island.midX - 24, y: bottom - 26, width: 48, height: 32)
+        let moments: [(String, CGRect, [(String, Frame)])] = [
             ("bottom-left corner", cornerCrop, [
-                ("no beam near", time(phase: sites.corner + 0.25 - length / 2)),
-                ("beam centred on the corner", time(phase: sites.corner - length / 2)),
-                ("beam's tail leaving the corner", time(phase: sites.corner - length * 0.1)),
+                ("settled, the highlight far", far),
+                ("settled, the highlight at its nearest", near),
+                ("the wake's sweep at the corner", wake(at: corner)),
             ]),
-            ("top-left flare end (the wrap)", flareCrop, [
-                ("no beam near", time(phase: 0.25 - length / 2)),
-                ("beam straddling the wrap", time(phase: -length / 2)),
-                ("beam just after the wrap", time(phase: -length * 0.1)),
+            ("top-left flare end", flareCrop, [
+                ("settled", far),
+                ("the sweep leaving the top end", wake(at: 0.08)),
+                ("exit, 0.1 s in", fading),
+            ]),
+            ("bottom centre", centreCrop, [
+                ("settled, the highlight passing", settled(arrival + loop / 2)),
+                ("the sweep halfway along the bottom", wake(at: (corner + 1) / 2)),
+                ("the meeting: the bloom", wake(at: 1)),
             ]),
         ]
         struct Cell { let caption: String; let image: CGImage }
         var lines: [(String, [Cell])] = []
-        for (site, crop, times) in moments {
+        for (site, crop, frames) in moments {
             var cells: [Cell] = []
-            for (caption, t) in times {
+            for (caption, moment) in frames {
                 guard let frame = render(shape: shape, geometry: geometry, region: region,
-                                         frame: Frame(t: t, clock: t, activation: 1), variant: variant, glow: glow),
+                                         frame: moment, variant: variant, glow: glow),
                       let cut = frame.cropping(to: CGRect(x: crop.minX * scale, y: crop.minY * scale,
                                                           width: crop.width * scale, height: crop.height * scale).integral),
                       let big = enlarge(cut, by: zoom) else { return nil }
-                cells.append(Cell(caption: String(format: "%@ — t %.3f s", caption, t), image: big))
+                cells.append(Cell(caption: String(format: "%@ — clock %.2f s, act %.2f%@", caption, moment.clock, moment.activation,
+                                                  moment.listening ? "" : " · off"), image: big))
             }
             lines.append((site, cells))
         }
@@ -458,6 +502,23 @@ enum NeoOutlineFrames {
         let renderer = ImageRenderer(content: sheet)
         renderer.scale = 1
         return renderer.cgImage
+    }
+
+    /// The bottom of the black as drawn (points from the top), found by
+    /// rendering the island dark on white and scanning down a column a third
+    /// of the way in, between the notch and the corner.
+    static func drawnBottom(shape: Shape, geometry: NotchGeometry, region: CGRect, island: CGRect, glow: UInt32?) -> CGFloat {
+        let white = variants.first { $0.name == "white" } ?? variants[0]
+        guard let image = render(shape: shape, geometry: geometry, region: region,
+                                 frame: Frame(t: 0, clock: 0, activation: 0, listening: false), variant: white, glow: glow),
+              let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return island.maxY }
+        let x = Int((island.minX + max(8, island.width * 0.08)) * scale)
+        var last = -1
+        for y in 0..<image.height {
+            let p = bytes + y * image.bytesPerRow + x * 4
+            if p[0] < 40 && p[1] < 40 && p[2] < 40 { last = y }
+        }
+        return last < 0 ? island.maxY : CGFloat(last + 1) / scale
     }
 
     static func enlarge(_ image: CGImage, by factor: CGFloat) -> CGImage? {

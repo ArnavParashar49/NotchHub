@@ -55,15 +55,21 @@ struct IslandView: View {
     /// starts to listen, in every shape the pet rides. `nil` while no pulse
     /// shows.
     var listening: NeoListeningMark? = nil
-    /// NEO's microphone is live; a moving blue contour traces the hardware notch.
+    /// NEO's microphone is live: the island's rim lights (`NeoWakeOutlineView`).
     var neoListeningActive: Bool = false
-    /// AppKit context menus need smooth pointer tracking; hold the highlight still while one is open.
+    /// AppKit context menus need smooth pointer tracking; hold the light still while one is open.
     var neoListeningAnimationPaused: Bool = false
-    /// Offscreen rendering only (`--neo-outline-frames`): the wake outline's
-    /// clock and its entrance/exit progress (`NeoWakeOutlineView.now` and
-    /// `.activation`). Always `nil` live.
+    /// Offscreen rendering only (`--neo-outline-frames`): the wake light's
+    /// clock, its entrance/exit progress and Reduce Motion
+    /// (`NeoWakeOutlineView.now`, `.activation`, `.reduceMotionOverride`).
+    /// Always `nil` live.
     var neoListeningClock: Date? = nil
     var neoListeningActivation: Double? = nil
+    var neoListeningReduceMotion: Bool? = nil
+    /// The hardware notch in the hosting window's SwiftUI coordinates (like
+    /// `localFrame`), so the wake light's glow can keep off it. `nil` assumes
+    /// the notch is centred on the island.
+    var notchFrame: CGRect? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -180,7 +186,7 @@ struct IslandView: View {
             let leading = placement.anchor == .leading
             let frame = NeoListeningLayout.glowFrame(behind: placement)
             NeoListeningGlowView(mark: listening, petSize: placement.size,
-                                 tint: pet.glow.map(PetCanvas.color) ?? DesignTokens.listeningGlow)
+                                 tint: pet.glow.map(PetCanvas.color) ?? DesignTokens.wakeLight)
                 // Like the pet, a change of pixel scale crossfades.
                 .id("glow-\(Int(placement.scale))")
                 .transition(.opacity.animation(.easeOut(duration: 0.16)))
@@ -191,22 +197,36 @@ struct IslandView: View {
         }
     }
 
-    /// A thin black support rim follows the island's current silhouette,
-    /// centered on the hardware notch, and carries a continuous blue beam. It
-    /// extends only a couple of points so the light stays visible at the edge.
+    /// NEO's wake light: the island's own rim lit while NEO listens (see
+    /// `NeoWakeOutlineView`). It fills the island's frame exactly as the
+    /// black surface does — the same flexible frame in the same stack, the
+    /// same `surfaceShape` — so it is laid out at the black's real size
+    /// (taller than `localFrame` when content overflows it) and springs with
+    /// it frame by frame. The notch's place in the island changes in the same
+    /// transaction as the island's frame, so while the island moves the glow
+    /// keeps off the hardware, which does not.
     private var listeningSignalLayer: some View {
         NeoWakeOutlineView(
             shape: surfaceShape,
             isActive: neoListeningActive && hasNotch,
             paused: neoListeningAnimationPaused,
-            tint: pet?.glow.map(PetCanvas.color) ?? DesignTokens.accent,
+            tint: pet?.glow,
             now: neoListeningClock,
-            activation: neoListeningActivation
+            activation: neoListeningActivation,
+            notch: notchInIsland,
+            reduceMotionOverride: neoListeningReduceMotion
         )
-            .frame(width: localFrame.width + NeoWakeOutlineView.supportInset * 2,
-                   height: localFrame.height + NeoWakeOutlineView.supportInset * 2)
-            .position(x: localFrame.width / 2, y: localFrame.height / 2)
-            .allowsHitTesting(false)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(false)
+    }
+
+    /// The hardware notch in the island's own coordinates.
+    private var notchInIsland: CGRect? {
+        if let notchFrame {
+            return notchFrame.offsetBy(dx: -localFrame.minX, dy: -localFrame.minY)
+        }
+        guard notchWidth > 0, notchInset > 0 else { return nil }
+        return CGRect(x: (localFrame.width - notchWidth) / 2, y: 0, width: notchWidth, height: notchInset)
     }
 
     /// Room kept free for the pet at the right of notch-height bars.

@@ -237,7 +237,7 @@ struct PetSettingsSection: View {
                 ForEach(PetGlowColor.allCases, id: \.self) { glow in
                     Button { pet.glow = glow } label: {
                         PetSwatch(
-                            fill: .solid(glow.rgb(palette: palette).map(PetCanvas.color) ?? DesignTokens.listeningGlow),
+                            fill: .solid(glow.rgb(palette: palette).map(PetCanvas.color) ?? DesignTokens.wakeLight),
                             isOn: pet.glow == glow,
                             badge: glow == .matchFur ? "pawprint.fill" : nil
                         )

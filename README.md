@@ -134,24 +134,32 @@ NEO is busy its pose is what NEO is doing. With NEO ready the fox lives its
 own life — the idle island is exactly the pre-NEO one, mischief and all —
 and with NEO active the fox simply animates, in whatever shape the island is
 in (idle, the hover wings, the compact bar, the expanded island). When NEO is
-listening, an open blue contour reaches the screen's top edge at both sides,
-runs down the island and around its bottom, and leaves the top span clear. Two
-faster beams travel in the same direction, half a circuit apart, and wrap
-between the open ends. A narrow black support stroke gives the light a dark bed
-on bright desktops; it adds only a couple of points around the contour and
-keeps the island centered on the physical notch at every width.
-The outline fades away when listening ends and never takes a click. Its tint
-follows the user's pet glow colour. The core reports that NEO is listening,
-not room loudness, so the animation is state-driven and makes no claim about microphone level. It pauses
-while the notch's context menu is tracking; Reduce Motion keeps a still
-outline. The mark reads "NEO is listening" to assistive technology and is
-hidden from capture with the island in Ghost Mode.
+listening, the island's own rim lights — the wake light: a one-pixel line of
+cool blue lying on the silhouette with a soft glow a few points into the black
+behind it, brightest along the bottom and fading to nothing as the sides climb
+to the screen's top edge, with nothing across the top. One broad highlight
+drifts slowly to and fro along it and the rim breathes, barely. When NEO wakes,
+one bright sweep runs from both top ends down the sides and along the bottom,
+meets itself under the middle of the notch and blooms there, and the bloom
+becomes the drifting highlight. The island's black never grows for it: the
+line sits just outside the black (where the hardware notch can never cover
+it), and the glow, which the notch would hide, fades out before reaching it.
+It is drawn from the island's in-between shape on every frame, so it stays on
+the edge while the island springs between shapes; the wake and the exit run at
+the display's own rate (120 Hz on ProMotion), the settled light at 60 Hz (it
+has no edge left to step). It fades out in half a second when listening ends and
+never takes a click. Its tint follows the user's wake-outline colour. The core
+reports that NEO is listening, not room loudness, so the animation is
+state-driven and makes no claim about microphone level. It pauses while the
+notch's context menu is tracking; Reduce Motion keeps a still rim that only
+fades in and out. The mark reads "NEO is listening" to assistive technology
+and is hidden from capture with the island in Ghost Mode.
 
 The poses, from the fox's own frames (`PetBrain.neoAnimation`):
 
 - **connecting** → waking: a stretch, then standing alert
 - **listening** → attentive: ears up, eyes on you, a slow breath — paired
-  with the moving blue notch outline
+  with the island's lit rim
 - **thinking** → the thought bubble, scratching its head
 - **working** → pacing toward the notch and back
 - **searching** → the magnifier, then a sniff along the ground
@@ -180,15 +188,17 @@ left — to `DIR/notch-confirm.png`;
 `--neo-snapshots DIR` renders each pose offscreen in each island shape
 (`--neo-snapshots DIR listening` filters to NEO's listening mark in each
 shape); `--neo-glow-zoom DIR` keeps the legacy pet-halo comparison helper.
-`--neo-outline-frames DIR [LABEL]` renders the listening outline frame by
-frame at a fixed clock — a loop, its entrance and exit, and a real-time
-episode — in five island shapes on a grey menu bar, a white wallpaper and
-an x-ray of the notch, with contact sheets and 4× zooms, to `DIR/LABEL`
-(`--outline-shapes`, `--outline-variants`, `--outline-tint RRGGBB` narrow it);
+`--neo-outline-frames DIR [LABEL]` renders the wake light frame by frame at a
+fixed clock — a loop, its wake and exit, and a real-time episode — in five
+island shapes on a grey menu bar, a white wallpaper and an x-ray of the
+notch, with contact sheets and 4× zooms, to `DIR/LABEL` (`--outline-shapes`,
+`--outline-variants`, `--outline-tint RRGGBB` narrow it;
+`--outline-motion reduced` renders it as Reduce Motion shows it);
 `--neo-outline-morph DIR [LABEL]` samples the real island live, from an
 invisible window, while it springs between shapes and while the light comes
-and goes. `scripts/outline_gif.py FRAMEDIR` turns any of those frame folders
-into a real-time 30 fps GIF.
+and goes, and measures the light's frame rate and CPU cost at rest
+(`--outline-pacing-only` for just that). `scripts/outline_gif.py FRAMEDIR`
+turns any of those frame folders into a real-time 30 fps GIF.
 `NOTCHHUB_NEO_DIST=<folder>` serves that build of NEO's page (a `ui/dist`)
 instead of the installed one, for a debug run or the built-page tests.
 `NOTCHHUB_NEO_SNAPSHOTS=<dir>` makes `kill -USR1 <pid>` write NEO's page as it
@@ -381,9 +391,9 @@ placement and every snapshot are what they were.
   it is 4:1 against the island's black and 3:1 against the eyes and outline,
   white is held down until the cream muzzle, chest and tail tip stand clear of
   it. Palettes are built when the setting changes, never while drawing.
-- **Look — wake outline.** The contour uses the design system's cyan-teal (the
-  default), Sky, Violet, Rose, Amber, White, or **Match fur** (the fur's
-  highlight colour, lifted if the fur is dark).
+- **Look — wake outline.** The lit rim uses the design system's cool blue
+  (Blue, the default), Teal, Sky, Violet, Rose, Amber, White, or **Match fur**
+  (the fur's highlight colour, lifted if the fur is dark).
 - **Wear.** A hat (seasonal, none, or one of ten) and ONE accessory — glasses,
   sunglasses, a scarf, a bow tie, headphones — which combine. Accessories are
   pixel art like the hats (`art/pet/wear.pet`), drawn once for the front view

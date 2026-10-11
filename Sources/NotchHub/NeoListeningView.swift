@@ -88,164 +88,325 @@ struct NeoListeningGlowView: View {
     }
 }
 
-/// NEO's wake cue: an open blue U that runs down both sides and around the
-/// island's bottom, with its ends reaching the screen's top edge at both sides
-/// but no stroke across the top. Two short beams travel in the same direction,
-/// half a circuit apart, and wrap between the open ends. A narrow black
-/// support stroke keeps the light visible against bright desktops. The island's
-/// layout and centre do not change for the effect.
+
+/// NEO's wake light — the quiet rim. While NEO listens, the island's own
+/// edge lights: a one-pixel line of light lying ON the silhouette, with a
+/// soft glow a few points into the black behind it, brightest along the
+/// bottom and fading to nothing as the sides climb to the screen's top edge.
+/// One broad highlight drifts slowly to and fro along it and the whole rim
+/// breathes, barely. On waking, a single bright sweep runs from both top
+/// ends to the bottom centre, blooms where it meets itself, and the bloom
+/// becomes the drifting highlight. When listening ends it fades out in half
+/// a second. The light's arithmetic is `NeoWakeLight`'s; `NeoWakeRim` draws
+/// one moment of it.
+///
+/// WHERE THE LIGHT SITS: the line's inner edge is the silhouette — it is
+/// the one device pixel just outside the black — and the glow is inside.
+/// The island's black never grows; the line is light, not a border. It sits
+/// outside because of the hardware: on every notch-height shape the
+/// island's bottom edge IS the notch's, so anything drawn inside along it
+/// would be hidden under the camera housing — and when the fox hides in the
+/// notch, all of it would. Just outside, nothing ever covers it, so the line
+/// is one even weight everywhere. The glow, which the notch would cover,
+/// fades out before reaching it rather than being cut off by the housing's
+/// corners.
+///
+/// GLUED TO THE ISLAND: this view fills the island's frame as the black
+/// does (the same flexible frame in the same stack), so it knows the size
+/// the black is really laid out at; `NeoWakeRim` animates that size, the
+/// island's radii and the notch's place with the island's own transaction,
+/// and draws every frame from those in-between values — so while the island
+/// springs between shapes the light is drawn round exactly the black that
+/// is on screen.
+///
+/// CHEAP: one `Canvas` — a dozen filled paths, four gradients — a frame;
+/// no mask, no blur, no offscreen group. The timeline runs at the
+/// display's own rate (120 Hz on ProMotion) through the wake and the exit,
+/// eases to 60 Hz once the light has settled (`settledInterval` says why),
+/// and is paused whenever nothing moves: while NEO is not listening, once
+/// the exit has faded, while a context menu is open, offscreen, and — the
+/// rim being still then — under Reduce Motion except during its fades.
 struct NeoWakeOutlineView: View {
     let shape: NotchShape
     let isActive: Bool
     var paused = false
-    var tint: Color = DesignTokens.listeningGlow
+    /// The light's colour as RGB (the pet's glow setting,
+    /// `PetSettings.glowColor`); `nil` is the design token's blue,
+    /// `DesignTokens.wakeLight`.
+    var tint: UInt32? = nil
     /// Offscreen rendering only (`--neo-outline-frames`): the moment to draw,
-    /// in place of the timeline's clock, so a frame can be rendered at any
-    /// time in the loop. `nil` — always, live — follows the display.
+    /// in place of the timeline's clock — its `timeIntervalSinceReferenceDate`
+    /// is the light's clock (seconds since the wake). `nil` — always, live —
+    /// follows the display.
     var now: Date? = nil
     /// Offscreen rendering only: how far the light has come in, from 0 (dark)
-    /// to 1 (fully lit), in place of the fade that `isActive` animates — so a
-    /// frame of the light appearing or leaving can be drawn. `nil` live.
+    /// to 1 (settled), or gone out — `NeoWakeLight.activation`. `nil` live.
     /// An offscreen entrance passes `isActive` true with this rising; an exit
     /// passes `isActive` false with it falling, as the live view sees them.
     var activation: Double? = nil
+    /// The physical notch in this view's coordinates (the island's), or
+    /// `nil` when there is none to keep the glow off.
+    var notch: CGRect? = nil
+    /// Offscreen rendering only: Reduce Motion as if set (the environment's
+    /// value is read-only). `nil` follows the system.
+    var reduceMotionOverride: Bool? = nil
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    /// When this stretch of listening began: the light's clock starts here.
+    @State private var wakeStart: Date?
+    /// When it ended, while the light fades out.
+    @State private var exitStart: Date?
+    /// Whether the timeline is ticking: while listening (but for a still,
+    /// Reduce Motion rim) and through the fades.
+    @State private var running = false
+    /// Whether the wake is over and the light has settled into its slow
+    /// drift — when it no longer needs the display's full rate.
+    @State private var settled = false
 
-    /// Two points of black beyond the physical contour gives the blue edge a
-    /// dark bed, without making the notch look meaningfully larger.
-    static let supportInset: CGFloat = 2
-    static let loopDuration: TimeInterval = 3.6
-    static let beamLength: CGFloat = 0.115
-    /// The fade `isActive` drives, in and out: `.easeOut(duration: fadeDuration)`.
-    static let fadeDuration: TimeInterval = 0.18
+    /// The line: one device pixel on the Retina screens a notch comes on.
+    static let hairline: CGFloat = 0.5
+    /// The glow inside the line, as nested bands from the edge inward, each
+    /// with its own opacity. They overlap, so the glow is brightest at the
+    /// edge and falls away into the black — about 75, 48, 27, 12 and 5 % of
+    /// the line's light in successive device pixels (the last ones two and
+    /// three pixels deep) — and every band shares the silhouette as its
+    /// outer edge, so no seam can show between them.
+    static let glowBands: [(depth: CGFloat, alpha: Double)] = [(0.5, 0.519), (1, 0.288), (2, 0.171), (3.5, 0.074), (5, 0.05)]
 
-    /// Where the beams are in their loop at `date` (0 ..< 1).
+    static var loopDuration: TimeInterval { NeoWakeLight.loopDuration }
+    static var enterDuration: TimeInterval { NeoWakeLight.enterDuration }
+    /// The exit's length (the light fades as its progress²).
+    static var fadeDuration: TimeInterval { NeoWakeLight.exitDuration }
+
+    /// Where the resting light is in its loop at `date` (0 ..< 1).
     static func cycle(at date: Date) -> Double {
-        date.timeIntervalSinceReferenceDate
-            .truncatingRemainder(dividingBy: loopDuration) / loopDuration
+        let t = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: loopDuration) / loopDuration
+        return t < 0 ? t + 1 : t
     }
 
-    /// The live fade as an `activation`, `seconds` after `isActive` changed:
-    /// what the eased opacity animation shows at that moment. For offscreen
-    /// renders of the entrance (`appearing`) and the exit.
+    /// The live entrance/exit progress `seconds` after listening began
+    /// (`appearing`) or ended — what the live view computes from its own
+    /// clock, for offscreen renders of the same moments.
     static func liveActivation(seconds: TimeInterval, appearing: Bool) -> Double {
-        let eased = easeOut(max(0, min(1, seconds / fadeDuration)))
-        return appearing ? eased : 1 - eased
+        NeoWakeLight.activation(seconds: seconds, appearing: appearing)
     }
 
-    /// SwiftUI's `.easeOut` timing curve, the cubic Bézier (0, 0, 0.58, 1).
-    static func easeOut(_ x: Double) -> Double {
-        // Solve x(s) = x for the curve's parameter, then return y(s).
-        func bezier(_ s: Double, _ p1: Double, _ p2: Double) -> Double {
-            let u = 1 - s
-            return 3 * u * u * s * p1 + 3 * u * s * s * p2 + s * s * s
-        }
-        var lo = 0.0, hi = 1.0
-        for _ in 0..<40 {
-            let mid = (lo + hi) / 2
-            if bezier(mid, 0, 0.58) < x { lo = mid } else { hi = mid }
-        }
-        return bezier((lo + hi) / 2, 0, 1)
+    /// For `--neo-outline-morph`'s pacing probe: how many frames of light
+    /// have been drawn, live.
+    static var framesDrawn = 0
+
+    /// The settled light's frame interval. The wake's sweep and the exit
+    /// run at the display's full rate (120 Hz on ProMotion): the sweep's
+    /// front is sharp and fast. Once settled, nothing on the rim has an edge
+    /// and its fastest change — the highlight's flank as it swings — moves
+    /// a pixel's brightness by under 1 % per 60 Hz frame, so a second
+    /// 120 Hz frame in between would look identical and cost as much again
+    /// (each frame re-renders the island's layer; measured with
+    /// `--neo-outline-morph`). Springs between shapes are not bound by this:
+    /// the island's animation draws the light at the display's rate.
+    static let settledInterval: TimeInterval = 1.0 / 60
+
+    private var reduceMotion: Bool { reduceMotionOverride ?? systemReduceMotion }
+
+    private var visible: Bool {
+        if let activation { return isActive || activation > 0 }
+        return isActive || running
     }
 
     var body: some View {
-        let frozen = now != nil
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: frozen || !isActive || paused || reduceMotion)) { context in
-            GeometryReader { geometry in
-                let physicalRect = CGRect(
-                    x: Self.supportInset,
-                    y: Self.supportInset,
-                    width: geometry.size.width - Self.supportInset * 2,
-                    height: geometry.size.height - Self.supportInset * 2
-                )
-                let path = Self.contour(shape, in: physicalRect)
-                // The open contour is a circular track for the beams: they
-                // flow left → down → right, then wrap to the left without
-                // drawing across the deliberately clear top span.
-                let cycle = Self.cycle(at: now ?? context.date)
-
-                ZStack {
-                    // Support only at the edge; this is not another filled badge.
-                    path.stroke(Color.black, style: StrokeStyle(lineWidth: Self.supportInset * 2, lineCap: .round, lineJoin: .round))
-
-                    if isActive {
-                        path.stroke(tint.opacity(reduceMotion ? 0.78 : 0.56),
-                                    style: StrokeStyle(lineWidth: reduceMotion ? 2.1 : 1.5, lineCap: .round, lineJoin: .round))
-
-                        if !reduceMotion {
-                            movingBeam(on: path, phase: cycle)
-                            movingBeam(on: path, phase: (cycle + 0.5).truncatingRemainder(dividingBy: 1))
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        GeometryReader { proxy in
+            TimelineView(.animation(minimumInterval: settled ? Self.settledInterval : nil,
+                                    paused: now != nil || paused || !running)) { context in
+                NeoWakeRim(size: proxy.size, shape: shape, notch: notch,
+                           phase: phase(at: now ?? context.date), tint: Self.components(tint))
             }
         }
-        .opacity(activation ?? (isActive ? 1 : 0))
-        .animation(activation == nil ? .easeOut(duration: Self.fadeDuration) : nil, value: isActive)
+        .opacity(visible ? 1 : 0)
+        .onAppear {
+            // Already listening when it appears (a relaunch): the settled
+            // rim, without a wake.
+            if isActive {
+                running = !reduceMotion
+                settled = true
+            }
+        }
+        .onChange(of: isActive) { active in
+            if active {
+                wakeStart = Date()
+                exitStart = nil
+            } else {
+                exitStart = Date()
+            }
+            running = true
+            settled = false
+        }
+        // Eases the timeline down once the wake has settled, and stops it
+        // once a fade is over and nothing moves.
+        .task(id: FadeKey(active: isActive, reduceMotion: reduceMotion)) {
+            if isActive, !reduceMotion {
+                try? await Task.sleep(nanoseconds: UInt64((NeoWakeLight.enterDuration + 0.05) * 1_000_000_000))
+                if !Task.isCancelled { settled = true }
+                return
+            }
+            let fade = reduceMotion ? NeoWakeLight.reduceMotionFade : NeoWakeLight.exitDuration
+            try? await Task.sleep(nanoseconds: UInt64((fade + 0.05) * 1_000_000_000))
+            if !Task.isCancelled { running = false }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("NEO is listening")
         .accessibilityHidden(!isActive)
     }
 
-    /// The outline's open contour: from the top edge down the left side, around
-    /// the bottom, and back up to the top on the right, without a stroke across
-    /// the top edge itself.
-    static func contour(_ shape: NotchShape, in rect: CGRect) -> Path {
-        let handle: CGFloat = 0.4477
-        let topLeft = max(0, min(shape.topLeadingRadius, rect.height / 2))
-        let topRight = max(0, min(shape.topTrailingRadius, rect.height / 2))
-        let bottomLeft = max(0, min(shape.bottomLeadingRadius, rect.width / 2, rect.height - topLeft))
-        let bottomRight = max(0, min(shape.bottomTrailingRadius, rect.width / 2, rect.height - topRight))
-
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX - topLeft, y: rect.minY))
-        if topLeft > 0 {
-            path.addCurve(
-                to: CGPoint(x: rect.minX, y: rect.minY + topLeft),
-                control1: CGPoint(x: rect.minX - topLeft * handle, y: rect.minY),
-                control2: CGPoint(x: rect.minX, y: rect.minY + topLeft * handle)
-            )
-        }
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - bottomLeft))
-        path.addCurve(
-            to: CGPoint(x: rect.minX + bottomLeft, y: rect.maxY),
-            control1: CGPoint(x: rect.minX, y: rect.maxY - bottomLeft * handle),
-            control2: CGPoint(x: rect.minX + bottomLeft * handle, y: rect.maxY)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX - bottomRight, y: rect.maxY))
-        path.addCurve(
-            to: CGPoint(x: rect.maxX, y: rect.maxY - bottomRight),
-            control1: CGPoint(x: rect.maxX - bottomRight * handle, y: rect.maxY),
-            control2: CGPoint(x: rect.maxX, y: rect.maxY - bottomRight * handle)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + topRight))
-        if topRight > 0 {
-            path.addCurve(
-                to: CGPoint(x: rect.maxX + topRight, y: rect.minY),
-                control1: CGPoint(x: rect.maxX, y: rect.minY + topRight * handle),
-                control2: CGPoint(x: rect.maxX + topRight * handle, y: rect.minY)
-            )
-        }
-        return path
+    private struct FadeKey: Equatable {
+        let active: Bool
+        let reduceMotion: Bool
     }
 
-    /// A short, rounded beam and its soft blue trail. At the open ends, the
-    /// beam wraps from one side to the other without crossing the top.
-    private func movingBeam(on path: Path, phase: Double) -> some View {
-        let end = phase + Double(Self.beamLength)
-        var beamPath = Path()
-        if end <= 1 {
-            beamPath.addPath(path.trimmedPath(from: phase, to: end))
-        } else {
-            beamPath.addPath(path.trimmedPath(from: phase, to: 1))
-            beamPath.addPath(path.trimmedPath(from: 0, to: end - 1))
+    /// The light's phase at `date`: offscreen from the injected progress;
+    /// live from when this stretch of listening began and ended.
+    private func phase(at date: Date) -> NeoWakeLight.Phase {
+        if now == nil { Self.framesDrawn += 1 }
+        if let activation {
+            return NeoWakeLight.phase(clock: date.timeIntervalSinceReferenceDate, activation: activation,
+                                      listening: isActive, reduceMotion: reduceMotion)
         }
-        return ZStack {
-            beamPath.stroke(tint.opacity(0.28), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
-                .blur(radius: 1.7)
-            beamPath.stroke(tint.opacity(0.96), style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+        if reduceMotion {
+            let progress: Double
+            if isActive {
+                progress = wakeStart.map { NeoWakeLight.activation(seconds: date.timeIntervalSince($0), appearing: true, reduceMotion: true) } ?? 1
+            } else {
+                progress = exitStart.map { NeoWakeLight.activation(seconds: date.timeIntervalSince($0), appearing: false, reduceMotion: true) } ?? 0
+            }
+            return NeoWakeLight.phase(clock: 0, activation: progress, listening: isActive, reduceMotion: true)
         }
+        let sinceWake = wakeStart.map { max(0, date.timeIntervalSince($0)) }
+        let fade = isActive ? 1 : exitStart.map {
+            NeoWakeLight.exitFade(remaining: NeoWakeLight.activation(seconds: date.timeIntervalSince($0), appearing: false))
+        } ?? 0
+        return NeoWakeLight.Phase(
+            clock: sinceWake ?? date.timeIntervalSinceReferenceDate,
+            wake: sinceWake.flatMap { $0 < NeoWakeLight.enterDuration ? $0 : nil },
+            fade: fade
+        )
+    }
+
+    /// The tint's sRGB components: the glow setting's, or the token's.
+    static func components(_ rgb: UInt32?) -> (red: Double, green: Double, blue: Double) {
+        guard let rgb else { return DesignTokens.wakeLightRGB }
+        return (Double((rgb >> 16) & 0xFF) / 255, Double((rgb >> 8) & 0xFF) / 255, Double(rgb & 0xFF) / 255)
+    }
+
+    /// The rim's open contour at the silhouette itself: from the top-left
+    /// end down the left side, round the bottom, and up to the top-right
+    /// end, with nothing across the top.
+    static func contour(_ shape: NotchShape, in rect: CGRect) -> Path {
+        let rim = NotchRimGeometry(shape, in: rect)
+        var path = Path()
+        NotchRimGeometry.add(rim.half(.leading, offset: 0), to: &path, moving: true)
+        NotchRimGeometry.add(rim.half(.trailing, offset: 0).reversed().map(\.reversed), to: &path, moving: false)
+        return path
+    }
+}
+
+/// One moment of NEO's wake light, drawn round the island as it is on
+/// screen right now.
+///
+/// ANIMATABLE: its size, the island's four radii and the notch's place are
+/// its animatable data, so when the island springs to a new shape SwiftUI
+/// hands this view the in-between values on every frame of the spring — in
+/// the same transaction as the black — and the paths AND the gradients are
+/// computed from them together. (A shape's gradient fill resolves against
+/// the view's laid-out frame, which jumps straight to the new size; a light
+/// whose gradients followed that frame would slide along the rim mid-morph
+/// and break at the bottom centre where its two halves meet.)
+///
+/// ONE CANVAS: everything is drawn in a single `Canvas` in absolute points
+/// — the gradients' ends included — from just above and left of the
+/// island's top-left (`margin`, so the line's ends at the flares are
+/// inside it). One recorded drawing per frame, rendered on the GPU with the
+/// rest of the island. Measured against the alternatives
+/// (`--neo-outline-morph`): gradient-filled shapes are rasterised on the
+/// CPU, layer by layer, at about twice the cost; gradient masks over a
+/// fixed frame rasterise the whole frame. The GPU keeps its render cache
+/// resident while the light animates (about 95 MB of graphics memory) and
+/// gives it back within a couple of seconds of the light going out.
+private struct NeoWakeRim: View, Animatable {
+    var size: CGSize
+    var shape: NotchShape
+    var notch: CGRect?
+    let phase: NeoWakeLight.Phase
+    let tint: (red: Double, green: Double, blue: Double)
+
+    /// How far the canvas reaches beyond the island on every side.
+    static let margin: CGFloat = 8
+
+    var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, AnimatablePair<NotchShape.AnimatableData, CGFloat>> {
+        get {
+            AnimatablePair(AnimatablePair(size.width, size.height),
+                           AnimatablePair(shape.animatableData, notch?.minX ?? 0))
+        }
+        set {
+            size = CGSize(width: newValue.first.first, height: newValue.first.second)
+            shape.animatableData = newValue.second.first
+            notch?.origin.x = newValue.second.second
+        }
+    }
+
+    var body: some View {
+        let m = Self.margin
+        let island = CGRect(origin: CGPoint(x: m, y: m), size: size)
+        let split = CGFloat(NeoWakeLight.split(size: size, notch: notch))
+        // Everything this frame needs, computed here from the in-between
+        // geometry and captured by the canvas.
+        let halves: [(path: [Path], line: Path, glow: Gradient, lineGradient: Gradient, start: CGPoint, end: CGPoint)] =
+            NeoWakeLight.Half.allCases.map { half in
+                let stops = NeoWakeLight.stops(half: half, size: size, phase: phase, notch: notch)
+                let axis = self.axis(half: half)
+                let bands = NeoWakeOutlineView.glowBands.map {
+                    NotchRimBand(shape: shape, island: island, half: half, split: split, inner: -$0.depth, outer: 0).path(in: .zero)
+                }
+                let line = NotchRimBand(shape: shape, island: island, half: half, split: split,
+                                        inner: 0, outer: NeoWakeOutlineView.hairline).path(in: .zero)
+                // The line leans to white where it is brightest (a hot
+                // core); the glow keeps more of the tint, and keeps off the
+                // notch.
+                return (bands, line, gradient(stops, whiten: 0.35, glow: true), gradient(stops, whiten: 1), axis.start, axis.end)
+            }
+        return Canvas(opaque: false, rendersAsynchronously: false) { context, _ in
+            for half in halves {
+                for (index, band) in half.path.enumerated() {
+                    var layer = context
+                    layer.opacity = NeoWakeOutlineView.glowBands[index].alpha
+                    layer.fill(band, with: .linearGradient(half.glow, startPoint: half.start, endPoint: half.end))
+                }
+                context.fill(half.line, with: .linearGradient(half.lineGradient, startPoint: half.start, endPoint: half.end))
+            }
+        }
+        .frame(width: max(1, size.width) + m * 2, height: max(1, size.height) + m * 2)
+        .offset(x: -m, y: -m)
+    }
+
+    /// One half's gradient axis, in the canvas's points: laid diagonally
+    /// across its half of the island from the top end (`D` = 0) to the
+    /// meeting point (`D` = 1) — the 45° axis whose projection is the
+    /// Manhattan distance from the top end.
+    private func axis(half: NeoWakeLight.Half) -> (start: CGPoint, end: CGPoint) {
+        let width = max(1, size.width), m = Self.margin
+        let reach = CGFloat(NeoWakeLight.reach(half: half, size: size, split: NeoWakeLight.split(size: size, notch: notch))) / 2
+        return (CGPoint(x: m + (half == .leading ? 0 : width), y: m),
+                CGPoint(x: m + (half == .leading ? reach : width - reach), y: m + reach))
+    }
+
+    /// A half's light as gradient stops in the tint. `glow`: for the glow,
+    /// which keeps off the notch; not for the line.
+    private func gradient(_ stops: [NeoWakeLight.Stop], whiten: Double, glow: Bool = false) -> Gradient {
+        Gradient(stops: stops.map { stop in
+            let w = stop.white * whiten
+            return Gradient.Stop(
+                color: Color(.sRGB, red: tint.red + (1 - tint.red) * w, green: tint.green + (1 - tint.green) * w,
+                             blue: tint.blue + (1 - tint.blue) * w, opacity: stop.alpha * (glow ? stop.clear : 1)),
+                location: stop.location
+            )
+        })
     }
 }

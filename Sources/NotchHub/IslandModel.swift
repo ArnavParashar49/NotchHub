@@ -27,6 +27,9 @@ final class IslandModel: ObservableObject {
     @Published var notchInset: CGFloat = 0
     /// The notch's width — the gap the wings leave in the middle.
     @Published var notchWidth: CGFloat = 0
+    /// The hardware notch in the hosting window's SwiftUI coordinates (like
+    /// `localFrame`): where NEO's wake light keeps its glow off.
+    @Published var notchFrame: CGRect?
     /// Whether the island is idle (tucked behind the notch).
     @Published var isIdle: Bool = true
     /// What the two wings show while the island is in its sideways peek.
@@ -88,7 +91,8 @@ struct IslandRootView: View {
             hasNotch: model.hasNotch,
             listening: nil,
             neoListeningActive: model.neoListeningActive,
-            neoListeningAnimationPaused: model.contextMenuTracking
+            neoListeningAnimationPaused: model.contextMenuTracking,
+            notchFrame: model.notchFrame
         )
     }
 }

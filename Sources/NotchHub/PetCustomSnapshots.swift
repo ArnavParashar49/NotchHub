@@ -174,7 +174,7 @@ enum PetCustomSnapshots {
         var hat: PetHat? = nil
         var accessory: PetAccessory? = nil
         var look: PetLook = .fox
-        var glow: PetGlowColor = .teal
+        var glow: PetGlowColor = .blue
         /// Seconds NEO has been listening; `nil`: it is not.
         var listening: TimeInterval? = nil
         var activity: Activity? = nil

@@ -273,6 +273,8 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         // hundreds of points apart).
         window.apply(state: .idle)
         islandModel.localFrame = window.swiftUIFrame(for: .idle)
+        // Idle with no dock is exactly the notch.
+        islandModel.notchFrame = geometry.hasNotch ? window.swiftUIFrame(for: .idle, content: .default) : nil
         window.orderFrontRegardless()
 
         registerHotKeys()

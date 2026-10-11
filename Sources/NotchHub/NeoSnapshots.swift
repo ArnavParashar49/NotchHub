@@ -6,9 +6,9 @@ import UniformTypeIdentifiers
 /// `--neo-snapshots DIR`: the real `IslandView` with the pet posing as NEO,
 /// rendered offscreen with `ImageRenderer` in each of NEO's states and in
 /// the island shapes it can be in, so each pose can be checked without a
-/// core or a screen recording. While NEO listens, a blue beam travels around a
-/// black-supported outline of the island silhouette, centred on the notch. The hardware cutout is
-/// masked in black over each row. An optional filter keeps only
+/// core or a screen recording. While NEO listens, the island's rim lights
+/// (`NeoWakeOutlineView`). The hardware cutout is masked in black over each
+/// row. An optional filter keeps only
 /// the rows whose name contains it (`--neo-snapshots DIR listening`). The
 /// last row is NEO's panel (its chat hangs down from the notch, with no pet)
 /// with a stand-in for the page: a web view cannot be rendered offscreen.
@@ -98,6 +98,7 @@ enum NeoSnapshots {
         _ row: Row, geometry: NotchGeometry,
         regionMinX customMinX: CGFloat? = nil, regionSize: CGSize? = nil,
         outlineClock: Date? = nil, outlineActivation: Double? = nil, outlineActive: Bool? = nil, glow: UInt32? = nil,
+        outlineReduceMotion: Bool? = nil,
         background: Color? = Color(.sRGB, red: 0.42, green: 0.42, blue: 0.45)
     ) -> Scene {
         let notch = geometry.notchFrame
@@ -132,7 +133,9 @@ enum NeoSnapshots {
             listening: nil,
             neoListeningActive: outlineActive ?? (row.neo == .listening),
             neoListeningClock: outlineClock,
-            neoListeningActivation: outlineActivation
+            neoListeningActivation: outlineActivation,
+            neoListeningReduceMotion: outlineReduceMotion,
+            notchFrame: CGRect(x: notch.minX - regionMinX, y: 0, width: notch.width, height: notch.height)
         )
         .frame(width: regionWidth, height: rowHeight)
         .background(background ?? .clear)
@@ -160,14 +163,14 @@ enum NeoSnapshots {
         let songListening = Activity(kind: .songRecognition, title: "Listening for a song", subtitle: "Listening · 0:04")
         let identifiedSong = Activity(kind: .identifiedSong, title: "Midnight City", subtitle: "M83 · Hurry Up, We're Dreaming · 2011", artwork: coverSample)
         rows += [
-            // Listening outlines the physical notch, regardless of the island's width.
-            Row(name: "idle, listening — moving blue notch outline", state: .idle, neo: .listening),
-            Row(name: "idle on the LEFT of the notch, listening — moving outline", state: .idle, neo: .listening, dock: PetDock(side: .left, reach: PetLayout.idleDock)),
-            Row(name: "wings, listening — moving blue notch outline", state: .wings, neo: .listening, wings: wings),
-            Row(name: "compact (volume), listening — moving blue notch outline", state: .compact, neo: .listening, activity: .volume(0.62)),
+            // Listening lights the island's rim, whatever its shape.
+            Row(name: "idle, listening — wake rim lit", state: .idle, neo: .listening),
+            Row(name: "idle on the LEFT of the notch, listening — wake rim lit", state: .idle, neo: .listening, dock: PetDock(side: .left, reach: PetLayout.idleDock)),
+            Row(name: "wings, listening — wake rim lit", state: .wings, neo: .listening, wings: wings),
+            Row(name: "compact (volume), listening — wake rim lit", state: .compact, neo: .listening, activity: .volume(0.62)),
             Row(name: "compact (song recognition), listening", state: .compact, neo: .listening, activity: songListening),
             Row(name: "identified song popup", state: .expanded, neo: .speaking, activity: identifiedSong, drawsHardwareNotch: false),
-            Row(name: "expanded (music), listening — moving blue notch outline", state: .expanded, neo: .listening, activity: song),
+            Row(name: "expanded (music), listening — wake rim lit", state: .expanded, neo: .listening, activity: song),
             Row(name: "compact (volume), speaking", state: .compact, neo: .speaking, activity: .volume(0.62)),
             Row(name: "expanded (music), thinking", state: .expanded, neo: .thinking, activity: song),
             Row(name: "NEO panel (the chat, \(Int(NeoPanelLayout.standard.width))×\(Int(NeoPanelLayout.standard.height)) under the notch), speaking — no pet", state: .neoPanel, neo: .speaking),
@@ -223,7 +226,7 @@ enum NeoSnapshots {
                 let delta = frame.width - plain.width
                 line += String(format: " — %+.0f pt listening width", delta)
                 if abs(delta) > 0.5 { line += " — UNEXPECTED LISTENING GEOMETRY" }
-                line += " — moving notch outline"
+                line += " — rim lit"
             }
             print(line)
         }

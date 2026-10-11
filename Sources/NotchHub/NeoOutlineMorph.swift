@@ -23,7 +23,7 @@ import UniformTypeIdentifiers
 ///   as the main thread allows with the island at rest.
 ///
 /// Times are wall-clock, so two runs differ by a frame or so; the pet and
-/// the beams run live.
+/// the light run live.
 @MainActor
 enum NeoOutlineMorph {
 
@@ -74,6 +74,17 @@ enum NeoOutlineMorph {
         var stamps: [TimeInterval] = []
         var last: Data?
         var count = 0
+        /// The light's own frame count when the probe began, and its rate.
+        var drawnAtStart = 0
+        var drawnRate = 0.0
+        /// CPU seconds per second, the island at rest without and with the light.
+        var idleCPU = 0.0
+        var litCPU = 0.0
+        /// The memory footprint at rest, without and with the light, in MB.
+        var idleFootprint = 0.0
+        var litFootprint = 0.0
+        /// How long the lit measurement runs.
+        var quietSeconds: TimeInterval = 1
         init(root: URL, geometry: NotchGeometry, region: CGRect, queue: [Change]) {
             self.root = root
             self.geometry = geometry
@@ -103,7 +114,11 @@ enum NeoOutlineMorph {
 
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
-        let run = Run(root: root, geometry: geometry, region: region, queue: changes)
+        // `--outline-pacing-only`: skip the changes and measure the redraw
+        // rate and CPU alone (for profiling, with a longer lit stretch).
+        let pacingOnly = arguments.contains("--outline-pacing-only")
+        let run = Run(root: root, geometry: geometry, region: region, queue: pacingOnly ? [] : changes)
+        run.quietSeconds = pacingOnly ? 4 : 1
         run.window.isOpaque = false
         run.window.backgroundColor = .clear
         run.window.hasShadow = false
@@ -139,6 +154,8 @@ enum NeoOutlineMorph {
             model.wingStatus = pose.row.wings ?? WingStatus()
             model.notchInset = run.geometry.notchFrame.height
             model.notchWidth = run.geometry.notchFrame.width
+            model.notchFrame = CGRect(x: run.geometry.notchFrame.minX - run.region.minX, y: 0,
+                                      width: run.geometry.notchFrame.width, height: run.geometry.notchFrame.height)
             model.surfaceVisible = true
             model.hasNotch = true
             model.neoListeningActive = pose.listening
@@ -270,12 +287,52 @@ enum NeoOutlineMorph {
     /// back to back for a second and counts how often what is drawn changes:
     /// the outline's real redraw rate (the pet holds a cel far longer).
     static func pacing(_ run: Run) {
-        apply(Pose(row: NeoSnapshots.Row(name: "wings", state: .wings, neo: .listening, wings: NeoSnapshots.wingsSample)),
-              run: run, animation: nil)
-        later(0.5) {
-            run.start = Date()
-            sample(run)
+        let wings = NeoSnapshots.Row(name: "wings", state: .wings, neo: .listening, wings: NeoSnapshots.wingsSample)
+        apply(Pose(row: wings, listening: false), run: run, animation: nil)
+        // The process's CPU time over a quiet second (no snapshots competing
+        // for the main thread): first without the light, then with it, and
+        // the light's own frame count meanwhile.
+        later(0.6) {
+            let idleStart = (Date(), cpuTime())
+            later(1.0) {
+                run.idleCPU = (cpuTime() - idleStart.1) / Date().timeIntervalSince(idleStart.0)
+                run.idleFootprint = footprint()
+                apply(Pose(row: wings), run: run, animation: nil)
+                later(2.0) { // past the wake, into the settled light
+                    let quietStart = (Date(), cpuTime())
+                    run.drawnAtStart = NeoWakeOutlineView.framesDrawn
+                    later(run.quietSeconds) {
+                        let seconds = Date().timeIntervalSince(quietStart.0)
+                        run.drawnRate = Double(NeoWakeOutlineView.framesDrawn - run.drawnAtStart) / seconds
+                        run.litCPU = (cpuTime() - quietStart.1) / seconds
+                        run.litFootprint = footprint()
+                        // …then what snapshots can see.
+                        run.start = Date()
+                        sample(run)
+                    }
+                }
+            }
         }
+    }
+
+    /// This process's physical memory footprint, in MB.
+    static func footprint() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return result == KERN_SUCCESS ? Double(info.phys_footprint) / 1_048_576 : 0
+    }
+
+    /// This process's user + system CPU time so far, in seconds.
+    static func cpuTime() -> Double {
+        var usage = rusage()
+        getrusage(RUSAGE_SELF, &usage)
+        func seconds(_ t: timeval) -> Double { Double(t.tv_sec) + Double(t.tv_usec) / 1_000_000 }
+        return seconds(usage.ru_utime) + seconds(usage.ru_stime)
     }
 
     static func sample(_ run: Run) {
@@ -288,18 +345,31 @@ enum NeoOutlineMorph {
             later(0.002) { sample(run) }
             return
         }
-        let stamps = run.stamps
+        // Then listening ends; once the light has gone, the memory again.
+        let sampled = (count: run.count, seconds: t, stamps: run.stamps)
+        apply(Pose(row: NeoSnapshots.Row(name: "wings", state: .wings, neo: .listening, wings: NeoSnapshots.wingsSample), listening: false),
+              run: run, animation: nil)
+        later(2.0) { report(run, sampled: sampled, afterFootprint: footprint()) }
+    }
+
+    static func report(_ run: Run, sampled: (count: Int, seconds: TimeInterval, stamps: [TimeInterval]), afterFootprint: Double) {
+        let stamps = sampled.stamps, t = sampled.seconds
         let gaps = zip(stamps.dropFirst(), stamps).map { $0 - $1 }.sorted()
         let median = gaps.isEmpty ? 0 : gaps[gaps.count / 2]
         let screenHz = NSScreen.main?.maximumFramesPerSecond ?? 0
         let report = String(format: """
-            wake outline redraw rate, island at rest (wings), listening
+            wake light redraw rate, island at rest (wings), listening, settled
             display: up to %d Hz (NSScreen.maximumFramesPerSecond)
-            samples taken: %d in %.2f s
-            distinct frames drawn: %d → %.0f per second (median gap %.1f ms)
-            TimelineView(.animation(minimumInterval: 1/60)) caps the beams at 60 fps
+            frames of light computed by its TimelineView over a quiet second: %.0f per second
+              (the wake and the exit run at the display's rate; settled, the light asks for 60 — see NeoWakeOutlineView.settledInterval)
+            process CPU at rest: %.1f %% without the light, %.1f %% with it → about %.2f ms of CPU per frame of light
+            memory footprint: %.1f MB without the light, %.1f MB with it, %.1f MB 2 s after it went out
+            snapshots taken: %d in %.2f s (each cacheDisplay is slow, so this caps what they can see)
+            distinct snapshots: %d → %.0f per second (median gap %.1f ms)
 
-            """, screenHz, run.count, t, stamps.count, Double(max(0, stamps.count - 1)) / t, median * 1000)
+            """, screenHz, run.drawnRate, run.idleCPU * 100, run.litCPU * 100,
+            run.drawnRate > 0 ? (run.litCPU - run.idleCPU) * 1000 / run.drawnRate : 0,
+            run.idleFootprint, run.litFootprint, afterFootprint, sampled.count, t, stamps.count, Double(max(0, stamps.count - 1)) / t, median * 1000)
         print(report, terminator: "")
         try? report.write(to: run.root.appendingPathComponent("pacing.txt"), atomically: true, encoding: .utf8)
         exit(0)

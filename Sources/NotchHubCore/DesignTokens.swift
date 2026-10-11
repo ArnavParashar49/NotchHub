@@ -53,6 +53,13 @@ public enum DesignTokens {
     /// black, complements the fox's orange, and stays distinct from the
     /// now-playing visualizer and macOS microphone/camera indicators.
     public static let listeningGlow = Color(red: 0.40, green: 0.88, blue: 0.96)
+    /// NEO's wake light: the island's rim while NEO listens (the "Blue"
+    /// setting, the default). A cool, clean blue — clearly blue rather than
+    /// cyan, lighter than the "Sky" option — chosen to read as light on the
+    /// island's black and as a crisp edge on a white wallpaper.
+    public static let wakeLight = Color(.sRGB, red: wakeLightRGB.red, green: wakeLightRGB.green, blue: wakeLightRGB.blue)
+    /// `wakeLight`'s components, for the light's per-stop colour mixing.
+    public static let wakeLightRGB: (red: Double, green: Double, blue: Double) = (0.40, 0.75, 1.0)
     /// How a pulse cut short leaves, when listening ends before it is over:
     /// a quick ease-out from wherever it was. (A whole pulse needs nothing:
     /// its own curve — `NeoListeningLayout.pulse` — begins and ends dark.)
