@@ -186,6 +186,94 @@ struct NeoListenerParsingTests {
         #expect(NeoListener.facts(in: #"{"type":"song_state","data":{"sid":"m1"},"ts":1}"#).isEmpty)
     }
 
+    /// An NBF1 v1 packet as NEO's `pack_frame` lays it out: 64 header bytes
+    /// (magic, version, kind, header length, the 16-byte session, …, the
+    /// MIME code at byte 56), then the image.
+    private func packet(sid: [UInt8] = Array(0..<16), version: UInt8 = 1, kind: UInt8 = 3, header: Int = 64,
+                        mime: UInt8 = 1, image: Data = Data([0xFF, 0xD8, 0xFF, 0xD9])) -> Data {
+        var bytes = [UInt8](repeating: 0, count: 64)
+        bytes.replaceSubrange(0..<4, with: Array("NBF1".utf8))
+        bytes[4] = version
+        bytes[5] = kind
+        bytes[6] = UInt8(header & 0xFF)
+        bytes[7] = UInt8(header >> 8)
+        bytes.replaceSubrange(8..<24, with: sid)
+        bytes[56] = mime
+        return Data(bytes) + image
+    }
+
+    @Test("a camera frame is read from NEO's NBF1 packet, and anything else is not a frame")
+    func cameraFrames() {
+        let jpeg = Data([0xFF, 0xD8, 0xFF, 0xD9])
+        let parsed = NeoListener.cameraImage(in: packet(image: jpeg))
+        // The session as NEO writes it in JSON: base64url, unpadded.
+        #expect(parsed?.0 == Data(Array(0..<16) as [UInt8]).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: ""))
+        #expect(parsed?.0.count == 22)
+        #expect(parsed?.1 == jpeg)
+        // A session id with the characters base64url swaps.
+        #expect(NeoListener.cameraImage(in: packet(sid: [UInt8](repeating: 0xFB, count: 16)))?.0.contains { "+/=".contains($0) } == false)
+
+        var wrongMagic = packet()
+        wrongMagic[0] = UInt8(ascii: "X")
+        let rejected: [(String, Data)] = [
+            ("wrong magic", wrongMagic),
+            ("another version", packet(version: 2)),
+            ("a browser page, not the camera", packet(kind: 1)),
+            ("a still", packet(kind: 2)),
+            ("not a JPEG", packet(mime: 2)),
+            ("a header shorter than the layout", packet(header: 32)),
+            ("a header past the packet", packet(header: 200)),
+            ("no image", packet(image: Data())),
+            ("too short", Data(packet().prefix(63))),
+            ("too big", packet(image: Data(count: 2_000_000))),
+        ]
+        for (name, data) in rejected {
+            #expect(NeoListener.cameraImage(in: data) == nil, "\(name)")
+        }
+    }
+
+    @Test("camera frames reach the island at most 24 times a second, however fast NEO sends them")
+    func cameraFramePace() {
+        let interval = NeoListener.cameraFrameInterval
+        #expect(abs(interval - 1.0 / 24.0) < 1e-12)
+        #expect(NeoListener.cameraFrameDue(at: 100 + interval, after: 100))
+        #expect(!NeoListener.cameraFrameDue(at: 100 + interval * 0.9, after: 100))
+        // The first frame always goes.
+        #expect(NeoListener.cameraFrameDue(at: Date.timeIntervalSinceReferenceDate, after: 0))
+        // NEO at 60 fps for one second: 20 frames go on, never more than 24.
+        for fps in [30.0, 60.0, 120.0] {
+            var last: TimeInterval = 0
+            var shown = 0
+            for i in 0..<Int(fps) {
+                let now = 1000 + Double(i) / fps
+                if NeoListener.cameraFrameDue(at: now, after: last) {
+                    last = now
+                    shown += 1
+                }
+            }
+            #expect(shown <= 24 && shown >= Int(min(fps, 24)) / 2, "\(fps) fps → \(shown)")
+        }
+    }
+
+    @Test("gentle check-ins: where the switch stands is read like the wake word, and goes out as the core's set command")
+    func wellbeingCheckins() {
+        #expect(NeoListener.coreSettings(in: #"{"type":"hello","data":{"state":"idle","wake_word":true,"wellbeing_checkins":false},"ts":1}"#)
+            == NeoCoreSettings(wakeWord: true, wellbeingCheckins: false))
+        // A settings event about check-ins alone is still where the switches stand.
+        #expect(NeoListener.coreSettings(in: #"{"type":"settings","data":{"wellbeing_checkins":true},"ts":1}"#)
+            == NeoCoreSettings(wellbeingCheckins: true))
+        // Only a real boolean is an answer.
+        for odd in [#""true""#, "1", "null"] {
+            #expect(NeoListener.coreSettings(in: #"{"type":"settings","data":{"wellbeing_checkins":\#(odd)},"ts":1}"#) == nil, "\(odd)")
+            #expect(NeoListener.coreSettings(in: #"{"type":"hello","data":{"state":"idle","wellbeing_checkins":\#(odd)},"ts":1}"#)
+                == NeoCoreSettings(), "\(odd)")
+        }
+        #expect(NeoSetting.wellbeingCheckins(true).name == "wellbeing_checkins")
+        #expect(NeoSetting.wellbeingCheckins(true).command == #"{"cmd":"set","name":"wellbeing_checkins","value":true}"#)
+        #expect(NeoSetting.wellbeingCheckins(false).command == #"{"cmd":"set","name":"wellbeing_checkins","value":false}"#)
+    }
+
     @Test("NEO summoned by hand (the hotkey, the tray) is a fact for the panel")
     func woke() {
         #expect(NeoListener.facts(in: #"{"type":"woke","data":{"source":"ui"},"ts":1}"#) == [.woke])

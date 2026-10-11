@@ -308,12 +308,15 @@ public final class NeoListener: NSObject, SystemListener {
                         }
                     } else if case let .data(frame) = message,
                               let (sid, image) = Self.cameraImage(in: frame),
-                              sid == self.cameraSID,
-                              Date.timeIntervalSinceReferenceDate - self.lastCameraFrameAt >= (1.0 / 24.0) {
-                        self.lastCameraFrameAt = Date.timeIntervalSinceReferenceDate
-                        self.emit(SystemEvent(source: .neo, payload: .neo(.cameraFrame(image))))
+                              sid == self.cameraSID {
+                        let now = Date.timeIntervalSinceReferenceDate
+                        if Self.cameraFrameDue(at: now, after: self.lastCameraFrameAt) {
+                            self.lastCameraFrameAt = now
+                            self.emit(SystemEvent(source: .neo, payload: .neo(.cameraFrame(image))))
+                        }
                     }
-                    // Binary frames (page and camera pictures) are not for us.
+                    // Every other binary frame (a browser card's page, another
+                    // session's camera, a malformed packet) is not for us.
                     self.receive(on: task)
                 case .failure:
                     self.dropped(task)
@@ -518,9 +521,20 @@ public final class NeoListener: NSObject, SystemListener {
         }
     }
 
+    /// The preview's pace: at most 24 camera frames a second reach the island,
+    /// however fast NEO sends them.
+    static let cameraFrameInterval: TimeInterval = 1.0 / 24.0
+
+    /// Whether a camera frame arriving at `now` goes on to the island, the
+    /// last one having gone at `last` (both reference-date seconds).
+    static func cameraFrameDue(at now: TimeInterval, after last: TimeInterval) -> Bool {
+        now - last >= cameraFrameInterval
+    }
+
     /// NBF1 v1 camera packet: the first 64 bytes are metadata, the rest JPEG.
     /// Reject other frame kinds, oversized payloads and stale/malformed headers.
-    private static func cameraImage(in packet: Data) -> (String, Data)? {
+    /// Returns the session id (as NEO writes it in JSON) and the image bytes.
+    static func cameraImage(in packet: Data) -> (String, Data)? {
         guard packet.count >= 64, packet.count <= 2_000_000,
               packet.prefix(4) == Data("NBF1".utf8), packet[4] == 1, packet[5] == 3 else { return nil }
         let header = Int(packet[6]) | Int(packet[7]) << 8

@@ -127,6 +127,43 @@ struct NeoShellTests {
         }
     }
 
+    @Test("“Gentle check-ins” is the core's setting like the wake word: off unless the core says on, dimmed when nobody can say")
+    func wellbeingCheckins() {
+        // One set command with a real boolean, read back the way the core says it.
+        for on in [true, false] {
+            let setting = NeoSetting.wellbeingCheckins(on)
+            #expect(setting.name == "wellbeing_checkins")
+            let object = try? JSONSerialization.jsonObject(with: Data(setting.command.utf8)) as? [String: Any]
+            #expect(Set((object ?? [:]).keys) == ["cmd", "name", "value"])
+            #expect(object?["cmd"] as? String == "set" && object?["name"] as? String == "wellbeing_checkins")
+            #expect(NeoCoreSettings(payload: ["wellbeing_checkins": object?["value"] as Any]).wellbeingCheckins == on)
+            // The intent is the core's to do, not NEO.app's shell's.
+            #expect(NeoSettingsIntent.wellbeingCheckins(on).setting == .wellbeingCheckins(on))
+            #expect(NeoSettingsIntent.wellbeingCheckins(on).shellAction == nil)
+        }
+        for odd in ["true", 0, 1, NSNull()] as [Any] {
+            #expect(NeoCoreSettings(payload: ["wellbeing_checkins": odd]).wellbeingCheckins == nil, "\(odd)")
+        }
+        // The two settings are read apart.
+        #expect(NeoCoreSettings(payload: ["wake_word": true, "wellbeing_checkins": false]) == NeoCoreSettings(wakeWord: true, wellbeingCheckins: false))
+
+        let on = NeoSettingsModel(featureOn: true, connected: true, shell: ready, core: NeoCoreSettings(wellbeingCheckins: true))
+        #expect(on.wellbeingCheckins == true && on.checkinsForSounds && on.isEnabled(.wellbeingCheckins(false)))
+        let off = NeoSettingsModel(featureOn: true, connected: true, shell: ready, core: NeoCoreSettings(wellbeingCheckins: false))
+        #expect(off.wellbeingCheckins == false && !off.checkinsForSounds && off.isEnabled(.wellbeingCheckins(true)))
+        // Honest about what leaves the Mac.
+        #expect(on.wellbeingCheckinsCaption.contains("on-device") && on.wellbeingCheckinsCaption.contains("Gemini"))
+        // NEO not running, the feature off, or a core too old to say: off, and dimmed.
+        for model in [
+            NeoSettingsModel(featureOn: true, connected: false, shell: ready, core: NeoCoreSettings(wellbeingCheckins: true)),
+            NeoSettingsModel(featureOn: false, connected: true, shell: ready, core: NeoCoreSettings(wellbeingCheckins: true)),
+            NeoSettingsModel(featureOn: true, connected: true, shell: ready, core: NeoCoreSettings(wakeWord: true)),
+        ] {
+            #expect(model.wellbeingCheckins == nil && !model.checkinsForSounds, "\(model.availability)")
+            #expect(!model.isEnabled(.wellbeingCheckins(true)) && !model.isEnabled(.wellbeingCheckins(false)), "\(model.availability)")
+        }
+    }
+
     @Test("NEO running, everything allowed: every row works, and nothing asks to be allowed or started")
     func readyModel() {
         let model = NeoSettingsModel(featureOn: true, connected: true, shell: ready)
