@@ -301,9 +301,10 @@ extension NotchHubApp {
         }
     }
 
-    /// The left wing's width as the hit layouts need it.
+    /// Where the notch sits inside the hover wings, as the hit layouts need
+    /// it (`IslandContentSize.wingHitLead`): the centred strip's wider side.
     var wingHitLead: CGFloat? {
-        islandModel.contentSize.wingLead
+        islandModel.contentSize.wingHitLead
     }
 
     // MARK: - Demo
