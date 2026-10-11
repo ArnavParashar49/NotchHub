@@ -253,6 +253,7 @@ extension NotchHubApp {
         case .dnd: return Activity(kind: .dnd, title: "Do Not Disturb", subtitle: "On", symbol: "moon.zzz.fill")
         case .wifi: return Activity(kind: .wifi, title: "Wi-Fi", subtitle: "Connected", symbol: "wifi")
         case .clipboard: return Activity(kind: .clipboard, title: "Clipboard", subtitle: "Copied", symbol: "doc.on.clipboard")
+        case .songRecognition: return Activity(kind: .songRecognition, title: "Listening for a song", subtitle: "Listening · 0:04", progress: 0.4)
         default: return Activity(kind: kind, title: kind.rawValue, symbol: kind.defaultSymbol)
         }
     }

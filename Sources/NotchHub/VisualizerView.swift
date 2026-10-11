@@ -9,13 +9,16 @@ import SwiftUI
 struct MusicVisualizer: View {
     let isPlaying: Bool
     var color: Color = DesignTokens.accent
+    /// Optional single-color treatment for NEO's listening state.
+    var tint: Color? = nil
     
     /// Horizontally longer as requested (was 24).
     var width: CGFloat = 48
     var height: CGFloat = 14
     
-    /// Number of bars in the visualizer.
-    private let barCount = 12
+    /// Keep the bars fine as the visualizer grows into a wider lane.
+    /// At the default 48pt width this remains the original 12 bars.
+    private var barCount: Int { max(12, Int(width / 5)) }
     private let spacing: CGFloat = 2
 
     var body: some View {
@@ -54,7 +57,7 @@ struct MusicVisualizer: View {
 
                 // Each bar's colour is a point on the horizontal sweep, so the
                 // strip transitions green → cyan left to right.
-                let barColor = interpolate(t: indexFactor)
+                let barColor = tint ?? interpolate(t: indexFactor)
 
                 RoundedRectangle(cornerRadius: 1, style: .continuous)
                     // A vertical gradient per bar — brighter at the top, dimmer

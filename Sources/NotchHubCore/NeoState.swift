@@ -63,8 +63,14 @@ public enum NeoFact: Equatable, Sendable {
     case note(String)
     /// Something went wrong in the core.
     case error(String)
-    /// A card (the browser, the camera, a song) opened or closed in the chat.
+    /// A card opened or closed by NEO. The browser uses chat; camera and song
+    /// cards are handled by NotchHub's native surfaces.
     case card(NeoCardKind, open: Bool)
+    /// NEO's song-identification state for a native notch surface.
+    case songCard(NeoSongCardState)
+    /// NEO's camera status; image bytes are a separate ephemeral update.
+    case cameraCard(NeoCameraCardState)
+    case cameraFrame(Data)
     /// NEO was summoned by hand — the hotkey, the menu-bar item, its orb —
     /// rather than by its wake word: the user asked to see it.
     case woke

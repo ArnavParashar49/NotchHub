@@ -92,6 +92,9 @@ extension NotchHubApp {
         case .camera:
             return cameraContent()
 
+        case .neoCamera:
+            return neoCameraContent()
+
         case .neo:
             return neoPanelContent()
 
@@ -156,6 +159,12 @@ extension NotchHubApp {
         switch panel {
         case .camera:
             camera.close()
+        case .neoCamera:
+            monitor?.neoCameraStop()
+            monitor?.neoCameraVisible(false)
+            neoCameraStream.frame = nil
+            neoCameraStream.boxes = []
+            neoCameraState = nil
         case .teleprompter:
             teleprompter.pause()
         case .fileDrop:
@@ -277,6 +286,7 @@ extension NotchHubApp {
         case .pet: closePetPanel()
         case .teleprompter: closeTeleprompter()
         case .camera: closeCamera()
+        case .neoCamera: closePanel()
         case .neo: closeNeoPanel()
         case .none: break
         }

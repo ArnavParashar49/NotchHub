@@ -225,6 +225,17 @@ public final class SystemMonitor {
         entries.compactMap { $0.listener as? NeoListener }.forEach { $0.send(answer) }
     }
 
+    /// Lets NEO stream its live camera only while the native notch surface is
+    /// showing it. Hidden clients receive no camera frames.
+    public func neoCameraVisible(_ visible: Bool) {
+        entries.compactMap { $0.listener as? NeoListener }.forEach { $0.setCameraVisible(visible) }
+    }
+
+    /// Stops NEO's camera capture when its native notch surface closes.
+    public func neoCameraStop() {
+        entries.compactMap { $0.listener as? NeoListener }.forEach { $0.stopCamera() }
+    }
+
     /// Asks the meeting listener to read the call's state again soon.
     public func refreshMeeting() {
         entries.compactMap { $0.listener as? MeetingListener }.forEach { $0.pollSoon() }

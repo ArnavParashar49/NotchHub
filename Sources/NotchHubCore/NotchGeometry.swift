@@ -43,17 +43,15 @@ public struct NotchGeometry: Equatable {
 
     // MARK: - Tuning
 
-    /// How far the compact bar stretches to the LEFT of the notch edge.
+    /// Default space needed by compact content on the LEFT of the notch.
     ///
-    /// The compact bar is exactly notch-height and grows LEFT and RIGHT — it
-    /// never expands downward, so a transient activity (a volume change, a
-    /// battery readout) shows alongside the notch instead of as a pill hanging
-    /// under it. The two sides are deliberately asymmetric: the left holds only
-    /// the activity's glyph, so it stays snug — just the icon and a hair of
-    /// inset — while the right holds the title and value and needs the room.
+    /// The compact bar is exactly notch-height and grows equally to both sides
+    /// of the notch center. Its content can still use different widths on each
+    /// side; the shorter side is balanced inside the centered surface.
     public static let compactLeadOverhang: CGFloat = 40
-    /// How far the compact bar stretches to the RIGHT of the notch edge —
-    /// enough for a full track title beside its artist without truncating.
+    /// Default space needed by compact content on the RIGHT of the notch —
+    /// enough for a title and value. The surface uses the larger side on both
+    /// sides to stay centered.
     public static let compactTrailOverhang: CGFloat = 116
     /// The resting width of a wing beside the notch, before its content has
     /// been measured.
@@ -148,13 +146,13 @@ public struct NotchGeometry: Equatable {
             height: notchHeight
         )
 
-        // The compact bar is asymmetric: a snug left wing for the glyph and a
-        // wider right wing for the title. Its origin is set so the notch region
-        // inside it still centres on the real notch — otherwise the cutout would
-        // drift and content would land under the physical notch.
-        let compactWidth = notchWidth + compactLeadOverhang + compactTrailOverhang
+        // Content needs different amounts of room on either side, but the
+        // island itself grows equally around the notch so it never looks off
+        // centre. The content view balances the shorter side internally.
+        let compactSide = max(compactLeadOverhang, compactTrailOverhang)
+        let compactWidth = notchWidth + compactSide * 2
         let compact = CGRect(
-            x: screenFrame.midX - compactLeadOverhang - notchWidth / 2,
+            x: notch.midX - compactWidth / 2,
             y: screenFrame.maxY - notchHeight,
             width: compactWidth,
             height: notchHeight
@@ -233,11 +231,15 @@ public struct NotchGeometry: Equatable {
         case .idle:
             // The pet's dock beside the notch (see `PetDock`); without one — or
             // while the pet hides in the notch — idle is exactly the notch.
-            guard let dock = content.petDock, dock.reach > 0 else { return notchFrame }
-            return compactBar(lead: dock.lead, trail: dock.trail)
+            let lead = content.petDock?.lead ?? 0
+            let trail = content.petDock?.trail ?? 0
+            guard lead + trail > 0 else { return notchFrame }
+            return compactBar(lead: lead, trail: trail)
         case .wings: return compactBar(lead: content.wingLead ?? content.wingSide, trail: content.wingSide)
         case .compact: return compactBar(lead: content.compactLead, trail: content.compactTrail)
-        case .expanded: return expandedFrame
+        case .expanded:
+            if let size = content.expandedSize { return panel(width: size.width, height: size.height) }
+            return expandedFrame
         case .interactive: return interactiveFrame
         case .appPanel: return appPanelFrame(height: content.panelHeight)
         case .tray: return trayFrame
@@ -301,17 +303,16 @@ public struct NotchGeometry: Equatable {
 
     /// The compact bar sized to a specific lead/trail width.
     ///
-    /// The compact bar is asymmetric — a snug left wing for the glyph and a
-    /// wider right wing for the title — so its origin is set from the LEAD
-    /// width, keeping the notch region inside it centred on the real notch.
-    /// Without that, the cutout drifts and content lands under the physical
-    /// notch.
+    /// Content may need different widths on each side, but the surface grows
+    /// equally from the notch center. The views balance their content inside
+    /// the wider side so the physical notch remains centered in every state.
     public func compactBar(lead: CGFloat, trail: CGFloat) -> CGRect {
         let l = min(max(0, lead), Self.maxContentOverhang)
         let t = min(max(0, trail), Self.maxContentOverhang)
-        let width = notchFrame.width + l + t
+        let side = max(l, t)
+        let width = notchFrame.width + side * 2
         return CGRect(
-            x: screenFrame.midX - l - notchFrame.width / 2,
+            x: notchFrame.midX - width / 2,
             y: screenFrame.maxY - notchFrame.height,
             width: width,
             height: notchFrame.height

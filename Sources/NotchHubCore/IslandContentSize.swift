@@ -27,6 +27,8 @@ public struct IslandContentSize: Equatable, Sendable {
     /// The height a content-driven panel needs (an app panel with extra rows).
     /// `nil` uses the panel's standard height.
     public var panelHeight: CGFloat? = nil
+    /// A smaller, content-specific `.expanded` surface, such as NEO's song popup.
+    public var expandedSize: CGSize? = nil
     /// The IDLE island's home for the pixel pet beside the notch — which side,
     /// and how far it reaches out. `nil` (no pet dock) keeps idle exactly the
     /// notch.

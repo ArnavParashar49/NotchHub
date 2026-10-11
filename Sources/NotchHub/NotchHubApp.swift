@@ -97,12 +97,11 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
 
     // NEO in the notch: the pet IS NEO. Its presence is state the app keeps,
     // like the weather: never an activity, so it never competes with one, and
-    // never a change of shape — only the pet's pose, and one pulse of light
-    // behind it when NEO starts to listen. See `+Neo`.
+    // never a change of shape — only the pet's pose and a moving outline on the notch
+    // while NEO listens. See `+Neo`.
     var neoPresence = NeoPresenceModel()
-    /// The one thing NEO adds to the island: each time it starts LISTENING
-    /// (its mic is live) a soft glow pulses once behind the pet. It takes no
-    /// room. Fed NEO's held state; see `+Neo`.
+    // Retained for the standalone listening snapshot/demo helpers. The live
+    // island now uses `neoListeningActive` and the moving blue notch outline.
     var neoListening = NeoListeningIndicator()
     /// Whether NEO's panel (its chat, below the notch) is open — fed NEO's
     /// state from the presence's hold, so the two always agree. See `+NeoPanel`.
@@ -127,6 +126,18 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     /// The page size NEO's page last asked for (a browser card wants more
     /// than the chat); `nil` is the chat's own size.
     var neoPanelRequest: CGSize?
+    /// NEO's camera frames are short-lived UI data, held only while the native
+    /// camera surface is visible. They are never written to disk.
+    let neoCameraStream = NeoCameraStream()
+    var neoCameraState: NeoCameraCardState?
+    var neoCameraExpanded = false
+    var neoCameraMirrored = true
+    /// One native island activity carries NEO's song meter/result without
+    /// opening the embedded chat.
+    var neoSongActivityID: UUID?
+    var neoSongSID: String?
+    var neoSongCardState: NeoSongCardState?
+    var neoSongDismissTask: Task<Void, Never>?
     /// Comes back when NEO's presence or the panel will change on its own (a
     /// held state, the settle after idle, the panel folding).
     var neoWakeTask: Task<Void, Never>?
@@ -166,7 +177,7 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     }()
 
     /// A panel that temporarily replaces the queue-driven island.
-    enum Panel { case none, tray, settings, fileDrop, pet, teleprompter, camera, neo }
+    enum Panel { case none, tray, settings, fileDrop, pet, teleprompter, camera, neoCamera, neo }
     var panel: Panel = .none
 
     /// The teleprompter's script and scroll position. Kept across openings, so
@@ -221,6 +232,9 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         window.onMouseMove = { [weak self] point in
             self?.updateHoveredControl(at: point)
             self?.petMouseMoved(point)
+        }
+        window.onContextMenuTrackingChanged = { [weak self] tracking in
+            self?.islandModel.contextMenuTracking = tracking
         }
         window.onClick = { [weak self] in self?.islandClicked() }
         window.onControlHit = { [weak self] point in
@@ -512,8 +526,6 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         syncNeoConfirm()
         let petUpdate = updatePet()
         let state = currentIslandState()
-        // After the pet: on the idle dock the listening pulse waits for the
-        // pet to stand at its spot.
         let listening = updatedNeoListeningMark(for: state)
         // Before anything is drawn for this shape: a surface that must not be
         // captured has to be out of the capture path BEFORE its first frame.
@@ -558,9 +570,10 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             model.wingStatus = status
             model.panelContent = panel
             model.meeting = meeting
-            // NEO's listening pulse keeps its own timing, whatever spring
-            // moves the island around it: it changes nothing about the shape.
+            // The listening outline is independent of the island's
+            // morph and the pet's position.
             model.listening = listening
+            model.neoListeningActive = neoPresent && neoPresence.state == .listening
             // In the same transaction as the shape, so the pet's move from where
             // it was drawn rides the island's spring.
             publishPet(petUpdate)
@@ -617,6 +630,17 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         case .compact:
             guard let current = machine.activity else { return .default }
             return IslandMetrics.compact(current, petSlot: petBarReserve)
+        case .expanded:
+            var size = IslandContentSize.default
+            if let activity = machine.activity, activity.kind == .identifiedSong {
+                let titleWidth = IslandMetrics.textWidth(activity.title)
+                let detailWidth = IslandMetrics.textWidth(activity.subtitle ?? "")
+                let petReserve = petVisible ? petMetrics.expandedReserve : 0
+                let popupWidth = min(max(320, 38 + DesignTokens.space12 + max(titleWidth, detailWidth)
+                    + DesignTokens.contentInset * 2 + 8 + petReserve + 32), 420)
+                size.expandedSize = CGSize(width: popupWidth, height: 80)
+            }
+            return size
         case .idle:
             var size = IslandContentSize.default
             size.petDock = petIdleDock
@@ -666,6 +690,7 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         case .pet: return .skin
         case .teleprompter: return teleprompterState
         case .camera: return cameraIslandState
+        case .neoCamera: return neoCameraExpanded ? .cameraExpanded : .camera
         case .neo: return .neoPanel
         case .none: break
         }

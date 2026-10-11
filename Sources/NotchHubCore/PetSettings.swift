@@ -24,7 +24,7 @@ public struct PetSettings: Codable, Equatable, Sendable {
     /// The picked fur colour. What is drawn is derived from it within
     /// legibility bounds (`PetPalette.custom`).
     public var customFur = PetFurColor.default
-    /// The colour of NEO's listening glow behind the pet.
+    /// The tint of NEO's wake outline; the stored `glow` key stays for compatibility.
     public var glow: PetGlowColor = .teal
     /// What it wears on its head.
     public var hat: PetHatChoice = .seasonal
@@ -94,7 +94,7 @@ public struct PetSettings: Codable, Equatable, Sendable {
         usesCustomFur ? .custom(customFur) : .look(look)
     }
 
-    /// The listening glow's colour; `nil` is the design token's teal.
+    /// The wake outline's colour; `nil` is the design token's teal.
     public var glowColor: UInt32? { glow.rgb(palette: palette) }
 
     /// Its night, when it sleeps through one.

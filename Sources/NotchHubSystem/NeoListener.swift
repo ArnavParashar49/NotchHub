@@ -13,7 +13,8 @@ import NotchHubCore
 /// and `shell_status`) into a `NeoShellStatus`. A confirmation NEO stages
 /// (`confirm`, or the one pending in the `hello`) and its end
 /// (`confirm_done`) are facts too: the island's Allow / Cancel. What the core
-/// says about its own settings (the hello's `wake_word`, and `settings`) is a
+/// says about its own settings (the hello's `wake_word` and
+/// `wellbeing_checkins`, and `settings`) is a
 /// `NeoCoreSettings`. It sends five
 /// kinds of command and nothing else, ever: `camera_view visible:false`, so
 /// the core never streams camera frames to a client that cannot show them;
@@ -48,6 +49,9 @@ public final class NeoListener: NSObject, SystemListener {
     public static let defaultReconnectDelay: TimeInterval = 1.5
     /// No camera preview frames, please.
     public static let cameraOffCommand = #"{"cmd":"camera_view","visible":false}"#
+    public static let cameraOnCommand = #"{"cmd":"camera_view","visible":true}"#
+    public static let cameraStopCommand = #"{"cmd":"camera_stop"}"#
+    public static let songHelloCommand = #"{"cmd":"song_hello"}"#
     /// NEO's UI lives in the notch: NEO.app keeps its window hidden.
     public static let hostNotchCommand = #"{"cmd":"ui_host","host":"notch"}"#
     /// …and it is NEO.app's again.
@@ -75,6 +79,8 @@ public final class NeoListener: NSObject, SystemListener {
     private var isRunning = false
     private var isConnected = false
     private var reconnect: DispatchWorkItem?
+    private var cameraSID: String?
+    private var lastCameraFrameAt: TimeInterval = 0
 
     /// - Parameter hostsUI: whether NotchHub has NEO's UI to show in its
     ///   panel (`NeoUIBundle`), and so takes NEO's UI into the notch.
@@ -203,6 +209,23 @@ public final class NeoListener: NSObject, SystemListener {
         }
     }
 
+    /// Lets NEO stream preview frames only while its native notch surface is
+    /// visible. A hidden client receives no camera pixels.
+    public func setCameraVisible(_ visible: Bool) {
+        queue.async { [self] in
+            guard isRunning, isConnected, let task else { return }
+            task.send(.string(visible ? Self.cameraOnCommand : Self.cameraOffCommand)) { _ in }
+        }
+    }
+
+    /// Stops NEO's camera session when the user closes its native notch card.
+    public func stopCamera() {
+        queue.async { [self] in
+            guard isRunning, isConnected, let task else { return }
+            task.send(.string(Self.cameraStopCommand)) { _ in }
+        }
+    }
+
     private func connect() {
         guard isRunning, task == nil else { return }
         guard let token = Self.readToken(at: tokenFile), let socketURL = Self.socketURL(base: url, token: token) else {
@@ -223,6 +246,8 @@ public final class NeoListener: NSObject, SystemListener {
             // NEO's UI is in the notch from here on: NEO.app hides its window.
             task.send(.string(Self.hostNotchCommand)) { _ in }
         }
+        // Recover an in-flight song card if NotchHub connects after it opened.
+        task.send(.string(Self.songHelloCommand)) { _ in }
         receive(on: task)
     }
 
@@ -260,6 +285,7 @@ public final class NeoListener: NSObject, SystemListener {
                 switch result {
                 case let .success(message):
                     if case let .string(text) = message {
+                        self.updateCameraSession(from: text)
                         if let status = Self.shellStatus(in: text) {
                             self.emit(SystemEvent(source: .neo, payload: .neoShell(status)))
                         }
@@ -269,6 +295,12 @@ public final class NeoListener: NSObject, SystemListener {
                         for fact in Self.facts(in: text) {
                             self.emit(SystemEvent(source: .neo, payload: .neo(fact)))
                         }
+                    } else if case let .data(frame) = message,
+                              let (sid, image) = Self.cameraImage(in: frame),
+                              sid == self.cameraSID,
+                              Date.timeIntervalSinceReferenceDate - self.lastCameraFrameAt >= (1.0 / 24.0) {
+                        self.lastCameraFrameAt = Date.timeIntervalSinceReferenceDate
+                        self.emit(SystemEvent(source: .neo, payload: .neo(.cameraFrame(image))))
                     }
                     // Binary frames (page and camera pictures) are not for us.
                     self.receive(on: task)
@@ -311,7 +343,7 @@ public final class NeoListener: NSObject, SystemListener {
         case "hello": return NeoCoreSettings(payload: payload)
         case "settings":
             let settings = NeoCoreSettings(payload: payload)
-            return settings.wakeWord == nil ? nil : settings
+            return settings.wakeWord == nil && settings.wellbeingCheckins == nil ? nil : settings
         default: return nil
         }
     }
@@ -331,9 +363,20 @@ public final class NeoListener: NSObject, SystemListener {
             // Only what NEO is doing NOW — its state, and a question still
             // waiting for an answer. The replayed `recent` events are the old
             // transcript, which must not pop up on the island.
-            let pending = (payload["confirm"] as? [String: Any]).flatMap(NeoConfirmCard.init(payload:)).map { [NeoFact.confirm($0)] } ?? []
-            guard let state = (payload["state"] as? String).flatMap(NeoState.init(rawValue:)) else { return pending }
-            return [.state(state)] + pending
+            var facts: [NeoFact] = []
+            if let state = (payload["state"] as? String).flatMap(NeoState.init(rawValue:)) {
+                facts.append(.state(state))
+            }
+            if let pending = (payload["confirm"] as? [String: Any]).flatMap(NeoConfirmCard.init(payload:)) {
+                facts.append(.confirm(pending))
+            }
+            if let camera = payload["camera"] as? [String: Any],
+               let live = camera["live"] as? [String: Any],
+               let card = cameraCard(live) {
+                facts.append(.card(.camera, open: true))
+                facts.append(.cameraCard(card))
+            }
+            return facts
         case "state":
             guard let state = (payload["state"] as? String).flatMap(NeoState.init(rawValue:)) else { return [] }
             return [.state(state)]
@@ -348,9 +391,20 @@ public final class NeoListener: NSObject, SystemListener {
             return [.error(payload["message"] as? String ?? "")]
         case "browser_open": return [.card(.browser, open: true)]
         case "browser_close": return [.card(.browser, open: false)]
-        case "camera_open": return [.card(.camera, open: true)]
+        case "camera_open":
+            var facts: [NeoFact] = [.card(.camera, open: true)]
+            if let card = cameraCard(payload) { facts.append(.cameraCard(card)) }
+            return facts
+        case "camera_state": return cameraCard(payload).map { [.cameraCard($0)] } ?? []
         case "camera_close": return [.card(.camera, open: false)]
-        case "song_open": return [.card(.song, open: true)]
+        case "song_open":
+            var facts: [NeoFact] = []
+            if let sid = payload["sid"] as? String, !sid.isEmpty {
+                facts.append(.songCard(NeoSongCardState(sid: sid, status: "listening")))
+            }
+            facts.append(.card(.song, open: true))
+            return facts
+        case "song_state": return songCard(payload).map { [.songCard($0)] } ?? []
         case "song_close": return [.card(.song, open: false)]
         case "woke": return [.woke] // summoned by hand (the hotkey, the tray)
         case "confirm":
@@ -363,6 +417,101 @@ public final class NeoListener: NSObject, SystemListener {
         default:
             return []
         }
+    }
+
+    private static func cameraCard(_ payload: [String: Any]) -> NeoCameraCardState? {
+        guard let sid = payload["sid"] as? String, !sid.isEmpty,
+              let status = payload["status"] as? String else { return nil }
+        let labels = (payload["labels"] as? [String] ?? []).prefix(8).map { String($0.prefix(40)) }
+        let boxes = ((payload["boxes"] as? [[String: Any]]) ?? []).prefix(20).enumerated().compactMap { index, raw -> NeoCameraBox? in
+            guard let x = (raw["x"] as? NSNumber)?.doubleValue,
+                  let y = (raw["y"] as? NSNumber)?.doubleValue,
+                  let w = (raw["w"] as? NSNumber)?.doubleValue,
+                  let h = (raw["h"] as? NSNumber)?.doubleValue,
+                  w > 0, h > 0 else { return nil }
+            let id = (raw["id"] as? NSNumber)?.intValue ?? index
+            let label = String((raw["label"] as? String ?? "").prefix(40))
+            let score = min(1, max(0, (raw["score"] as? NSNumber)?.doubleValue ?? 0))
+            let normalizedX = min(1, max(0, x))
+            let normalizedY = min(1, max(0, y))
+            return NeoCameraBox(
+                id: id,
+                x: normalizedX,
+                y: normalizedY,
+                w: min(1 - normalizedX, max(0, w)),
+                h: min(1 - normalizedY, max(0, h)),
+                label: label,
+                score: score
+            )
+        }
+        return NeoCameraCardState(
+            sid: sid,
+            status: status,
+            answer: (payload["answer"] as? String).map { String($0.prefix(500)) },
+            labels: labels,
+            boxes: boxes
+        )
+    }
+
+    private static func songCard(_ payload: [String: Any]) -> NeoSongCardState? {
+        guard let sid = payload["sid"] as? String, !sid.isEmpty,
+              let status = payload["status"] as? String else { return nil }
+        let result = payload["result"] as? [String: Any] ?? [:]
+        return NeoSongCardState(
+            sid: sid,
+            status: status,
+            level: min(1, max(0, (payload["level"] as? NSNumber)?.doubleValue ?? 0)),
+            elapsed: max(0, (payload["elapsed_s"] as? NSNumber)?.doubleValue ?? 0),
+            message: (payload["message"] as? String).map { String($0.prefix(300)) },
+            title: (result["title"] as? String).map { String($0.prefix(120)) },
+            artist: (result["artist"] as? String).map { String($0.prefix(120)) },
+            album: (result["album"] as? String).map { String($0.prefix(120)) },
+            year: result["year"].map { String(describing: $0).prefix(12).description },
+            cover: imageDataURI(result["cover"] as? String)
+        )
+    }
+
+    private static func imageDataURI(_ value: String?) -> Data? {
+        guard let value, value.hasPrefix("data:image/"), let comma = value.firstIndex(of: ",") else { return nil }
+        let encoded = String(value[value.index(after: comma)...])
+        guard encoded.utf8.count <= 1_500_000 else { return nil }
+        return Data(base64Encoded: encoded)
+    }
+
+    private func updateCameraSession(from text: String) {
+        guard let data = text.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String else { return }
+        let payload = object["data"] as? [String: Any] ?? [:]
+        switch type {
+        case "camera_open", "camera_state":
+            cameraSID = payload["sid"] as? String
+        case "camera_close":
+            if cameraSID == (payload["sid"] as? String) { cameraSID = nil }
+        case "hello":
+            let live = (payload["camera"] as? [String: Any])?["live"] as? [String: Any]
+            cameraSID = live?["sid"] as? String
+        default:
+            break
+        }
+    }
+
+    /// NBF1 v1 camera packet: the first 64 bytes are metadata, the rest JPEG.
+    /// Reject other frame kinds, oversized payloads and stale/malformed headers.
+    private static func cameraImage(in packet: Data) -> (String, Data)? {
+        guard packet.count >= 64, packet.count <= 2_000_000,
+              packet.prefix(4) == Data("NBF1".utf8), packet[4] == 1, packet[5] == 3 else { return nil }
+        let header = Int(packet[6]) | Int(packet[7]) << 8
+        guard header >= 64, header <= packet.count else { return nil }
+        let sidBytes = packet.subdata(in: 8..<24)
+        let sid = sidBytes.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        let mime = packet[56]
+        guard mime == 1 else { return nil } // NEO currently streams JPEG camera frames.
+        let image = packet.subdata(in: header..<packet.count)
+        return image.isEmpty ? nil : (sid, image)
     }
 }
 

@@ -45,9 +45,8 @@ public enum PetSize: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    /// The pet's side in the notch strip, in points: 14, 16 or 20. All three
-    /// leave room for NEO's listening glow (the pet + 6 pt, swelling to 1.06×)
-    /// inside a 32-pt strip.
+    /// The pet's side in the notch strip, in points: 14, 16 or 20. Each size
+    /// stays comfortably within the 32-pt notch strip.
     public var points: CGFloat {
         switch self {
         case .small: return 14

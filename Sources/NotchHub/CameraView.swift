@@ -3,17 +3,26 @@ import AVFoundation
 import NotchHubCore
 import SwiftUI
 
-/// The camera preview: the picture, and a quiet bar of controls under it.
-///
-/// The picture is a real `AVCaptureVideoPreviewLayer` hosted in an `NSView` —
-/// there is no frame capture anywhere in the path, so the preview cannot record
-/// even in principle. The controls are DRAWN and hit-tested by the window, like
-/// every other island surface, so checking your hair before a call never pulls
-/// focus out of the app you are about to present from.
+@MainActor
+final class NeoCameraStream: ObservableObject {
+    @Published var frame: Data?
+    @Published var boxes: [NeoCameraBox] = []
+}
+
+/// The camera preview and its quiet bar of controls. The manual notch camera
+/// uses an `AVCaptureVideoPreviewLayer` and reads no frames; NEO's separate,
+/// short-lived stream is shown only when NEO itself is looking through it.
+/// Controls are drawn and hit-tested by the window, so the preview never pulls
+/// focus from the app you are about to present from.
 struct CameraView: View {
     let state: CameraState
     /// The live preview layer, when there is one.
     let previewLayer: AVCaptureVideoPreviewLayer?
+    /// NEO's streamed camera surface. The manual notch camera leaves this nil
+    /// and continues to use its native AVFoundation preview layer.
+    var stream: NeoCameraStream? = nil
+    /// A short NEO result or label shown over the native preview.
+    var caption: String? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,7 +45,10 @@ struct CameraView: View {
             RoundedRectangle(cornerRadius: DesignTokens.radiusRow, style: .continuous)
                 .fill(Color.white.opacity(0.05))
 
-            if state.phase == .live, let previewLayer {
+            if state.phase == .live, let stream {
+                NeoCameraStreamPreview(stream: stream, mirrored: state.isMirrored)
+                    .transition(.opacity)
+            } else if state.phase == .live, let previewLayer {
                 CameraPreview(layer: previewLayer)
                     // Mirrored the way you expect to see yourself. This flips
                     // the PREVIEW only; nothing is being captured to flip.
@@ -45,6 +57,22 @@ struct CameraView: View {
                     .transition(.opacity)
             } else {
                 placeholder
+            }
+
+            if let caption, !caption.isEmpty {
+                VStack {
+                    Spacer()
+                    Text(caption)
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 7)
+                        .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .padding(7)
+                }
             }
         }
         .animation(DesignTokens.springMorph, value: state.phase)
@@ -138,6 +166,82 @@ struct CameraView: View {
         case .close: return "xmark"
         case .openSettings: return "gearshape"
         }
+    }
+}
+
+/// The streamed NEO preview updates independently of the island layout. A
+/// frame no longer asks NotchHub to rebuild the whole notch surface.
+private struct NeoCameraStreamPreview: View {
+    @ObservedObject var stream: NeoCameraStream
+    let mirrored: Bool
+
+    private let frameAspect = 16.0 / 9.0
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                if let data = stream.frame, let image = NSImage(data: data) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+
+                    ForEach(stream.boxes) { box in
+                        detectionBox(box, imageSize: image.size, in: geometry.size)
+                    }
+                } else {
+                    RoundedRectangle(cornerRadius: DesignTokens.radiusRow, style: .continuous)
+                        .fill(Color.white.opacity(0.05))
+                        .overlay {
+                            Image(systemName: "video.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(DesignTokens.textTertiary)
+                        }
+                }
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.radiusRow, style: .continuous))
+        }
+    }
+
+    private func detectionBox(_ box: NeoCameraBox, imageSize: CGSize, in size: CGSize) -> some View {
+        let aspect = imageSize.width > 0 && imageSize.height > 0
+            ? imageSize.width / imageSize.height : frameAspect
+        let drawnWidth = max(size.width, size.height * aspect)
+        let drawnHeight = max(size.height, size.width / aspect)
+        let cropX = (drawnWidth - size.width) / 2
+        let cropY = (drawnHeight - size.height) / 2
+        let x = mirrored ? CGFloat(1 - box.x - box.w) : CGFloat(box.x)
+        let rect = CGRect(
+            x: x * drawnWidth - cropX,
+            y: CGFloat(box.y) * drawnHeight - cropY,
+            width: CGFloat(box.w) * drawnWidth,
+            height: CGFloat(box.h) * drawnHeight
+        )
+        let accent = Color(red: 0.48, green: 0.91, blue: 0.82)
+        let title = box.score > 0 ? "\(box.label) \(Int(box.score * 100))%" : box.label
+
+        return ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(accent.opacity(0.06))
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .stroke(accent, lineWidth: 1.5)
+            if !box.label.isEmpty {
+                Text(title)
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .lineLimit(1)
+                    .foregroundStyle(accent)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .fixedSize()
+                    .offset(x: 2, y: rect.minY < 20 ? 2 : -18)
+            }
+        }
+        .frame(width: max(1, rect.width), height: max(1, rect.height))
+        .position(x: rect.midX, y: rect.midY)
+        .allowsHitTesting(false)
     }
 }
 

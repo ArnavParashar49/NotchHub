@@ -227,6 +227,9 @@ final class IslandContainerView: NSView {
             onClick?()
             return
         }
+        let notchWindow = window as? NotchWindow
+        notchWindow?.setContextMenuTracking(true)
+        defer { notchWindow?.setContextMenuTracking(false) }
         NSMenu.popUpContextMenu(menu, with: event, for: self)
     }
 
@@ -302,6 +305,8 @@ final class NotchWindow: NSPanel {
 
     private var localMonitor: Any?
     private var globalMonitor: Any?
+    private var isContextMenuTracking = false
+    var onContextMenuTrackingChanged: ((Bool) -> Void)?
 
     init(geometry: NotchGeometry) {
         self.geometry = geometry
@@ -365,6 +370,9 @@ final class NotchWindow: NSPanel {
     private var lastMousePoint: NSPoint = .zero
 
     private func handleMouseMove(_ location: NSPoint, isScreen: Bool = false) {
+        // NSMenu owns pointer tracking while its context menu is open. Avoid
+        // running hover hit tests and pet reactions for those same events.
+        guard !isContextMenuTracking else { return }
         guard !needsInteraction else {
             ignoresMouseEvents = false
             return
@@ -398,6 +406,12 @@ final class NotchWindow: NSPanel {
         if !needsInteraction {
             ignoresMouseEvents = !container.catchesMouse(at: point)
         }
+    }
+
+    func setContextMenuTracking(_ tracking: Bool) {
+        guard tracking != isContextMenuTracking else { return }
+        isContextMenuTracking = tracking
+        onContextMenuTrackingChanged?(tracking)
     }
 
     private func log(_ message: String) {

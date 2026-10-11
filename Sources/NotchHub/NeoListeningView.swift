@@ -87,3 +87,124 @@ struct NeoListeningGlowView: View {
             .opacity(opacity)
     }
 }
+
+/// NEO's wake cue: an open blue U that runs down both sides and around the
+/// island's bottom, with its ends reaching the screen's top edge at both sides
+/// but no stroke across the top. Two short beams travel in the same direction,
+/// half a circuit apart, and wrap between the open ends. A narrow black
+/// support stroke keeps the light visible against bright desktops. The island's
+/// layout and centre do not change for the effect.
+struct NeoWakeOutlineView: View {
+    let shape: NotchShape
+    let isActive: Bool
+    var paused = false
+    var tint: Color = DesignTokens.listeningGlow
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Two points of black beyond the physical contour gives the blue edge a
+    /// dark bed, without making the notch look meaningfully larger.
+    static let supportInset: CGFloat = 2
+    private static let loopDuration: TimeInterval = 3.6
+    private static let beamLength: CGFloat = 0.115
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !isActive || paused || reduceMotion)) { context in
+            GeometryReader { geometry in
+                let physicalRect = CGRect(
+                    x: Self.supportInset,
+                    y: Self.supportInset,
+                    width: geometry.size.width - Self.supportInset * 2,
+                    height: geometry.size.height - Self.supportInset * 2
+                )
+                let path = wakeContour(in: physicalRect)
+                // The open contour is a circular track for the beams: they
+                // flow left → down → right, then wrap to the left without
+                // drawing across the deliberately clear top span.
+                let cycle = context.date.timeIntervalSinceReferenceDate
+                    .truncatingRemainder(dividingBy: Self.loopDuration) / Self.loopDuration
+
+                ZStack {
+                    // Support only at the edge; this is not another filled badge.
+                    path.stroke(Color.black, style: StrokeStyle(lineWidth: Self.supportInset * 2, lineCap: .round, lineJoin: .round))
+
+                    if isActive {
+                        path.stroke(tint.opacity(reduceMotion ? 0.78 : 0.56),
+                                    style: StrokeStyle(lineWidth: reduceMotion ? 2.1 : 1.5, lineCap: .round, lineJoin: .round))
+
+                        if !reduceMotion {
+                            movingBeam(on: path, phase: cycle)
+                            movingBeam(on: path, phase: (cycle + 0.5).truncatingRemainder(dividingBy: 1))
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .opacity(isActive ? 1 : 0)
+        .animation(.easeOut(duration: 0.18), value: isActive)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("NEO is listening")
+        .accessibilityHidden(!isActive)
+    }
+
+    /// The outline's open contour: from the top edge down the left side, around
+    /// the bottom, and back up to the top on the right, without a stroke across
+    /// the top edge itself.
+    private func wakeContour(in rect: CGRect) -> Path {
+        let handle: CGFloat = 0.4477
+        let topLeft = max(0, min(shape.topLeadingRadius, rect.height / 2))
+        let topRight = max(0, min(shape.topTrailingRadius, rect.height / 2))
+        let bottomLeft = max(0, min(shape.bottomLeadingRadius, rect.width / 2, rect.height - topLeft))
+        let bottomRight = max(0, min(shape.bottomTrailingRadius, rect.width / 2, rect.height - topRight))
+
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX - topLeft, y: rect.minY))
+        if topLeft > 0 {
+            path.addCurve(
+                to: CGPoint(x: rect.minX, y: rect.minY + topLeft),
+                control1: CGPoint(x: rect.minX - topLeft * handle, y: rect.minY),
+                control2: CGPoint(x: rect.minX, y: rect.minY + topLeft * handle)
+            )
+        }
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - bottomLeft))
+        path.addCurve(
+            to: CGPoint(x: rect.minX + bottomLeft, y: rect.maxY),
+            control1: CGPoint(x: rect.minX, y: rect.maxY - bottomLeft * handle),
+            control2: CGPoint(x: rect.minX + bottomLeft * handle, y: rect.maxY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX - bottomRight, y: rect.maxY))
+        path.addCurve(
+            to: CGPoint(x: rect.maxX, y: rect.maxY - bottomRight),
+            control1: CGPoint(x: rect.maxX - bottomRight * handle, y: rect.maxY),
+            control2: CGPoint(x: rect.maxX, y: rect.maxY - bottomRight * handle)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + topRight))
+        if topRight > 0 {
+            path.addCurve(
+                to: CGPoint(x: rect.maxX + topRight, y: rect.minY),
+                control1: CGPoint(x: rect.maxX, y: rect.minY + topRight * handle),
+                control2: CGPoint(x: rect.maxX + topRight * handle, y: rect.minY)
+            )
+        }
+        return path
+    }
+
+    /// A short, rounded beam and its soft blue trail. At the open ends, the
+    /// beam wraps from one side to the other without crossing the top.
+    private func movingBeam(on path: Path, phase: Double) -> some View {
+        let end = phase + Double(Self.beamLength)
+        var beamPath = Path()
+        if end <= 1 {
+            beamPath.addPath(path.trimmedPath(from: phase, to: end))
+        } else {
+            beamPath.addPath(path.trimmedPath(from: phase, to: 1))
+            beamPath.addPath(path.trimmedPath(from: 0, to: end - 1))
+        }
+        return ZStack {
+            beamPath.stroke(tint.opacity(0.28), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+                .blur(radius: 1.7)
+            beamPath.stroke(tint.opacity(0.96), style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+        }
+    }
+}

@@ -21,6 +21,9 @@ struct WingView: View {
     var trailingReserve: CGFloat = 0
     /// The left wing's width; `nil` splits the bar evenly.
     var leadWidth: CGFloat? = nil
+    /// The right wing's content width. When provided with `leadWidth`, the
+    /// shorter side is padded so the two wings stay centered on the notch.
+    var trailWidth: CGFloat? = nil
     /// The control the cursor is resting on, resolved by the coordinator against
     /// `WingControlLayout` — the same geometry the window hit-tests with.
     var hovered: IslandControl? = nil
@@ -35,20 +38,30 @@ struct WingView: View {
     @Namespace private var hoverHighlight
 
     var body: some View {
-        HStack(spacing: 0) {
-            if let leadWidth {
-                leftWing.frame(width: leadWidth)
-            } else {
-                leftWing.frame(maxWidth: .infinity)
+        if let leadWidth, let trailWidth {
+            let balancedSide = max(leadWidth, trailWidth)
+            HStack(spacing: 0) {
+                leftWing.frame(width: balancedSide)
+                Color.clear.frame(width: notchWidth)
+                rightWing.frame(width: balancedSide)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            HStack(spacing: 0) {
+                if let leadWidth {
+                    leftWing.frame(width: leadWidth)
+                } else {
+                    leftWing.frame(maxWidth: .infinity)
+                }
 
-            // The notch cutout itself — nothing is visible here.
-            Color.clear.frame(width: notchWidth)
+                // The notch cutout itself — nothing is visible here.
+                Color.clear.frame(width: notchWidth)
 
-            rightWing
-                .frame(maxWidth: .infinity)
+                rightWing
+                    .frame(maxWidth: .infinity)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Left

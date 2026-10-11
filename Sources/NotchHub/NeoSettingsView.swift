@@ -37,6 +37,8 @@ struct NeoSettingsSection: View {
             }
             group("Voice") {
                 wakeWordRow
+                separator
+                wellbeingCheckinsRow
             }
             group("Actions") {
                 actionRow("Open NEO chat", symbol: "bubble.left.fill", intent: .openChat, hint: model.hotkey)
@@ -185,6 +187,39 @@ struct NeoSettingsSection: View {
             .accessibilityLabel("Listen for Neo")
             .accessibilityValue(isOn ? "On" : "Off")
             .accessibilityHint(model.wakeWordCaption)
+        }
+        .padding(.trailing, 10)
+        .padding(.vertical, 8)
+        .frame(minHeight: NeoSettingsMetrics.rowHeight)
+        .opacity(enabled ? 1 : NeoSettingsMetrics.disabledOpacity)
+        .disabled(!enabled)
+    }
+
+    /// Opt-in on-device cough/crying cues, using only the existing NEO mic stream.
+    private var wellbeingCheckinsRow: some View {
+        let isOn = model.checkinsForSounds
+        let enabled = model.isEnabled(.wellbeingCheckins(!isOn))
+        return HStack(spacing: 0) {
+            rowIcon("waveform", lit: enabled && isOn)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Gentle check-ins")
+                    .font(NeoSettingsMetrics.titleFont)
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .lineLimit(1)
+                Text(model.wellbeingCheckinsCaption)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(DesignTokens.textTertiary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Button { onIntent(.wellbeingCheckins(!isOn)) } label: {
+                SwitchIndicator(isOn: isOn, tint: SettingsMetrics.ink)
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Gentle check-ins")
+            .accessibilityValue(isOn ? "On" : "Off")
+            .accessibilityHint(model.wellbeingCheckinsCaption)
         }
         .padding(.trailing, 10)
         .padding(.vertical, 8)

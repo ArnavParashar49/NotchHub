@@ -49,14 +49,9 @@ public enum DesignTokens {
     public static let fieldFill = Color.white.opacity(0.06)
     /// Tint for a live call's "on air" state.
     public static let onAir = Color(red: 0.30, green: 0.85, blue: 0.46)
-    /// NEO's listening glow — the soft halo that pulses once behind the pet
-    /// when NEO starts to listen (its microphone is live). A cool cyan-teal: it reads as "awake"
-    /// on black, it is the complement of the fox's orange (so the fox stands
-    /// out against its own light rather than melting into it, as it does in a
-    /// warm amber), and it is neither the now-playing visualizer's green nor
-    /// the orange and green of the system's microphone and camera dots. Drawn
-    /// as a blurred radial falloff (`NeoListeningGlowView`) — the design
-    /// system's one gradient, because it is light and not a surface.
+    /// NEO's listening outline tint. A cool cyan-teal that reads as awake on
+    /// black, complements the fox's orange, and stays distinct from the
+    /// now-playing visualizer and macOS microphone/camera indicators.
     public static let listeningGlow = Color(red: 0.40, green: 0.88, blue: 0.96)
     /// How a pulse cut short leaves, when listening ends before it is over:
     /// a quick ease-out from wherever it was. (A whole pulse needs nothing:

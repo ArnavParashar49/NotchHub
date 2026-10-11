@@ -97,15 +97,19 @@ public struct NeoCoreSettings: Equatable, Sendable {
     /// "Listen for 'Neo'": the microphone stays on for the wake word (true),
     /// or opens only while NEO is summoned by hand (false).
     public var wakeWord: Bool?
+    /// Local sound check-ins for repeated cough, nasal, sneeze, throat-clear and crying cues.
+    public var wellbeingCheckins: Bool?
 
-    public init(wakeWord: Bool? = nil) {
+    public init(wakeWord: Bool? = nil, wellbeingCheckins: Bool? = nil) {
         self.wakeWord = wakeWord
+        self.wellbeingCheckins = wellbeingCheckins
     }
 
     /// From the hello's data, or a `settings` event's. Only a real boolean
     /// counts: `"false"` or `0` is not an answer.
     public init(payload: [String: Any]) {
         wakeWord = Self.bool(payload["wake_word"])
+        wellbeingCheckins = Self.bool(payload["wellbeing_checkins"])
     }
 
     /// A JSON boolean, and nothing that merely bridges to one (a number).
@@ -124,19 +128,24 @@ public enum NeoSetting: Equatable, Sendable {
     /// Listen for "Neo" (on), or keep the microphone closed until NEO is
     /// summoned with its keys (off).
     case wakeWord(Bool)
+    /// Run the opt-in sound check locally on frames from NEO's existing mic.
+    case wellbeingCheckins(Bool)
 
     /// The setting's name on the wire.
     public var name: String {
         switch self {
         case .wakeWord: return "wake_word"
+        case .wellbeingCheckins: return "wellbeing_checkins"
         }
     }
 
     /// The command, as one line of JSON.
     public var command: String {
+        let on: Bool
         switch self {
-        case let .wakeWord(on): return #"{"cmd":"set","name":"\#(name)","value":\#(on)}"#
+        case let .wakeWord(value), let .wellbeingCheckins(value): on = value
         }
+        return #"{"cmd":"set","name":"\#(name)","value":\#(on)}"#
     }
 }
 
@@ -174,6 +183,8 @@ public enum NeoSettingsIntent: Equatable, Sendable {
     case quit
     /// Switch "Listen for 'Neo'" to this.
     case wakeWord(Bool)
+    /// Switch local wellbeing sound check-ins on or off.
+    case wellbeingCheckins(Bool)
     /// NEO is not running: launch NEO.app.
     case start
     /// Open the pane of System Settings where the permission is granted.
@@ -189,14 +200,17 @@ public enum NeoSettingsIntent: Equatable, Sendable {
         case .eraseMemory: return .eraseMemory
         case let .openAtLogin(on): return .openAtLogin(on)
         case .quit: return .quit
-        case .openChat, .start, .openPermission, .wakeWord: return nil
+        case .openChat, .start, .openPermission, .wakeWord, .wellbeingCheckins: return nil
         }
     }
 
     /// The setting of the core's the intent switches, or `nil` for the rest.
     public var setting: NeoSetting? {
-        if case let .wakeWord(on) = self { return .wakeWord(on) }
-        return nil
+        switch self {
+        case let .wakeWord(on): return .wakeWord(on)
+        case let .wellbeingCheckins(on): return .wellbeingCheckins(on)
+        default: return nil
+        }
     }
 }
 
@@ -249,12 +263,15 @@ public struct NeoSettingsModel: Equatable, Sendable {
     /// "Listen for 'Neo'" as the core has it, or `nil` while nobody said
     /// (NEO is not running, or its core is too old to have the setting).
     public let wakeWord: Bool?
+    /// Local wellbeing check-ins, or nil when the connected core predates this setting.
+    public let wellbeingCheckins: Bool?
 
     public init(featureOn: Bool, connected: Bool, shell: NeoShellStatus?, core: NeoCoreSettings? = nil) {
         self.featureOn = featureOn
         let live = featureOn && connected
         // Like the shell's word: a setting from before NEO quit says nothing now.
         wakeWord = live ? core?.wakeWord : nil
+        wellbeingCheckins = live ? core?.wellbeingCheckins : nil
         if !featureOn {
             availability = .off
         } else if !connected {
@@ -328,6 +345,12 @@ public struct NeoSettingsModel: Equatable, Sendable {
             : "Summon with \(hotkey) — the microphone is on only while NEO listens."
     }
 
+    public var checkinsForSounds: Bool { wellbeingCheckins ?? false }
+
+    public var wellbeingCheckinsCaption: String {
+        "Detection stays on-device. With Gemini Live, the check-in line and 5s reply audio go to Gemini."
+    }
+
     /// "Start NEO" shows only when NotchHub is looking for NEO and it is not there.
     public var canStart: Bool { availability == .away }
 
@@ -354,6 +377,8 @@ public struct NeoSettingsModel: Equatable, Sendable {
             // The core's own setting: it needs the core (NEO.app or not), and
             // one that said where the switch stands.
             return isRunning && wakeWord != nil
+        case .wellbeingCheckins:
+            return isRunning && wellbeingCheckins != nil
         case .start:
             return canStart
         case let .openPermission(permission):

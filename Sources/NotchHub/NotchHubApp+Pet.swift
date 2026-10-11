@@ -163,8 +163,6 @@ extension NotchHubApp {
             renderIsland()
         } else {
             publishPet(update)
-            // The pet coming home from a game is also when NEO's listening
-            // pulse, if it was waiting for it, lights behind it.
             publishNeoListening()
         }
         clearStalePetHover()

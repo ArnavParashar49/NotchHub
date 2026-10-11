@@ -24,6 +24,10 @@ public enum ActivityKind: String, CaseIterable, Codable, Equatable {
     case meeting
     /// A coding agent (Claude Code, Codex, …) working on the machine.
     case codingAgent
+    /// NEO is listening to identify a song, without player controls.
+    case songRecognition
+    /// A song NEO identified, with cover art and a compact detail popup.
+    case identifiedSong
     /// The frontmost app, dressed for the island.
     case skin
     case custom
@@ -51,6 +55,8 @@ public enum ActivityKind: String, CaseIterable, Codable, Equatable {
         case .clipboard: return "doc.on.clipboard"
         case .meeting: return "video.fill"
         case .codingAgent: return "chevron.left.forwardslash.chevron.right"
+        case .songRecognition: return "waveform"
+        case .identifiedSong: return "music.note"
         case .skin: return "app.fill"
         case .custom: return "sparkles"
         }
@@ -59,7 +65,7 @@ public enum ActivityKind: String, CaseIterable, Codable, Equatable {
     /// Baseline priority. Higher wins the island.
     public var basePriority: Int {
         switch self {
-        case .lowBattery: return 90
+        case .lowBattery, .songRecognition, .identifiedSong: return 90
         case .recording, .microphone, .camera: return 80
         case .meeting: return 75
         case .timer: return 70
@@ -86,7 +92,7 @@ public enum ActivityKind: String, CaseIterable, Codable, Equatable {
         case .clipboard, .notification: return 3.0
         case .music, .timer, .download, .recording, .microphone, .camera,
              .lowBattery, .focus, .dnd, .calendar, .meeting, .skin,
-             .codingAgent, .custom:
+             .codingAgent, .custom, .songRecognition, .identifiedSong:
             return 0 // persistent until replaced or explicitly removed
         }
     }
@@ -223,6 +229,10 @@ public struct Activity: Identifiable, Equatable {
             // Show the track title in the compact bar so the user can see
             // what is playing without hovering.
             return title
+        case .songRecognition:
+            return title
+        case .identifiedSong:
+            return title
         case .volume, .brightness, .battery, .lowBattery, .download:
             // The percentage is the news; the glyph names the kind.
             if let progress { return "\(Int((progress * 100).rounded()))%" }
@@ -238,6 +248,7 @@ public struct Activity: Identifiable, Equatable {
     public var compactDetail: String? {
         switch kind {
         case .music: return nil
+        case .identifiedSong: return subtitle
         default: return nil
         }
     }
@@ -252,11 +263,11 @@ public struct Activity: Identifiable, Equatable {
     /// genuinely different detailed layout are worth expanding.
     public var canExpand: Bool {
         switch kind {
-        case .music, .meeting:
+        case .music, .meeting, .identifiedSong:
             return true
         case .volume, .brightness, .battery, .lowBattery, .wifi, .bluetooth,
              .airpods, .recording, .microphone, .camera, .calendar, .focus,
-             .dnd, .clipboard, .notification, .codingAgent, .skin, .custom,
+             .dnd, .clipboard, .notification, .codingAgent, .songRecognition, .skin, .custom,
              .timer, .download:
             return false
         }
@@ -267,7 +278,7 @@ public struct Activity: Identifiable, Equatable {
     /// still opens the call panel (`canExpand`).
     public var expandsOnHover: Bool {
         switch kind {
-        case .music: return true
+        case .music, .identifiedSong: return true
         default: return false
         }
     }

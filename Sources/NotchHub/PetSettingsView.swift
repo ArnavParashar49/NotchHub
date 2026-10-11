@@ -6,7 +6,7 @@ import SwiftUI
 /// A live preview at the top — the fox as it is now, enlarged, and at its true
 /// size beside a notch on the side it lives on — then four groups: Look (its
 /// fur: a preset or a colour of one's own, and the colour of NEO's listening
-/// glow), Wear (a hat and an accessory, which combine), Size & place, and
+/// signal), Wear (a hat and an accessory, which combine), Size & place, and
 /// Personality (its energy, its night, its name). Every control writes
 /// `PetSettings` through the binding, and the app applies it at once: the fox
 /// in the notch changes as the preview does, with no relaunch.
@@ -230,8 +230,8 @@ struct PetSettingsSection: View {
 
     private var glowRow: some View {
         HStack(spacing: 0) {
-            rowIcon("sun.max.fill")
-            rowTitle("Listening glow", caption: pet.glow.title)
+            rowIcon("waveform")
+            rowTitle("Wake outline", caption: pet.glow.title)
             Spacer(minLength: 8)
             HStack(spacing: PetSettingsMetrics.swatchSpacing) {
                 ForEach(PetGlowColor.allCases, id: \.self) { glow in
@@ -243,7 +243,7 @@ struct PetSettingsSection: View {
                         )
                     }
                     .buttonStyle(PressStyle())
-                    .accessibilityLabel("\(glow.title) glow")
+                    .accessibilityLabel("\(glow.title) wake outline")
                 }
             }
         }

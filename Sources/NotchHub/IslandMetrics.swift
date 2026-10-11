@@ -84,6 +84,15 @@ enum IslandMetrics {
             }
             // Only the visualizer on the trail (right) side.
             trail += musicVisualizerWidth
+        } else if activity.kind == .identifiedSong {
+            lead = DesignTokens.compactInset + 28 + DesignTokens.space8
+                + min(textWidth(activity.title), maxCompactMusicTextWidth)
+            if let detail = activity.compactDetail {
+                trail += min(textWidth(detail), 92)
+            }
+        } else if activity.kind == .songRecognition {
+            lead += DesignTokens.space8 + min(textWidth(activity.title), maxCompactMusicTextWidth)
+            trail += musicVisualizerWidth
         } else if activity.kind == .meeting {
             // The call timer beside the glyph; mute and leave on the trail.
             lead += DesignTokens.space8 + textWidth("00:00:00")

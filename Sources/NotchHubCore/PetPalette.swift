@@ -175,7 +175,7 @@ public struct PetPalette: Equatable, Sendable {
     }
 }
 
-/// The colour of NEO's listening glow behind the pet.
+/// The tint for NEO's wake outline, kept under its old settings name for saved preferences.
 public enum PetGlowColor: String, CaseIterable, Codable, Sendable {
     /// The design system's cyan-teal (`DesignTokens.listeningGlow`).
     case teal

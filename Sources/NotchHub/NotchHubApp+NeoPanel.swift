@@ -218,8 +218,7 @@ extension NotchHubApp {
         }
     }
 
-    /// The earliest of NEO's presence's, the panel's and the listening pulse's
-    /// next change.
+    /// The earliest of NEO's presence, panel and legacy pulse model.
     func neoNextWake(at now: Date) -> Date? {
         [neoPresence.nextWake(at: now), neoPanel.nextWake(at: now), neoListening.nextWake(at: now)].compactMap { $0 }.min()
     }

@@ -1,16 +1,85 @@
 import CoreGraphics
 import Foundation
 
-/// A card NEO opens in its chat: the live browser, the camera preview, the
-/// song it is listening for. While one is open the panel stays open.
+/// A card NEO can open: browser cards use the embedded page; camera and song
+/// cards are rendered by NotchHub's native surfaces.
 public enum NeoCardKind: String, CaseIterable, Equatable, Sendable {
     case browser
     case camera
     case song
 }
 
-/// Whether NEO's panel — its whole chat, hanging down from the notch — is
-/// open, and when it closes on its own.
+/// A live song-identification update from NEO. The cover is already fetched
+/// by NEO and arrives as image bytes; the notch never loads a remote image.
+public struct NeoSongCardState: Equatable, Sendable {
+    public var sid: String
+    public var status: String
+    public var level: Double
+    public var elapsed: Double
+    public var message: String?
+    public var title: String?
+    public var artist: String?
+    public var album: String?
+    public var year: String?
+    public var cover: Data?
+
+    public init(sid: String, status: String, level: Double = 0, elapsed: Double = 0,
+                message: String? = nil, title: String? = nil, artist: String? = nil,
+                album: String? = nil, year: String? = nil, cover: Data? = nil) {
+        self.sid = sid
+        self.status = status
+        self.level = level
+        self.elapsed = elapsed
+        self.message = message
+        self.title = title
+        self.artist = artist
+        self.album = album
+        self.year = year
+        self.cover = cover
+    }
+}
+
+/// The textual part of NEO's camera card. Preview pixels travel separately so
+/// they never enter the event log or transcript history.
+public struct NeoCameraBox: Equatable, Sendable, Identifiable {
+    public var id: Int
+    public var x: Double
+    public var y: Double
+    public var w: Double
+    public var h: Double
+    public var label: String
+    public var score: Double
+
+    public init(id: Int, x: Double, y: Double, w: Double, h: Double, label: String, score: Double) {
+        self.id = id
+        self.x = x
+        self.y = y
+        self.w = w
+        self.h = h
+        self.label = label
+        self.score = score
+    }
+}
+
+public struct NeoCameraCardState: Equatable, Sendable {
+    public var sid: String
+    public var status: String
+    public var answer: String?
+    public var labels: [String]
+    public var boxes: [NeoCameraBox]
+
+    public init(sid: String, status: String, answer: String? = nil, labels: [String] = [], boxes: [NeoCameraBox] = []) {
+        self.sid = sid
+        self.status = status
+        self.answer = answer
+        self.labels = labels
+        self.boxes = boxes
+    }
+}
+
+/// Whether NEO's embedded chat — hanging down from the notch — is open, and
+/// when it closes on its own. Native camera and song surfaces are tracked by
+/// NotchHub separately and do not open this panel.
 ///
 /// The rules, as the lane's: pure and clock-driven, every method takes `now`
 /// and `nextWake(at:)` says when the panel will change by itself.
@@ -18,8 +87,8 @@ public enum NeoCardKind: String, CaseIterable, Equatable, Sendable {
 /// - NEO thinking, working, searching or speaking never opens it: a voice
 ///   answer is the orb's alone, animating in the notch. Nor does NEO needing
 ///   an OK: that is the island's own Allow / Cancel under the notch
-///   (`NeoConfirmModel`), not the whole chat. It opens only for a card (the
-///   browser, the camera, a song), the page asking to be seen (a login
+///   (`NeoConfirmModel`), not the whole chat. It opens only for a browser
+///   card, the page asking to be seen (a login
 ///   page, a question) — or when the user asks: a click on the lane, or
 ///   NEO summoned by hand (the hotkey, the tray: `woke`). A panel that is
 ///   already open shows the page's own confirm card, and is held open

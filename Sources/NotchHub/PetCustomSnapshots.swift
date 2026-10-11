@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 /// everything the pet's page of Settings can change — every fur preset, custom
 /// fur colours (with the colour that was picked beside the one that is drawn),
 /// each accessory alone and with a hat in front, side and peeking poses, the
-/// three sizes and both homes in the REAL island (idle, NEO's listening glow,
+/// three sizes and both homes in the REAL island (idle, NEO's wake outline,
 /// NEO's Allow / Cancel, the bars, mischief), and the Settings page itself.
 /// Headless, like the other snapshot modes: no window, no Screen Recording.
 @MainActor
@@ -44,7 +44,7 @@ enum PetCustomSnapshots {
         add("Fur — the ten presets") { furPresets }
         add("Fur — a colour of your own: the pick (dot) and the fox drawn from it, kept readable on black") { customFurs }
         add("Accessories — each alone (front, NEO's poses, asleep, side, peeking) and with a hat") { accessories }
-        add("Size and home — the real island at each size, on each side (hardware notch in red)", scale: 3) {
+        add("Size and home — the real island at each size, on each side (hardware notch masked in black)", scale: 3) {
             islands(geometry: geometry)
         }
         add("Settings → Pet — as it opens, and customised") { settingsPages(geometry: geometry) }
@@ -210,11 +210,6 @@ enum PetCustomSnapshots {
         }
         let frame = geometry.frame(for: cell.state, content: content)
         let local = CGRect(x: frame.minX - regionMinX, y: 0, width: frame.width, height: frame.height)
-        let mark: NeoListeningMark? = cell.listening.flatMap { since in
-            var indicator = NeoListeningIndicator()
-            indicator.update(listening: true, at: now.addingTimeInterval(-since))
-            return indicator.mark(for: cell.state, at: now)
-        }
         let palette = PetPalette.look(cell.look)
         let pet = PetRenderModel(
             presentation: PetPresentation(mood: .idle, animation: cell.animation, startedAt: now.addingTimeInterval(-cell.elapsed - 0.001),
@@ -228,13 +223,14 @@ enum PetCustomSnapshots {
                 current: cell.activity, stackCount: 0, state: cell.state, localFrame: local, cornerRadius: 10,
                 notchInset: notch.height, isIdle: cell.state == .idle, wingStatus: cell.state == .wings ? wingsSample : WingStatus(),
                 notchWidth: notch.width, contentSize: content, panelContent: panel, surfaceVisible: true, pet: pet, hasNotch: true,
-                listening: mark
+                listening: nil,
+                neoListeningActive: cell.listening != nil
             )
             .frame(width: regionWidth, height: height)
             .background(desktop)
             .overlay(alignment: .topLeading) {
                 NotchShape(bottomRadius: DesignTokens.radiusPhysicalNotchBottom, topRadius: DesignTokens.radiusNotchTopFlare)
-                    .fill(Color(.sRGB, red: 0.6, green: 0.05, blue: 0.05).opacity(0.5))
+                    .fill(Color.black)
                     .frame(width: notch.width, height: notch.height)
                     .offset(x: notch.minX - regionMinX)
             }
@@ -264,12 +260,12 @@ enum PetCustomSnapshots {
         for size in [PetSize.small, .large] {
             let name = size.title
             rows.append([
-                Cell(caption: "\(name) — NEO listening, the glow at its peak (teal)", size: size, animation: .neoListen, listening: peak),
-                Cell(caption: "\(name), left — listening, glow “match fur”, cyber", size: size, side: .left, animation: .neoListen,
+                Cell(caption: "\(name) — NEO listening, signal (teal)", size: size, animation: .neoListen, listening: peak),
+                Cell(caption: "\(name), left — wake outline “match fur”, cyber", size: size, side: .left, animation: .neoListen,
                      accessory: .headphones, look: .cyber, glow: .matchFur, listening: peak),
             ])
             rows.append([
-                Cell(caption: "\(name) — listening, glow violet, sunglasses", size: size, animation: .neoListen,
+                Cell(caption: "\(name) — wake outline violet, sunglasses", size: size, animation: .neoListen,
                      accessory: .sunglasses, glow: .violet, listening: peak),
                 Cell(caption: "\(name) — thinking, party hat + glasses", size: size, animation: .neoThink, hat: .party, accessory: .glasses),
             ])

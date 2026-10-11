@@ -31,12 +31,12 @@ struct NotchGeometryTests {
         #expect(g.compactFrame.width > g.notchFrame.width)
         #expect(abs(g.compactFrame.height - g.notchFrame.height) < 0.001)
         #expect(abs(g.compactFrame.maxY - g.notchFrame.maxY) < 0.001)
-        // The compact bar is asymmetric: a snug left wing, a wider right wing.
-        #expect(abs(g.compactFrame.minX - (g.notchFrame.minX - NotchGeometry.compactLeadOverhang)) < 0.001)
-        #expect(abs(g.compactFrame.maxX - (g.notchFrame.maxX + NotchGeometry.compactTrailOverhang)) < 0.001)
-        // The notch region inside it must still centre on the real notch,
-        // or content would land under the physical cutout.
-        #expect(abs(g.compactFrame.minX + NotchGeometry.compactLeadOverhang - g.notchFrame.minX) < 0.001)
+        // Content widths may be asymmetric, but the surface grows equally
+        // around the physical notch so it stays visually centered.
+        let side = max(NotchGeometry.compactLeadOverhang, NotchGeometry.compactTrailOverhang)
+        #expect(abs(g.compactFrame.minX - (g.notchFrame.minX - side)) < 0.001)
+        #expect(abs(g.compactFrame.maxX - (g.notchFrame.maxX + side)) < 0.001)
+        #expect(abs(g.compactFrame.midX - g.notchFrame.midX) < 0.001)
     }
 
     @Test("expanded island is wider, centered, and capped")
@@ -137,9 +137,11 @@ struct NotchGeometryTests {
         #expect(abs(wings.width - (g.notchFrame.width + 160 * 2)) < 0.001)
         #expect(abs(wings.midX - g.notchFrame.midX) < 0.001)
 
-        // Compact: lead on left, trail on right, notch region aligned
-        #expect(abs(compact.width - (g.notchFrame.width + 80 + 200)) < 0.001)
-        #expect(abs(compact.minX - (g.notchFrame.minX - 80)) < 0.001)
+        // Compact: content may need 80pt left and 200pt right, but the island
+        // balances both sides and remains centered on the notch.
+        #expect(abs(compact.width - (g.notchFrame.width + 200 * 2)) < 0.001)
+        #expect(abs(compact.minX - (g.notchFrame.minX - 200)) < 0.001)
+        #expect(abs(compact.midX - g.notchFrame.midX) < 0.001)
 
         // Envelope contains the enlarged content frames
         #expect(g.envelopeFrame.contains(wings))

@@ -81,6 +81,7 @@ public final class IslandStateMachine {
     private var lastHoverExit: Date?
     private var lastInteraction: Date?
     private var lastTransition: Date?
+    private var expandedHoldUntil: Date?
 
     public init() {}
 
@@ -157,6 +158,7 @@ public final class IslandStateMachine {
 
         case .clicked:
             lastInteraction = now
+            expandedHoldUntil = nil
             switch presentation {
             case .idle, .wings:
                 // A click on the notch opens the dashboard.
@@ -175,6 +177,7 @@ public final class IslandStateMachine {
 
         case .dismissed:
             lastInteraction = now
+            expandedHoldUntil = nil
             switch presentation {
             case .interactive: presentation = restingPresentation(now: now)
             case .expanded: presentation = .compact
@@ -220,8 +223,27 @@ public final class IslandStateMachine {
     /// False immediately after the cursor leaves; true once `hoverCollapseDelay`
     /// has passed since the last exit.
     public func shouldCollapse(now: Date) -> Bool {
+        guard !isExpansionHeld(at: now) else { return false }
         guard let exit = lastHoverExit else { return true }
         return now.timeIntervalSince(exit) >= hoverCollapseDelay
+    }
+
+    /// Keeps an automatically opened result expanded until its minimum display
+    /// time has passed, even if the pointer leaves or the normal idle timer fires.
+    public func holdExpanded(until date: Date) {
+        expandedHoldUntil = max(expandedHoldUntil ?? date, date)
+    }
+
+    /// Releases a timed expansion early when its result is replaced or cleared.
+    public func clearExpandedHold() {
+        expandedHoldUntil = nil
+    }
+
+    private func isExpansionHeld(at now: Date) -> Bool {
+        guard presentation == .expanded, let until = expandedHoldUntil else { return false }
+        if now < until { return true }
+        expandedHoldUntil = nil
+        return false
     }
 
     /// Advances time. Clears the transition flag, then steps the presentation
@@ -236,7 +258,7 @@ public final class IslandStateMachine {
         let idleSince = lastInteraction.map { now.timeIntervalSince($0) } ?? .greatestFiniteMagnitude
         let hoverExitCollapse = !isHovering && lastHoverExit != nil && shouldCollapse(now: now)
         let idleAutoCollapse = !isHovering && idleSince > autoCollapseDelay
-        let shouldStepDown = activityExpired || hoverExitCollapse || idleAutoCollapse
+        let shouldStepDown = !isExpansionHeld(at: now) && (activityExpired || hoverExitCollapse || idleAutoCollapse)
 
         switch presentation {
         case .interactive:

@@ -6,19 +6,14 @@ import UniformTypeIdentifiers
 /// `--neo-snapshots DIR`: the real `IslandView` with the pet posing as NEO,
 /// rendered offscreen with `ImageRenderer` in each of NEO's states and in
 /// the island shapes it can be in, so each pose can be checked without a
-/// core or a screen recording. Every row's island is exactly the pre-NEO
-/// island — the pet's pose is all that changes — and that holds while NEO
-/// LISTENS too: then a soft glow pulses ONCE behind the pet and takes no
-/// room (t = 0.45 s: the pulse at its peak; t = 1.0 s: fading; t = 3 s:
-/// nothing — NEO still listening, the pulse long over). The hardware notch
-/// is drawn over each row in translucent red. An optional filter keeps only
+/// core or a screen recording. While NEO listens, a blue beam travels around a
+/// black-supported outline of the island silhouette, centred on the notch. The hardware cutout is
+/// masked in black over each row. An optional filter keeps only
 /// the rows whose name contains it (`--neo-snapshots DIR listening`). The
 /// last row is NEO's panel (its chat hangs down from the notch, with no pet)
 /// with a stand-in for the page: a web view cannot be rendered offscreen.
 ///
-/// `--neo-glow-zoom DIR`: the fox and its listening glow, enlarged — NEO
-/// idle, the pulse at its peak, and the pulse fading — in the notch strip
-/// and in the expanded island, so the light itself can be judged.
+/// `--neo-glow-zoom DIR`: the fox and its listening treatment, enlarged.
 @MainActor
 enum NeoSnapshots {
 
@@ -30,11 +25,11 @@ enum NeoSnapshots {
         var wings: WingStatus? = nil
         /// Which frame of the pose to draw (its loop's n-th cel).
         var frame: Int = 0
-        /// How long NEO has been listening (rows where it is): the glow's
-        /// one pulse runs for the first 1.4 s, and after that nothing shows.
+        /// Retained as a label for older pulse comparison rows.
         var listeningFor: TimeInterval = 3
         /// The idle dock, where it is not the pet's home on the right.
         var dock: PetDock? = nil
+        var drawsHardwareNotch: Bool = true
     }
 
     /// One row's island, as the app would lay it out and draw it right now.
@@ -44,13 +39,23 @@ enum NeoSnapshots {
         let frame: CGRect
         let local: CGRect
         let content: IslandContentSize
-        let mark: NeoListeningMark?
         let pet: PetLayout.Placement?
         let rowHeight: CGFloat
     }
 
     static let wingsSample = WingStatus(left: WingItem(symbol: "safari", label: "Safari"), right: [WingItem(symbol: "wifi", label: "Wi-Fi"), WingItem(symbol: "battery.100.bolt", label: "82%", tint: .accent)], musicPlaying: false, strip: nil)
     static let songSample = Activity.music(title: "Midnight City", artist: "M83")
+    static let coverSample: Data? = {
+        let image = NSImage(size: NSSize(width: 96, height: 96))
+        image.lockFocus()
+        NSGradient(colors: [.systemBlue, .systemPurple])?.draw(in: NSRect(origin: .zero, size: image.size), angle: 45)
+        NSColor.systemPink.withAlphaComponent(0.9).setFill()
+        NSBezierPath(ovalIn: CGRect(x: 22, y: 22, width: 52, height: 52)).fill()
+        NSColor.white.withAlphaComponent(0.9).setFill()
+        NSBezierPath(ovalIn: CGRect(x: 41, y: 41, width: 14, height: 14)).fill()
+        image.unlockFocus()
+        return image.tiffRepresentation.flatMap { NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:]) }
+    }()
 
     /// The margin of desktop drawn on either side of the notch.
     static let margin: CGFloat = 360
@@ -60,18 +65,18 @@ enum NeoSnapshots {
         let regionMinX = notch.minX - margin
         let regionWidth = notch.width + margin * 2
         let notchHeight = notch.height
-        // Taken per row, so the glow's pulse is where `listeningFor` puts it
-        // however long the rows before took to draw.
+        // Use a fresh date per row for consistent pet animation frames.
         let now = Date()
-        // The listening mark, as the app's own model gives it for this
-        // shape after `listeningFor` seconds of listening.
-        let mark: NeoListeningMark? = row.neo == .listening ? {
-            var indicator = NeoListeningIndicator()
-            indicator.update(listening: true, at: now.addingTimeInterval(-row.listeningFor))
-            return indicator.mark(for: row.state, at: now)
-        }() : nil
         var content: IslandContentSize
         switch row.state {
+        case .expanded where row.activity?.kind == .identifiedSong:
+            content = .default
+            if let activity = row.activity {
+                let textWidth = max(IslandMetrics.textWidth(activity.title), IslandMetrics.textWidth(activity.subtitle ?? ""))
+                let popupWidth = min(max(320, 38 + DesignTokens.space12 + textWidth
+                    + DesignTokens.contentInset * 2 + 8 + PetLayout.expandedReserve + 32), 420)
+                content.expandedSize = CGSize(width: popupWidth, height: 80)
+            }
         case .wings:
             let sides = IslandMetrics.wings(row.wings ?? WingStatus(), petSlot: PetLayout.barSlot)
             content = IslandContentSize(compactLead: 0, compactTrail: 0, wingSide: sides.trail)
@@ -81,7 +86,9 @@ enum NeoSnapshots {
         default:
             content = .default
         }
-        if row.state == .idle { content.petDock = row.dock ?? .home }
+        if row.state == .idle {
+            content.petDock = row.dock ?? .home
+        }
         let frame = geometry.frame(for: row.state, content: content)
         let local = CGRect(x: frame.minX - regionMinX, y: 0, width: frame.width, height: frame.height)
         // The pose as the brain gives it, started so that the wanted cel shows now.
@@ -105,13 +112,14 @@ enum NeoSnapshots {
             current: row.activity, stackCount: 0, state: row.state, localFrame: local, cornerRadius: 10,
             notchInset: notchHeight, isIdle: row.state == .idle, wingStatus: row.wings ?? WingStatus(),
             notchWidth: notch.width, contentSize: content, panelContent: placeholder, surfaceVisible: true, pet: petModel, hasNotch: true,
-            listening: mark
+            listening: nil,
+            neoListeningActive: row.neo == .listening
         )
         .frame(width: regionWidth, height: rowHeight)
         .background(Color(.sRGB, red: 0.42, green: 0.42, blue: 0.45))
         let pet = row.state == .neoPanel ? nil
             : PetLayout.placement(for: row.state, islandSize: frame.size, notchHeight: notchHeight, dock: content.petDock ?? .home)
-        return Scene(view: AnyView(view), frame: frame, local: local, content: content, mark: mark, pet: pet, rowHeight: rowHeight)
+        return Scene(view: AnyView(view), frame: frame, local: local, content: content, pet: pet, rowHeight: rowHeight)
     }
 
     static func render(directory: String, filter: String? = nil) -> Int32 {
@@ -130,25 +138,17 @@ enum NeoSnapshots {
         }
         let wings = wingsSample
         let song = songSample
+        let songListening = Activity(kind: .songRecognition, title: "Listening for a song", subtitle: "Listening · 0:04")
+        let identifiedSong = Activity(kind: .identifiedSong, title: "Midnight City", subtitle: "M83 · Hurry Up, We're Dreaming · 2011", artwork: coverSample)
         rows += [
-            // Listening: the glow pulses once behind the pet — at its peak,
-            // fading, and gone (NEO still listening) — in every shape the pet
-            // rides. Each island is exactly as wide as it is without NEO.
-            Row(name: "idle, listening t=0.45 s — the pulse at its peak", state: .idle, neo: .listening, listeningFor: NeoListeningLayout.pulseRise),
-            Row(name: "idle, listening t=1.0 s — the pulse fading", state: .idle, neo: .listening, listeningFor: 1.0),
-            Row(name: "idle, listening t=3 s — nothing: the pulse is over", state: .idle, neo: .listening, listeningFor: 3),
-            Row(name: "idle on the LEFT of the notch, listening t=0.45 s — the pulse at its peak", state: .idle, neo: .listening, listeningFor: NeoListeningLayout.pulseRise, dock: PetDock(side: .left, reach: PetLayout.idleDock)),
-            Row(name: "idle on the LEFT of the notch, listening t=1.0 s — the pulse fading", state: .idle, neo: .listening, listeningFor: 1.0, dock: PetDock(side: .left, reach: PetLayout.idleDock)),
-            Row(name: "idle on the LEFT of the notch, listening t=3 s — nothing: the pulse is over", state: .idle, neo: .listening, listeningFor: 3, dock: PetDock(side: .left, reach: PetLayout.idleDock)),
-            Row(name: "wings, listening t=0.45 s — the pulse at its peak", state: .wings, neo: .listening, wings: wings, listeningFor: NeoListeningLayout.pulseRise),
-            Row(name: "wings, listening t=1.0 s — the pulse fading", state: .wings, neo: .listening, wings: wings, listeningFor: 1.0),
-            Row(name: "wings, listening t=3 s — nothing: the pulse is over", state: .wings, neo: .listening, wings: wings, listeningFor: 3),
-            Row(name: "compact (volume), listening t=0.45 s — the pulse at its peak", state: .compact, neo: .listening, activity: .volume(0.62), listeningFor: NeoListeningLayout.pulseRise),
-            Row(name: "compact (volume), listening t=1.0 s — the pulse fading", state: .compact, neo: .listening, activity: .volume(0.62), listeningFor: 1.0),
-            Row(name: "compact (volume), listening t=3 s — nothing: the pulse is over", state: .compact, neo: .listening, activity: .volume(0.62), listeningFor: 3),
-            Row(name: "expanded (music), listening t=0.45 s — the pulse at its peak", state: .expanded, neo: .listening, activity: song, listeningFor: NeoListeningLayout.pulseRise),
-            Row(name: "expanded (music), listening t=1.0 s — the pulse fading", state: .expanded, neo: .listening, activity: song, listeningFor: 1.0),
-            Row(name: "expanded (music), listening t=3 s — nothing: the pulse is over", state: .expanded, neo: .listening, activity: song, listeningFor: 3),
+            // Listening outlines the physical notch, regardless of the island's width.
+            Row(name: "idle, listening — moving blue notch outline", state: .idle, neo: .listening),
+            Row(name: "idle on the LEFT of the notch, listening — moving outline", state: .idle, neo: .listening, dock: PetDock(side: .left, reach: PetLayout.idleDock)),
+            Row(name: "wings, listening — moving blue notch outline", state: .wings, neo: .listening, wings: wings),
+            Row(name: "compact (volume), listening — moving blue notch outline", state: .compact, neo: .listening, activity: .volume(0.62)),
+            Row(name: "compact (song recognition), listening", state: .compact, neo: .listening, activity: songListening),
+            Row(name: "identified song popup", state: .expanded, neo: .speaking, activity: identifiedSong, drawsHardwareNotch: false),
+            Row(name: "expanded (music), listening — moving blue notch outline", state: .expanded, neo: .listening, activity: song),
             Row(name: "compact (volume), speaking", state: .compact, neo: .speaking, activity: .volume(0.62)),
             Row(name: "expanded (music), thinking", state: .expanded, neo: .thinking, activity: song),
             Row(name: "NEO panel (the chat, \(Int(NeoPanelLayout.standard.width))×\(Int(NeoPanelLayout.standard.height)) under the notch), speaking — no pet", state: .neoPanel, neo: .speaking),
@@ -177,7 +177,7 @@ enum NeoSnapshots {
 
         for (index, row) in rows.enumerated() {
             let scene = scene(row, geometry: geometry)
-            let (frame, mark) = (scene.frame, scene.mark)
+            let frame = scene.frame
             let view = scene.view
             let renderer = ImageRenderer(content: view)
             renderer.scale = scale
@@ -188,29 +188,23 @@ enum NeoSnapshots {
             rowTop += rowPixels(row)
             let y = CGFloat(totalHeight - rowTop)
             context.draw(image, in: CGRect(x: 0, y: y, width: CGFloat(image.width), height: CGFloat(image.height)))
-            context.saveGState()
-            context.translateBy(x: 0, y: y + CGFloat(image.height))
-            context.scaleBy(x: scale, y: -scale)
-            context.addPath(NotchShape(bottomRadius: DesignTokens.radiusPhysicalNotchBottom, topRadius: DesignTokens.radiusNotchTopFlare)
-                .path(in: CGRect(x: notch.minX - regionMinX, y: 0, width: notch.width, height: notch.height)).cgPath)
-            context.setFillColor(CGColor(srgbRed: 0.6, green: 0.05, blue: 0.05, alpha: 0.5))
-            context.fillPath()
-            context.restoreGState()
+            if row.drawsHardwareNotch {
+                context.saveGState()
+                context.translateBy(x: 0, y: y + CGFloat(image.height))
+                context.scaleBy(x: scale, y: -scale)
+                context.addPath(NotchShape(bottomRadius: DesignTokens.radiusPhysicalNotchBottom, topRadius: DesignTokens.radiusNotchTopFlare)
+                    .path(in: CGRect(x: notch.minX - regionMinX, y: 0, width: notch.width, height: notch.height)).cgPath)
+                context.setFillColor(CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 1))
+                context.fillPath()
+                context.restoreGState()
+            }
             var line = String(format: "row %d: %@ — island %.0f×%.0f", index, row.name, frame.width, frame.height)
-            if row.neo == .listening, let pet = scene.pet {
-                // The island this row would be with NEO idle: listening must
-                // never widen it, pulse or no pulse.
+            if row.neo == .listening {
                 let plain = self.scene(Row(name: "", state: row.state, neo: .idle, activity: row.activity, wings: row.wings, dock: row.dock), geometry: geometry).frame
-                line += String(format: " — %+.0f pt wide", frame.width - plain.width) + (frame == plain ? "" : " — NOT THE PLAIN ISLAND'S FRAME")
-                if mark != nil {
-                    let pulse = NeoListeningLayout.pulse(at: row.listeningFor)
-                    let glow = NeoListeningLayout.glowFrame(behind: pet, scale: NeoListeningLayout.pulseScaleRange.upperBound)
-                    line += String(format: ", glow %.0f pt, pulse %.2f (opacity %.2f, scale %.2f)", NeoListeningLayout.glowDiameter(petSize: pet.size),
-                                   pulse, NeoListeningLayout.glowOpacity(pulse: pulse), NeoListeningLayout.glowScale(pulse: pulse))
-                    line += CGRect(origin: .zero, size: frame.size).contains(glow) ? ", inside the island" : ", PAST THE ISLAND'S EDGE"
-                } else {
-                    line += ", no glow"
-                }
+                let delta = frame.width - plain.width
+                line += String(format: " — %+.0f pt listening width", delta)
+                if abs(delta) > 0.5 { line += " — UNEXPECTED LISTENING GEOMETRY" }
+                line += " — moving notch outline"
             }
             print(line)
         }

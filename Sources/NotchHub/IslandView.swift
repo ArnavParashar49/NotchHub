@@ -55,6 +55,11 @@ struct IslandView: View {
     /// starts to listen, in every shape the pet rides. `nil` while no pulse
     /// shows.
     var listening: NeoListeningMark? = nil
+    /// NEO's microphone is live; a moving blue contour traces the hardware notch.
+    var neoListeningActive: Bool = false
+    /// AppKit context menus need smooth pointer tracking; hold the highlight still while one is open.
+    var neoListeningAnimationPaused: Bool = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -66,8 +71,12 @@ struct IslandView: View {
                     .transition(.islandContent)
             }
 
-            // The glow is BEHIND the pet: light it stands in, not a badge.
-            listeningGlowLayer
+            listeningSignalLayer
+            // Explicit snapshot callers can still request the older one-shot
+            // pet halo; the live app uses the inlaid signal mark above.
+            if listening != nil {
+                listeningGlowLayer
+            }
 
             petLayer
         }
@@ -96,6 +105,7 @@ struct IslandView: View {
                     notchHeight: notchInset,
                     trailingReserve: petBarReserve,
                     leadWidth: contentSize.wingLead,
+                    trailWidth: contentSize.wingSide,
                     hovered: hoveredControl
                 )
                 .id("wings")
@@ -176,6 +186,22 @@ struct IslandView: View {
         }
     }
 
+    /// A thin black support rim follows the island's current silhouette,
+    /// centered on the hardware notch, and carries a continuous blue beam. It
+    /// extends only a couple of points so the light stays visible at the edge.
+    private var listeningSignalLayer: some View {
+        NeoWakeOutlineView(
+            shape: surfaceShape,
+            isActive: neoListeningActive && hasNotch,
+            paused: neoListeningAnimationPaused,
+            tint: pet?.glow.map(PetCanvas.color) ?? DesignTokens.accent
+        )
+            .frame(width: localFrame.width + NeoWakeOutlineView.supportInset * 2,
+                   height: localFrame.height + NeoWakeOutlineView.supportInset * 2)
+            .position(x: localFrame.width / 2, y: localFrame.height / 2)
+            .allowsHitTesting(false)
+    }
+
     /// Room kept free for the pet at the right of notch-height bars.
     private var petBarReserve: CGFloat { pet.map { PetMetrics($0.size).barSlot } ?? 0 }
 
@@ -204,6 +230,7 @@ struct IslandView: View {
         // NEO's two buttons: a small surface, its corners concentric with
         // the capsules inside it.
         if state == .neoConfirm { return NeoConfirmLayout.cornerRadius }
+        if state == .expanded, current?.kind == .identifiedSong { return DesignTokens.radiusIslandBottom }
         if Self.panelStates.contains(state) { return DesignTokens.radiusPanel }
         let base = state == .wings ? DesignTokens.radiusWingBottom : DesignTokens.radiusIslandBottom
         guard notchInset > 0 else { return base }
@@ -276,10 +303,17 @@ struct IslandView: View {
     /// stays centred on the real notch; the glyph sits at the extreme left of
     /// its wing rather than hugging the cutout, so the side reads snug.
     private func compactContent(for activity: Activity) -> some View {
-        HStack(spacing: 0) {
+        let balancedSide = max(contentSize.compactLead, contentSize.compactTrail)
+        // Let the visualizer fill the open right lane when a longer title
+        // widens the centered bar, while keeping its usual size on short rows.
+        let visualizerWidth = max(
+            IslandMetrics.musicVisualizerWidth,
+            balancedSide - DesignTokens.compactInset - petBarReserve
+        )
+        return HStack(spacing: 0) {
             // Left wing
             HStack(spacing: 8) {
-                if activity.kind == .music {
+                if activity.kind == .music || activity.kind == .identifiedSong {
                     // Square artwork thumbnail on the left, clearly visible.
                     Group {
                         if let artwork = activity.artwork, let image = NSImage(data: artwork) {
@@ -315,17 +349,23 @@ struct IslandView: View {
                     }
                 }
 
-                if activity.kind == .music, let text = activity.compactText {
+                if (activity.kind == .music || activity.kind == .identifiedSong), let text = activity.compactText {
                     MarqueeText(
                         text: text,
                         font: DesignTokens.compactFont,
                         foregroundStyle: DesignTokens.textPrimary,
                         maxWidth: IslandMetrics.maxCompactMusicTextWidth
                     )
+                } else if activity.kind == .songRecognition {
+                    Text(activity.title)
+                        .font(DesignTokens.compactFont)
+                        .foregroundStyle(DesignTokens.textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
             }
             .padding(.leading, DesignTokens.compactInset)
-            .frame(width: contentSize.compactLead, alignment: .leading)
+            .frame(width: balancedSide, alignment: .leading)
 
             // Notch
             Color.clear.frame(width: notchWidth)
@@ -333,7 +373,15 @@ struct IslandView: View {
             // Right wing
             HStack(spacing: 0) {
                 if activity.kind == .music {
-                    MusicVisualizer(isPlaying: activity.isPlaying, color: Color(red: 0.19, green: 0.82, blue: 0.35))
+                    MusicVisualizer(isPlaying: activity.isPlaying, color: Color(red: 0.19, green: 0.82, blue: 0.35), width: visualizerWidth)
+                } else if activity.kind == .songRecognition {
+                    MusicVisualizer(isPlaying: true, tint: DesignTokens.accent, width: visualizerWidth)
+                } else if activity.kind == .identifiedSong, let detail = activity.compactDetail {
+                    Text(detail)
+                        .font(DesignTokens.compactFont)
+                        .foregroundStyle(DesignTokens.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 } else if activity.kind == .meeting {
                     meetingCompactControls
                 } else if let text = activity.compactText {
@@ -345,7 +393,7 @@ struct IslandView: View {
                 }
             }
             .padding(.trailing, DesignTokens.compactInset + petBarReserve)
-            .frame(width: contentSize.compactTrail, alignment: .trailing)
+            .frame(width: balancedSide, alignment: .trailing)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -374,6 +422,9 @@ struct IslandView: View {
         if activity.kind == .music {
             return AnyView(musicExpandedContent(for: activity))
         }
+        if activity.kind == .identifiedSong {
+            return AnyView(identifiedSongPopupContent(for: activity))
+        }
         return AnyView(
             HStack(spacing: DesignTokens.space16) {
                 icon(for: activity, size: DesignTokens.iconSizeLarge)
@@ -401,6 +452,39 @@ struct IslandView: View {
             .padding(.trailing, DesignTokens.contentInset + petExpandedReserve)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         )
+    }
+
+    /// A compact NEO result card: cover art, song title and the artist/album
+    /// line, without the transport controls or progress bar of a live player.
+    private func identifiedSongPopupContent(for activity: Activity) -> some View {
+        HStack(spacing: DesignTokens.space12) {
+            artworkFill(for: activity)
+                .frame(width: 38, height: 38)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.radiusChip, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: DesignTokens.radiusChip, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+                )
+
+            VStack(alignment: .leading, spacing: DesignTokens.space2) {
+                Text(activity.title)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .lineLimit(1)
+                if let subtitle = activity.subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(DesignTokens.textSecondary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.leading, DesignTokens.contentInset + 2)
+        // Keep the fox's expanded slot clear so the artist/album line never
+        // renders underneath it.
+        .padding(.trailing, DesignTokens.contentInset + 6 + petExpandedReserve)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
     /// The expanded music surface: a clean square artwork on the left, track
@@ -534,6 +618,8 @@ struct IslandView: View {
             }
         case .music:
             mediaControls(for: activity)
+        case .songRecognition:
+            MusicVisualizer(isPlaying: true, tint: DesignTokens.accent)
         default:
             EmptyView()
         }

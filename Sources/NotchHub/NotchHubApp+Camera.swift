@@ -66,9 +66,54 @@ extension NotchHubApp {
         AnyView(CameraView(state: cameraState, previewLayer: camera.previewLayer))
     }
 
+    /// NEO owns capture and analysis; NotchHub only paints its latest frame in
+    /// the native camera layout. No second capture session is started here.
+    func neoCameraPresentationState() -> CameraState {
+        let status = neoCameraState?.status ?? "starting"
+        let phase: CameraPhase = status == "starting" ? .starting : .live
+        let name = status == "analysing" ? "NEO is looking…" : "NEO camera"
+        return CameraState(
+            phase: phase,
+            devices: [CameraDevice(id: "neo", name: name)],
+            deviceID: "neo",
+            isExpanded: neoCameraExpanded,
+            isMirrored: neoCameraMirrored
+        )
+    }
+
+    func neoCameraContent() -> AnyView {
+        let state = neoCameraPresentationState()
+        let caption = neoCameraState?.answer ?? neoCameraState?.labels.prefix(4).joined(separator: " · ")
+        return AnyView(CameraView(
+            state: state,
+            previewLayer: nil,
+            stream: neoCameraStream,
+            caption: caption
+        ))
+    }
+
     /// Handles a click on the camera's controls. A miss falls through to the
     /// island click.
     func cameraControlHit(at point: NSPoint) -> Bool {
+        if panel == .neoCamera {
+            let state = neoCameraPresentationState()
+            let frame = window.localFrame(for: neoCameraExpanded ? .cameraExpanded : .camera, content: .default)
+            guard let action = CameraLayout.action(at: point, in: frame, state: state) else { return false }
+            log("neo camera: \(action)")
+            switch action {
+            case .toggleSize:
+                neoCameraExpanded.toggle()
+                renderIsland()
+            case .toggleMirror:
+                neoCameraMirrored.toggle()
+                refreshPanel()
+            case .close:
+                closePanel() // releaseCurrentPanel sends camera_stop + view-off
+            case .switchDevice, .openSettings:
+                break
+            }
+            return true
+        }
         guard panel == .camera else { return false }
         let frame = window.localFrame(for: cameraIslandState, content: .default)
         guard let action = CameraLayout.action(at: point, in: frame, state: cameraState) else { return false }

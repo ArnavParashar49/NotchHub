@@ -37,7 +37,7 @@ extension NotchHubApp {
     func neoCoreSettingsReceived(_ settings: NeoCoreSettings) {
         guard settings != neoCoreSettings else { return }
         neoCoreSettings = settings
-        log("neo: listens for “Neo”: \(settings.wakeWord.map { $0 ? "on" : "off" } ?? "unknown")")
+        log("neo settings received (wake word: \(settings.wakeWord.map { $0 ? "on" : "off" } ?? "unknown"), check-ins: \(settings.wellbeingCheckins.map { $0 ? "on" : "off" } ?? "unknown"))")
         if panel == .settings { refreshPanel() }
     }
 
@@ -64,7 +64,7 @@ extension NotchHubApp {
             // NEO.app's own menu action: asked for through its core. Erasing
             // is still NEO's question to ask — it shows its own dialog first.
             if let action = intent.shellAction { monitor?.neoShell(action) }
-        case .wakeWord:
+        case .wakeWord, .wellbeingCheckins:
             // The core's own setting: asked of the core, which answers
             // everyone with where the switch now stands.
             if let setting = intent.setting { monitor?.neoSet(setting) }

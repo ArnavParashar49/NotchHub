@@ -45,9 +45,13 @@ final class IslandModel: ObservableObject {
     @Published var meeting: Meeting?
     /// The pixel pet, when shown.
     @Published var pet: PetRenderModel?
-    /// NEO's listening mark — the one pulse of light behind the pet when NEO
-    /// starts to listen; `nil` while no pulse shows.
+    /// Legacy pulse mark for explicit snapshot views; the live root uses the
+    /// moving outline instead.
     @Published var listening: NeoListeningMark?
+    /// NEO is actively listening. Drives the moving outline around the notch.
+    @Published var neoListeningActive: Bool = false
+    /// Pause the decorative animation while AppKit tracks the notch menu.
+    @Published var contextMenuTracking: Bool = false
     /// Whether this display has a notch (no idle dock or idle pet without one).
     @Published var hasNotch: Bool = true
     /// The drawn control the cursor is resting on. The island's controls are
@@ -82,7 +86,9 @@ struct IslandRootView: View {
             meeting: model.meeting,
             pet: model.pet,
             hasNotch: model.hasNotch,
-            listening: model.listening
+            listening: nil,
+            neoListeningActive: model.neoListeningActive,
+            neoListeningAnimationPaused: model.contextMenuTracking
         )
     }
 }

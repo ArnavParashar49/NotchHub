@@ -133,44 +133,25 @@ screen whenever NEO's core is connected (whatever Show Pet says), and while
 NEO is busy its pose is what NEO is doing. With NEO ready the fox lives its
 own life — the idle island is exactly the pre-NEO one, mischief and all —
 and with NEO active the fox simply animates, in whatever shape the island is
-in (idle, the hover wings, the compact bar, the expanded island). One thing
-is added, each time NEO starts **listening** (its microphone is live): a
-soft glow pulses once behind the fox.
-
-**The listening glow** (`NeoListeningIndicator`, `NeoListeningGlowView`):
-when NEO's state becomes listening a halo swells in behind the fox, peaks
-and fades fully out — ONE pulse, as if the fox pricked up and lit for a
-moment — and then nothing is drawn for the rest of that stretch of
-listening, however long it lasts. A new stretch (the state left listening
-and came back) pulses again. It is a blurred radial glow the fox's size +
-6 pt (22 pt around the 16-pt fox of the notch strip, 38 pt around the
-expanded island's), in a cool cyan-teal (`DesignTokens.listeningGlow`: the
-complement of the fox's orange, and neither the now-playing visualizer's
-green nor the system's mic and camera dots). The pulse lasts 1.4 s
-(`NeoListeningLayout.pulse`, 0 → 1 → 0): an eased rise to its peak at
-0.45 s — opacity 0.8, scale 1.06 — then a slower eased fall to nothing at
-1.4 s (opacity 0 → 0.8 → 0, scale 0.88 → 1.06 → 0.88; each half a
-half-cosine). If listening ends mid-pulse, what is lit fades on a quick
-ease-out (0.3 s). It takes **no room**, and there is no word beside it: the
-island never changes width for listening — idle, wings, compact and
-expanded have exactly the frames they have without NEO — and the glow is
-clipped to the island's black shape. It shows wherever the fox rides,
-including a panel's notch strip (the dashboard, an app panel, a call's
-controls), and nowhere the fox steps aside. On the idle dock the pulse
-waits for the fox to stand at its spot (a game comes home first), and then
-runs whole. NEO's core reports THAT it is listening, not how loud the room
-is, so the pulse has its own shape and claims no level; with Reduce Motion
-it is a single soft fade in and out (to opacity 0.6) at a fixed scale. It
-never takes a click, is hidden from capture with the rest of the island in
-Ghost Mode, and reads "Neo is listening" to assistive technology while the
-pulse shows. It is the design system's one gradient: it is light, not a
-surface.
+in (idle, the hover wings, the compact bar, the expanded island). When NEO is
+listening, an open blue contour reaches the screen's top edge at both sides,
+runs down the island and around its bottom, and leaves the top span clear. Two
+faster beams travel in the same direction, half a circuit apart, and wrap
+between the open ends. A narrow black support stroke gives the light a dark bed
+on bright desktops; it adds only a couple of points around the contour and
+keeps the island centered on the physical notch at every width.
+The outline fades away when listening ends and never takes a click. Its tint
+follows the user's pet glow colour. The core reports that NEO is listening,
+not room loudness, so the animation is state-driven and makes no claim about microphone level. It pauses
+while the notch's context menu is tracking; Reduce Motion keeps a still
+outline. The mark reads "NEO is listening" to assistive technology and is
+hidden from capture with the island in Ghost Mode.
 
 The poses, from the fox's own frames (`PetBrain.neoAnimation`):
 
 - **connecting** → waking: a stretch, then standing alert
-- **listening** → attentive: ears up, eyes on you, a slow breath — lit
-  once by the listening glow as it starts
+- **listening** → attentive: ears up, eyes on you, a slow breath — paired
+  with the moving blue notch outline
 - **thinking** → the thought bubble, scratching its head
 - **working** → pacing toward the notch and back
 - **searching** → the magnifier, then a sniff along the ground
@@ -197,10 +178,8 @@ for 6 s); `--neo-confirm-snapshot DIR` renders those buttons offscreen —
 before, as seen, with their hit targets, hovered, and with the fox on the
 left — to `DIR/notch-confirm.png`;
 `--neo-snapshots DIR` renders each pose offscreen in each island shape
-(`--neo-snapshots DIR listening` only the listening rows: 0.45 s — the
-pulse at its peak — 1.0 s — fading — and 3 s — nothing — into listening, in
-every shape); `--neo-glow-zoom DIR` renders the fox and its glow enlarged:
-NEO idle, the pulse at its peak, and the pulse fading.
+(`--neo-snapshots DIR listening` filters to NEO's listening mark in each
+shape); `--neo-glow-zoom DIR` keeps the legacy pet-halo comparison helper.
 `NOTCHHUB_NEO_DIST=<folder>` serves that build of NEO's page (a `ui/dist`)
 instead of the installed one, for a debug run or the built-page tests.
 `NOTCHHUB_NEO_SNAPSHOTS=<dir>` makes `kill -USR1 <pid>` write NEO's page as it
@@ -393,9 +372,9 @@ placement and every snapshot are what they were.
   it is 4:1 against the island's black and 3:1 against the eyes and outline,
   white is held down until the cream muzzle, chest and tail tip stand clear of
   it. Palettes are built when the setting changes, never while drawing.
-- **Look — listening glow.** NEO's glow behind the fox: the design system's
-  teal (the default, untouched), Sky, Violet, Rose, Amber, White, or **Match
-  fur** (the fur's highlight colour, lifted if the fur is dark).
+- **Look — wake outline.** The contour uses the design system's cyan-teal (the
+  default), Sky, Violet, Rose, Amber, White, or **Match fur** (the fur's
+  highlight colour, lifted if the fur is dark).
 - **Wear.** A hat (seasonal, none, or one of ten) and ONE accessory — glasses,
   sunglasses, a scarf, a bow tie, headphones — which combine. Accessories are
   pixel art like the hats (`art/pet/wear.pet`), drawn once for the front view
@@ -410,7 +389,8 @@ placement and every snapshot are what they were.
   pixels and every position and offset is a whole number of points
   (`PetMetrics`), so the art stays crisp and never shimmers as it moves. The
   idle dock (30 / 34 / 42 pt), the room the bars keep, the transport's
-  reserve, the mischief (hiding, peeking) and the listening glow all follow
+  reserve and the mischief (hiding, peeking) follow the size; the listening
+  signal colour follows the pet's chosen glow colour.
   the size. NEO's Allow / Cancel surface does not change — a large fox still
   fits beside the notch in it. The pet's panel always shows the fox at 48 pt.
 - **Home.** Right of the notch (the default), left of it, or Auto — no fixed
@@ -443,7 +423,7 @@ saved) falls back to its default on its own.
 `DIR/pet-custom.png` (`shots/pet-custom.png`): every preset, custom colours
 with the pick beside the fox drawn from it, each accessory alone and with a
 hat in front, side and peeking poses, the three sizes on both sides in the
-real island (idle, the listening glow, Allow / Cancel, the bars, mischief),
+real island (idle, the wake outline, Allow / Cancel, the bars, mischief),
 and the Settings page. `python3 scripts/pet_art.py sheet OUT.png --wear NAME
 [--hat NAME] [--look NAME]` shows an accessory on every frame of the art.
 

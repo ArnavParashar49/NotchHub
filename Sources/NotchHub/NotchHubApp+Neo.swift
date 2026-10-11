@@ -9,13 +9,11 @@ import NotchHubSystem
 /// held state and whether its core is there — and, from that state and the
 /// card facts, `NeoPanelModel` (`+NeoPanel`). The pet takes NEO's state
 /// through `petContext` (`PetContext.neoState`) and poses as what NEO is
-/// doing. One thing is added, each time NEO starts LISTENING: a soft glow
-/// pulses ONCE behind the pet (`NeoListeningIndicator`) — it swells in,
-/// peaks and fades out over 1.4 s, and then nothing is drawn for the rest of
-/// that stretch of listening. It takes no room: the island is exactly what
-/// it is without NEO, always. The models are pure and clock-driven: they say
-/// when something will change on its own (a held state becoming due, the
-/// settle after idle, the panel folding, the pulse ending), and
+/// doing. While NEO listens, a small animated voiceprint appears inside the
+/// physical notch. It needs no extra island space and does not trace the edge.
+/// The models are pure and clock-driven: they say when something will change
+/// on its own (a held state becoming due, the settle after idle, the panel
+/// folding), and
 /// `scheduleNeoWake` comes back exactly then. NEO's state lives here and in
 /// the models only — never in the activity queue or the state machine.
 extension NotchHubApp {
@@ -50,12 +48,45 @@ extension NotchHubApp {
         // gone, with whatever it was waiting on.
         let confirmChanged = neoConfirm.receive(fact, at: now)
         switch fact {
-        case let .card(kind, open): neoPanel.card(kind, open: open, at: now)
+        case let .card(kind, open):
+            switch kind {
+            case .browser:
+                neoPanel.card(kind, open: open, at: now)
+            case .camera:
+                if open { openNeoCamera() } else { closeNeoCamera() }
+            case .song:
+                if open { updateNeoSongActivity(at: now) } else { finishNeoSongActivity(at: now) }
+            }
+        case let .cameraCard(state):
+            let previous = neoCameraState
+            neoCameraState = state
+            if panel != .neoCamera { openNeoCamera() }
+            neoCameraStream.boxes = state.boxes
+            if panel == .neoCamera,
+               previous?.status != state.status || previous?.answer != state.answer || previous?.labels != state.labels {
+                refreshPanel()
+            }
+        case let .cameraFrame(frame):
+            guard panel == .neoCamera else { return }
+            neoCameraStream.frame = frame
+            return // a preview pixel doesn't change NEO's state, the panel, or the pet
+        case let .songCard(state):
+            if let previousSID = neoSongSID, previousSID != state.sid {
+                neoSongDismissTask?.cancel()
+                if let id = neoSongActivityID { queue.remove(id: id) }
+                neoSongActivityID = nil
+                machine.clearExpandedHold()
+            }
+            neoSongCardState = state
+            neoSongSID = state.sid
+            updateNeoSongActivity(at: now)
         case .woke:
             neoConfirm.userOpenedChat()
             neoPanel.show(at: now) // summoned by hand: the explicit show
         case .connected(false):
             neoPanel.disconnected(at: now)
+            if panel == .neoCamera { closePanel() }
+            finishNeoSongActivity(at: now)
             log("neo: core away — panel open=\(neoPanel.isOpen) waiting=\(neoPanel.isWaitingForCore)")
         case .connected(true):
             log("neo: core back — panel open=\(neoPanel.isOpen) waiting=\(neoPanel.isWaitingForCore)")
@@ -78,7 +109,120 @@ extension NotchHubApp {
         scheduleNeoWake(neoNextWake(at: now))
     }
 
-    // MARK: - The listening pulse
+    /// Camera and song cards have native NotchHub surfaces; only browser cards
+    /// need NEO's embedded page. Camera pixels stay in memory while visible.
+    func openNeoCamera() {
+        guard panel != .neoCamera else {
+            monitor?.neoCameraVisible(true)
+            return
+        }
+        neoCameraStream.frame = nil
+        neoCameraStream.boxes = []
+        takePanel(.neoCamera)
+        monitor?.neoCameraVisible(true)
+        renderIsland()
+    }
+
+    func closeNeoCamera() {
+        guard panel == .neoCamera else {
+            neoCameraStream.frame = nil
+            neoCameraStream.boxes = []
+            neoCameraState = nil
+            return
+        }
+        closePanel() // releaseCurrentPanel stops the session and hides its stream
+    }
+
+    func updateNeoSongActivity(at now: Date) {
+        let state = neoSongCardState
+        let title: String
+        let subtitle: String
+        let symbol: String
+        let artwork: Data?
+        let isListening = state?.status == "listening" || state?.status == "matching"
+        let hasTrack = state?.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let previousKind = neoSongActivityID.flatMap { id in queue.all.first(where: { $0.id == id })?.kind }
+        if let state, let track = state.title, !track.isEmpty {
+            title = track
+            subtitle = [state.artist, state.album, state.year].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+            symbol = "music.note"
+            artwork = state.cover
+        } else {
+            title = state?.status == "not_found" ? "No song found"
+                : state?.status == "error" ? "Couldn't identify song"
+                : "Listening for a song"
+            let elapsed = Int(state?.elapsed ?? 0)
+            let clock = String(format: "%d:%02d", elapsed / 60, elapsed % 60)
+            subtitle = state?.message ?? (state?.status == "listening" || state?.status == "matching"
+                ? "Listening · \(clock)" : "Try asking again")
+            symbol = state?.status == "listening" || state?.status == "matching" ? "waveform" : "music.note"
+            artwork = nil
+        }
+        let activity = Activity(
+            id: neoSongActivityID ?? UUID(),
+            kind: isListening ? .songRecognition : (state?.status == "found" && hasTrack ? .identifiedSong : .custom),
+            title: title,
+            subtitle: subtitle.isEmpty ? nil : subtitle, symbol: symbol,
+            priority: 90, autoDismiss: 0, progress: state?.level,
+            elapsed: state?.elapsed, artwork: artwork, createdAt: now
+        )
+        if let id = neoSongActivityID {
+            queue.replace(id, with: activity)
+        } else {
+            neoSongActivityID = activity.id
+            queue.push(activity)
+        }
+        renderQueue()
+        // A found track earns a short details popup automatically. Its small
+        // expanded layout is also available on hover after the popup settles.
+        if activity.kind == .identifiedSong, panel == .none, !neoConfirmShowing {
+            if previousKind != .identifiedSong, machine.presentation != .interactive {
+                machine.holdExpanded(until: now.addingTimeInterval(4.25))
+            }
+            if machine.presentation == .compact {
+                machine.send(.priorityChanged)
+                renderIsland()
+            }
+        } else if previousKind == .identifiedSong {
+            machine.clearExpandedHold()
+        }
+    }
+
+    func finishNeoSongActivity(at now: Date) {
+        guard let id = neoSongActivityID else { return }
+        if let state = neoSongCardState,
+           state.status == "found" || state.status == "not_found" || state.status == "error" {
+            let current = queue.all.first(where: { $0.id == id })
+            let final = Activity(
+                id: id, kind: state.status == "found" && current?.title != nil ? .identifiedSong : .custom,
+                title: current?.title ?? "Song identified",
+                subtitle: current?.subtitle, symbol: current?.symbol, priority: current?.priority,
+                autoDismiss: 4, artwork: current?.artwork, createdAt: now
+            )
+            queue.replace(id, with: final)
+            neoSongDismissTask?.cancel()
+            neoSongDismissTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                guard !Task.isCancelled, let self, self.neoSongActivityID == id else { return }
+                self.queue.remove(id: id)
+                self.neoSongActivityID = nil
+                self.neoSongSID = nil
+                self.neoSongCardState = nil
+                self.machine.clearExpandedHold()
+                self.renderQueue()
+            }
+        } else {
+            neoSongDismissTask?.cancel()
+            queue.remove(id: id)
+            neoSongActivityID = nil
+            neoSongSID = nil
+            neoSongCardState = nil
+            machine.clearExpandedHold()
+        }
+        renderQueue()
+    }
+
+    // MARK: - Legacy listening pulse (snapshot compatibility)
 
     /// Whether the pet stands at its spot on the idle dock — not hiding in
     /// the notch, peeking, or mid-game (it comes home first, as for any NEO
@@ -89,20 +233,15 @@ extension NotchHubApp {
             && petBrain.presentation.mood != .mischief
     }
 
-    /// The listening mark for a shape right now, or `nil` where none shows:
-    /// NEO not listening (or away), its one pulse over, a surface the pet
-    /// steps aside for, or the idle dock while the pet is not standing at
-    /// its spot.
+    /// The legacy snapshot mark for a shape right now. The live view uses
+    /// `neoListeningActive` and draws the moving notch outline instead.
     func neoListeningMark(for state: IslandState, at now: Date = Date()) -> NeoListeningMark? {
         guard neoPresent else { return nil }
         return neoListening.mark(for: state, at: now, petAtHome: petAtHome)
     }
 
-    /// Feeds the listening indicator NEO's held state — a stretch of
-    /// listening runs only while NEO is here and listening, and its one pulse
-    /// begins once the pet is where the glow would light it — and returns
-    /// the mark for `state`. A pulse that began just now ends on its own:
-    /// the wake-up is planned for then.
+    /// Feeds the legacy snapshot indicator NEO's held state and returns its
+    /// mark. The live outline follows the core's listening state directly.
     func updatedNeoListeningMark(for state: IslandState, at now: Date = Date()) -> NeoListeningMark? {
         let begun = neoListening.pulseStart
         neoListening.update(
@@ -116,16 +255,17 @@ extension NotchHubApp {
         return neoListeningMark(for: state, at: now)
     }
 
-    /// Brings the listening mark up to date and hands it to the island. The
-    /// glow takes no room, so nothing about the island's shape moves for it.
+    /// Keeps the legacy snapshot mark current and publishes the live listening
+    /// state that drives the moving blue notch outline.
     func publishNeoListening(at now: Date = Date()) {
         let mark = updatedNeoListeningMark(for: currentIslandState(), at: now)
         if islandModel.listening != mark {
             islandModel.listening = mark
         }
+        islandModel.neoListeningActive = neoPresent && neoPresence.state == .listening
     }
 
-    /// Re-poses the pet for NEO, and brings the listening pulse up to date.
+    /// Re-poses the pet for NEO and refreshes its listening state.
     func refreshNeoPet() {
         publishPet(updatePet())
         publishNeoListening()

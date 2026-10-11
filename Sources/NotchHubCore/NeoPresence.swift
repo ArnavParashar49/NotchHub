@@ -53,7 +53,7 @@ public struct NeoPresenceModel: Equatable, Sendable {
             let wasIdle = hold.current == .idle
             hold.receive(next, at: now)
             noteIdle(wasIdle: wasIdle, at: now)
-        case .transcript, .note, .error, .card, .woke, .confirm, .confirmDone:
+        case .transcript, .note, .error, .card, .songCard, .cameraCard, .cameraFrame, .woke, .confirm, .confirmDone:
             break
         }
         lastReported = (state, isActive(at: now))

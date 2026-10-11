@@ -20,9 +20,26 @@ struct NeoListenerParsingTests {
             == [.transcript(role: .user, text: "hi", final: false)])
         #expect(NeoListener.facts(in: #"{"type":"note","data":{"text":"n"},"ts":1}"#) == [.note("n")])
         #expect(NeoListener.facts(in: #"{"type":"error","data":{"message":"m"},"ts":1}"#) == [.error("m")])
-        for other in ["browser_state", "camera_state", "song_state", "tool_start", "tool_end", "turn", "confirm", "problems", "erased", "ui_host", "shell", "shell_status", "shell_result", "host_attached", "settings", "set_result"] {
+        for other in ["browser_state", "tool_start", "tool_end", "turn", "confirm", "problems", "erased", "ui_host", "shell", "shell_status", "shell_result", "host_attached", "settings", "set_result"] {
             #expect(NeoListener.facts(in: #"{"type":"\#(other)","data":{"state":"speaking"},"ts":1}"#).isEmpty, "\(other)")
         }
+    }
+
+    @Test("camera state carries normalized detection boxes to NEO's camera surface")
+    func cameraBoxes() {
+        let message = #"{"type":"camera_state","data":{"sid":"cam-1","status":"analysing","labels":["person"],"boxes":[{"id":7,"x":0.1,"y":0.2,"w":0.5,"h":0.4,"label":"person","score":0.93},{"x":0.9,"y":0.9,"w":0.4,"h":0.4,"label":"edge","score":1.4},{"x":0.2,"y":0.2,"w":-1,"h":0.1,"label":"invalid"}]},"ts":1}"#
+        let facts = NeoListener.facts(in: message)
+        #expect(facts.count == 1)
+        guard case let .cameraCard(card) = facts.first else { return }
+        #expect(card.sid == "cam-1")
+        #expect(card.status == "analysing")
+        #expect(card.labels == ["person"])
+        #expect(card.boxes.count == 2)
+        #expect(card.boxes.first == NeoCameraBox(id: 7, x: 0.1, y: 0.2, w: 0.5, h: 0.4, label: "person", score: 0.93))
+        #expect(card.boxes.last?.id == 1)
+        #expect(abs((card.boxes.last?.w ?? 0) - 0.1) < 0.000001)
+        #expect(abs((card.boxes.last?.h ?? 0) - 0.1) < 0.000001)
+        #expect(card.boxes.last?.score == 1)
     }
 
     @Test("what NEO.app's shell reported is read from the hello and from shell_status, and from nothing else")
@@ -96,7 +113,10 @@ struct NeoListenerParsingTests {
         #expect(NeoListener.facts(in: #"{"type":"browser_close","data":{"sid":"s","reason":"done"},"ts":1}"#) == [.card(.browser, open: false)])
         #expect(NeoListener.facts(in: #"{"type":"camera_open","data":{"sid":"c"},"ts":1}"#) == [.card(.camera, open: true)])
         #expect(NeoListener.facts(in: #"{"type":"camera_close","data":{"sid":"c","reason":"stopped"},"ts":1}"#) == [.card(.camera, open: false)])
-        #expect(NeoListener.facts(in: #"{"type":"song_open","data":{"sid":"m"},"ts":1}"#) == [.card(.song, open: true)])
+        #expect(NeoListener.facts(in: #"{"type":"song_open","data":{"sid":"m"},"ts":1}"#) == [
+            .songCard(NeoSongCardState(sid: "m", status: "listening")),
+            .card(.song, open: true),
+        ])
         #expect(NeoListener.facts(in: #"{"type":"song_close","data":{"sid":"m"},"ts":1}"#) == [.card(.song, open: false)])
     }
 
@@ -213,7 +233,13 @@ struct NeoListenerStubTests {
             process.standardOutput = pipe
             process.standardError = FileHandle.nullDevice
             pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-                guard let self, let chunk = String(data: handle.availableData, encoding: .utf8), !chunk.isEmpty else { return }
+                let data = handle.availableData
+                guard !data.isEmpty, let self, let chunk = String(data: data, encoding: .utf8) else {
+                    // EOF remains readable; unregister here or the dispatch
+                    // source spins while Stub.stop waits for the child.
+                    handle.readabilityHandler = nil
+                    return
+                }
                 self.lock.lock()
                 self.text += chunk
                 self.lock.unlock()
@@ -270,10 +296,11 @@ struct NeoListenerStubTests {
         ])
 
         // The stub refuses any Origin but NEO's own, so a connection proves
-        // URLSession sent none — and the one command is the camera opt-out.
+        // URLSession sent none. The host opts out of camera frames and asks
+        // for an already-open song card after connecting.
         #expect(await waitFor { stub.lines.contains { $0.hasPrefix("CMD ") } })
         let commands = stub.lines.filter { $0.hasPrefix("CMD ") }
-        #expect(commands == ["CMD " + NeoListener.cameraOffCommand])
+        #expect(commands == ["CMD " + NeoListener.cameraOffCommand, "CMD " + NeoListener.songHelloCommand])
         #expect(stub.lines.contains("ORIGIN -"))
         #expect(!stub.lines.contains { $0.hasPrefix("REJECT") })
         // …and with no Origin and `role=host`, the core counts it a host.
@@ -321,6 +348,7 @@ struct NeoListenerStubTests {
         #expect(recorder.cores == [true, false, true].map { NeoCoreSettings(wakeWord: $0) })
         #expect(stub.lines.filter { $0.hasPrefix("CMD ") } == [
             "CMD " + NeoListener.cameraOffCommand,
+            "CMD " + NeoListener.songHelloCommand,
             #"CMD {"cmd":"set","name":"wake_word","value":false}"#,
             #"CMD {"cmd":"set","name":"wake_word","value":true}"#,
         ])
@@ -352,8 +380,11 @@ struct NeoListenerStubTests {
         monitor.register(listener)
         let actions: [NeoShellAction] = [.settings, .openLogs, .openAtLogin(false), .eraseMemory, .restart, .show]
         actions.forEach(monitor.neoShell)
-        #expect(await waitFor { stub.lines.filter { $0.hasPrefix("CMD ") }.count == 1 + actions.count })
-        #expect(stub.lines.filter { $0.hasPrefix("CMD ") } == ["CMD " + NeoListener.cameraOffCommand] + actions.map { "CMD " + $0.command })
+        #expect(await waitFor { stub.lines.filter { $0.hasPrefix("CMD ") }.count == 2 + actions.count })
+        #expect(stub.lines.filter { $0.hasPrefix("CMD ") } == [
+            "CMD " + NeoListener.cameraOffCommand,
+            "CMD " + NeoListener.songHelloCommand,
+        ] + actions.map { "CMD " + $0.command })
         #expect(!stub.lines.contains { $0.contains(#""action":"quit""#) })
 
         // Stopped: nothing more leaves.
@@ -399,6 +430,7 @@ struct NeoListenerStubTests {
         let commands = stub.lines.filter { $0.hasPrefix("CMD ") }
         #expect(commands == [
             "CMD " + NeoListener.cameraOffCommand,
+            "CMD " + NeoListener.songHelloCommand,
             #"CMD {"cmd":"confirm","yes":true,"action_id":"trash:4d15b0099e5a9d0a"}"#,
             #"CMD {"cmd":"confirm","yes":false,"action_id":"shell:b7f034d65f0f4e1a"}"#,
         ])
@@ -415,8 +447,12 @@ struct NeoListenerStubTests {
         let recorder = Recorder()
         let listener = NeoListener(url: URL(string: "ws://127.0.0.1:\(stub.port)/")!, tokenFile: stub.tokenFile, reconnectDelay: 0.2, hostsUI: true) { recorder.record($0) }
         listener.start()
-        #expect(await waitFor { stub.lines.filter { $0.hasPrefix("CMD ") }.count == 2 })
-        #expect(stub.lines.filter { $0.hasPrefix("CMD ") } == ["CMD " + NeoListener.cameraOffCommand, "CMD " + NeoListener.hostNotchCommand])
+        #expect(await waitFor { stub.lines.filter { $0.hasPrefix("CMD ") }.count == 3 })
+        #expect(stub.lines.filter { $0.hasPrefix("CMD ") } == [
+            "CMD " + NeoListener.cameraOffCommand,
+            "CMD " + NeoListener.hostNotchCommand,
+            "CMD " + NeoListener.songHelloCommand,
+        ])
 
         let began = Date()
         listener.stop() // waits, briefly, for the hand-back to leave

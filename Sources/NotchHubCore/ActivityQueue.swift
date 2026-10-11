@@ -150,7 +150,7 @@ private extension ActivityKind {
     /// Kinds where a newer event supersedes the previous one.
     var isReplaceable: Bool {
         switch self {
-        case .volume, .brightness, .battery, .lowBattery, .wifi, .bluetooth, .airpods, .clipboard, .music, .meeting, .skin, .codingAgent:
+        case .volume, .brightness, .battery, .lowBattery, .wifi, .bluetooth, .airpods, .clipboard, .music, .meeting, .skin, .codingAgent, .songRecognition, .identifiedSong:
             return true
         // A timer ticks several times a second; each tick is an UPDATE of the
         // same stopwatch, not a new activity. Without this the queue would
