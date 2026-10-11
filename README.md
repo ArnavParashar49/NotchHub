@@ -177,9 +177,17 @@ and ends a game on the dock (the game comes home first — the fox is never
 cut mid-leap).
 
 NotchHub is a second client of NEO's core (`ws://127.0.0.1:8765`, the token in
-`~/.neo/ws-token` — the only thing it reads under `~/.neo`). It sends
-`camera_view visible:false`, so the core never streams camera frames to it,
-and reconnects every 1.5 s while NEO is off. The toggle is **NEO** in
+`~/.neo/ws-token` — the only thing it reads under `~/.neo`), and reconnects
+every 1.5 s while NEO is off. When NEO turns its camera on, NotchHub shows it
+in its own native camera panel (the detection boxes on the picture, mirrored
+together); only NEO's opening of the camera opens that panel. Camera frames
+are off by default: every connection starts with `camera_view visible:false`,
+and NotchHub asks for frames (`visible:true`) only while that panel is on
+screen. Frames stay in memory only — the latest one, at most 24 a second —
+and are dropped when the panel closes; the panel is hidden from screen
+sharing and recording like the island's other camera preview. Its × (or
+another panel taking the island) sends `camera_stop` for that session, so the
+camera goes off rather than running unseen. The toggle is **NEO** in
 Settings. `--neo-demo` runs a scripted turn through the fox without a core
 (the chat stays closed; at the OK, Allow and Cancel pop out under the notch
 for 6 s); `--neo-confirm-snapshot DIR` renders those buttons offscreen —
@@ -322,7 +330,8 @@ the frame; the page lays itself out for whatever it is given.
 - NEO thinking, working, searching or speaking **never opens it**: a voice
   answer is the fox's alone, posing in the notch. Nor does "Needs your
   OK": that is Allow and Cancel under the notch (above). It opens only for
-  a card opening (the browser, the camera, a song), NEO's page asking to
+  the browser card opening (the camera and a song have NotchHub's own native
+  surfaces instead), NEO's page asking to
   be seen (a login page, a question) — or when
   you ask: a click anywhere on the island (the fox included) while NEO is
   active, or NEO summoned by hand (⌘⇧Space, its menu-bar item: the core's

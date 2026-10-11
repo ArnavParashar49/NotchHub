@@ -9,8 +9,11 @@ import NotchHubSystem
 /// held state and whether its core is there — and, from that state and the
 /// card facts, `NeoPanelModel` (`+NeoPanel`). The pet takes NEO's state
 /// through `petContext` (`PetContext.neoState`) and poses as what NEO is
-/// doing. While NEO listens, a small animated voiceprint appears inside the
-/// physical notch. It needs no extra island space and does not trace the edge.
+/// doing. While NEO listens (its mic is live), the island's own edge lights
+/// up (`NeoWakeOutlineView`, its arithmetic `NeoWakeLight`): a soft rim just
+/// outside the black, whatever shape the island has, that takes no room and
+/// never changes the island's size. Camera and song cards get NotchHub's own
+/// native surfaces (`NeoCameraSurface`, the song activity).
 /// The models are pure and clock-driven: they say when something will change
 /// on its own (a held state becoming due, the settle after idle, the panel
 /// folding), and

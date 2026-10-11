@@ -7,26 +7,38 @@ import NotchHubCore
 /// only admits clients that know the token NEO.app keeps in `~/.neo/ws-token`.
 /// This listener is a second client beside NEO's own overlay: it reads that
 /// one file (nothing else under `~/.neo`), connects with the token, and turns
-/// the core's `hello` / `state` / `transcript` / `note` / `error` messages and
-/// its card openings (`browser_open` …) and its `woke` (NEO summoned by hand)
-/// into `NeoFact`s — and what NEO.app's shell reported (the hello's `shell`,
-/// and `shell_status`) into a `NeoShellStatus`. A confirmation NEO stages
-/// (`confirm`, or the one pending in the `hello`) and its end
+/// the core's `hello` / `state` / `transcript` / `note` / `error` messages,
+/// its cards (`browser_open` / `browser_close`; the camera's `camera_open`,
+/// `camera_state`, `camera_close` and the hello's `camera.live`; the song's
+/// `song_open`, `song_state`, `song_close`) and its `woke` (NEO summoned by
+/// hand) into `NeoFact`s — and what NEO.app's shell reported (the hello's
+/// `shell`, and `shell_status`) into a `NeoShellStatus`. A confirmation NEO
+/// stages (`confirm`, or the one pending in the `hello`) and its end
 /// (`confirm_done`) are facts too: the island's Allow / Cancel. What the core
 /// says about its own settings (the hello's `wake_word` and
-/// `wellbeing_checkins`, and `settings`) is a
-/// `NeoCoreSettings`. It sends five
-/// kinds of command and nothing else, ever: `camera_view visible:false`, so
-/// the core never streams camera frames to a client that cannot show them;
-/// when NotchHub hosts NEO's UI (`hostsUI`), `ui_host notch` on every
-/// connection and `ui_host window` as it stops, so NEO.app keeps its own
-/// window hidden while the notch shows NEO and brings it back afterwards;
-/// `shell` (`send(_:)`), one of NEO.app's menu actions, when the user
-/// asks for it in Settings; `set` (`send(_:)` with a setting), when the user
-/// flips "Listen for 'Neo'" there — the core takes it from a host; and
-/// `confirm` (`send(_:)` with an answer), when
-/// the user presses Allow or Cancel under the notch — the very command NEO's
-/// own page sends from its card, naming the card's action id.
+/// `wellbeing_checkins`, and `settings`) is a `NeoCoreSettings`. Of the
+/// binary frames, only the live camera session's preview (NBF1, kind 3) is
+/// read — at most 24 a second, held in memory and never written anywhere.
+///
+/// The commands it sends, and nothing else, ever:
+/// - `camera_view` — `visible:false` on every connection, so the core never
+///   streams camera frames to a client that is not showing them, then
+///   `visible:true` only while NotchHub's NEO camera panel is on screen and
+///   `visible:false` again as it goes (`setCameraVisible(_:)`);
+/// - `camera_stop`, naming the session, when the user closes that panel or
+///   another one covers it (`stopCamera(sid:)`);
+/// - `song_hello` on every connection, so a song card already open when
+///   NotchHub connects is shown;
+/// - when NotchHub hosts NEO's UI (`hostsUI`), `ui_host notch` on every
+///   connection and `ui_host window` as it stops, so NEO.app keeps its own
+///   window hidden while the notch shows NEO and brings it back afterwards;
+/// - `shell` (`send(_:)`), one of NEO.app's menu actions, when the user asks
+///   for it in Settings;
+/// - `set` (`send(_:)` with a setting), when the user flips "Listen for
+///   'Neo'" or "Gentle check-ins" there — the core takes it from a host;
+/// - `confirm` (`send(_:)` with an answer), when the user presses Allow or
+///   Cancel under the notch — the very command NEO's own page sends from its
+///   card, naming the card's action id.
 ///
 /// It connects as a HOST: `role=host` in the query beside the token. The
 /// core gives the menu's actions to a host alone, and only a native client
@@ -49,8 +61,11 @@ public final class NeoListener: NSObject, SystemListener {
     public static let defaultReconnectDelay: TimeInterval = 1.5
     /// No camera preview frames, please.
     public static let cameraOffCommand = #"{"cmd":"camera_view","visible":false}"#
+    /// The camera panel is on screen: its preview frames, please.
     public static let cameraOnCommand = #"{"cmd":"camera_view","visible":true}"#
+    /// Turn the camera off (whichever session is live; see `cameraStopCommand(sid:)`).
     public static let cameraStopCommand = #"{"cmd":"camera_stop"}"#
+    /// The song card's state again, if one is open.
     public static let songHelloCommand = #"{"cmd":"song_hello"}"#
     /// NEO's UI lives in the notch: NEO.app keeps its window hidden.
     public static let hostNotchCommand = #"{"cmd":"ui_host","host":"notch"}"#
@@ -250,8 +265,8 @@ public final class NeoListener: NSObject, SystemListener {
         let task = session.webSocketTask(with: request)
         self.task = task
         task.resume()
-        // Queued behind the handshake; the core ignores a client's camera
-        // messages until it shows the card, and this one never will.
+        // Queued behind the handshake: no camera frames until NotchHub's
+        // camera panel is actually on screen (`setCameraVisible(true)`).
         task.send(.string(Self.cameraOffCommand)) { _ in }
         if hostsUI {
             // NEO's UI is in the notch from here on: NEO.app hides its window.
