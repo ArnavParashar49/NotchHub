@@ -180,6 +180,15 @@ left — to `DIR/notch-confirm.png`;
 `--neo-snapshots DIR` renders each pose offscreen in each island shape
 (`--neo-snapshots DIR listening` filters to NEO's listening mark in each
 shape); `--neo-glow-zoom DIR` keeps the legacy pet-halo comparison helper.
+`--neo-outline-frames DIR [LABEL]` renders the listening outline frame by
+frame at a fixed clock — a loop, its entrance and exit, and a real-time
+episode — in five island shapes on a grey menu bar, a white wallpaper and
+an x-ray of the notch, with contact sheets and 4× zooms, to `DIR/LABEL`
+(`--outline-shapes`, `--outline-variants`, `--outline-tint RRGGBB` narrow it);
+`--neo-outline-morph DIR [LABEL]` samples the real island live, from an
+invisible window, while it springs between shapes and while the light comes
+and goes. `scripts/outline_gif.py FRAMEDIR` turns any of those frame folders
+into a real-time 30 fps GIF.
 `NOTCHHUB_NEO_DIST=<folder>` serves that build of NEO's page (a `ui/dist`)
 instead of the installed one, for a debug run or the built-page tests.
 `NOTCHHUB_NEO_SNAPSHOTS=<dir>` makes `kill -USR1 <pid>` write NEO's page as it

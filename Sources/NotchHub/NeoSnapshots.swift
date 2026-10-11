@@ -60,13 +60,9 @@ enum NeoSnapshots {
     /// The margin of desktop drawn on either side of the notch.
     static let margin: CGFloat = 360
 
-    static func scene(_ row: Row, geometry: NotchGeometry) -> Scene {
-        let notch = geometry.notchFrame
-        let regionMinX = notch.minX - margin
-        let regionWidth = notch.width + margin * 2
-        let notchHeight = notch.height
-        // Use a fresh date per row for consistent pet animation frames.
-        let now = Date()
+    /// The island's content size and its frame on the screen for `row`, as
+    /// the app would lay it out.
+    static func layout(_ row: Row, geometry: NotchGeometry) -> (content: IslandContentSize, frame: CGRect) {
         var content: IslandContentSize
         switch row.state {
         case .expanded where row.activity?.kind == .identifiedSong:
@@ -89,7 +85,28 @@ enum NeoSnapshots {
         if row.state == .idle {
             content.petDock = row.dock ?? .home
         }
-        let frame = geometry.frame(for: row.state, content: content)
+        return (content, geometry.frame(for: row.state, content: content))
+    }
+
+    /// `row`'s island as the app would draw it. By default the region is the
+    /// notch with `margin` of desktop on either side, on a mid-grey desktop;
+    /// `--neo-outline-frames` passes its own region (`regionMinX` in screen
+    /// points, `regionSize`), no background (it composes its own backdrops),
+    /// and the wake outline's clock, entrance/exit progress, whether it is
+    /// listening (`false` for an exit's frames) and tint.
+    static func scene(
+        _ row: Row, geometry: NotchGeometry,
+        regionMinX customMinX: CGFloat? = nil, regionSize: CGSize? = nil,
+        outlineClock: Date? = nil, outlineActivation: Double? = nil, outlineActive: Bool? = nil, glow: UInt32? = nil,
+        background: Color? = Color(.sRGB, red: 0.42, green: 0.42, blue: 0.45)
+    ) -> Scene {
+        let notch = geometry.notchFrame
+        let regionMinX = customMinX ?? notch.minX - margin
+        let regionWidth = regionSize?.width ?? notch.width + margin * 2
+        let notchHeight = notch.height
+        // Use a fresh date per row for consistent pet animation frames.
+        let now = Date()
+        let (content, frame) = layout(row, geometry: geometry)
         let local = CGRect(x: frame.minX - regionMinX, y: 0, width: frame.width, height: frame.height)
         // The pose as the brain gives it, started so that the wanted cel shows now.
         let petModel: PetRenderModel? = row.state == .neoPanel ? nil : {
@@ -98,10 +115,10 @@ enum NeoSnapshots {
             return PetRenderModel(presentation: PetPresentation(
                 mood: (row.neo ?? .idle) == .idle ? .idle : .neo, animation: id, startedAt: started,
                 mirrored: row.state == .idle && row.dock?.side == .left
-            ))
+            ), glow: glow)
         }()
         let panelHeight = geometry.frame(for: .neoPanel, content: .default).height
-        let rowHeight = row.state == .neoPanel ? panelHeight + 8 : max(44, NotchGeometry.expandedHeight + 8)
+        let rowHeight = regionSize?.height ?? (row.state == .neoPanel ? panelHeight + 8 : max(44, NotchGeometry.expandedHeight + 8))
         let placeholder: AnyView? = row.state == .neoPanel
             ? AnyView(VStack(spacing: 8) {
                 Text("NEO's chat page (a WKWebView, served from neo://app/)").font(.system(size: 12, weight: .semibold))
@@ -113,10 +130,12 @@ enum NeoSnapshots {
             notchInset: notchHeight, isIdle: row.state == .idle, wingStatus: row.wings ?? WingStatus(),
             notchWidth: notch.width, contentSize: content, panelContent: placeholder, surfaceVisible: true, pet: petModel, hasNotch: true,
             listening: nil,
-            neoListeningActive: row.neo == .listening
+            neoListeningActive: outlineActive ?? (row.neo == .listening),
+            neoListeningClock: outlineClock,
+            neoListeningActivation: outlineActivation
         )
         .frame(width: regionWidth, height: rowHeight)
-        .background(Color(.sRGB, red: 0.42, green: 0.42, blue: 0.45))
+        .background(background ?? .clear)
         let pet = row.state == .neoPanel ? nil
             : PetLayout.placement(for: row.state, islandSize: frame.size, notchHeight: notchHeight, dock: content.petDock ?? .home)
         return Scene(view: AnyView(view), frame: frame, local: local, content: content, pet: pet, rowHeight: rowHeight)

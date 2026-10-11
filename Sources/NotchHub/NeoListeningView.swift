@@ -99,17 +99,59 @@ struct NeoWakeOutlineView: View {
     let isActive: Bool
     var paused = false
     var tint: Color = DesignTokens.listeningGlow
+    /// Offscreen rendering only (`--neo-outline-frames`): the moment to draw,
+    /// in place of the timeline's clock, so a frame can be rendered at any
+    /// time in the loop. `nil` — always, live — follows the display.
+    var now: Date? = nil
+    /// Offscreen rendering only: how far the light has come in, from 0 (dark)
+    /// to 1 (fully lit), in place of the fade that `isActive` animates — so a
+    /// frame of the light appearing or leaving can be drawn. `nil` live.
+    /// An offscreen entrance passes `isActive` true with this rising; an exit
+    /// passes `isActive` false with it falling, as the live view sees them.
+    var activation: Double? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Two points of black beyond the physical contour gives the blue edge a
     /// dark bed, without making the notch look meaningfully larger.
     static let supportInset: CGFloat = 2
-    private static let loopDuration: TimeInterval = 3.6
-    private static let beamLength: CGFloat = 0.115
+    static let loopDuration: TimeInterval = 3.6
+    static let beamLength: CGFloat = 0.115
+    /// The fade `isActive` drives, in and out: `.easeOut(duration: fadeDuration)`.
+    static let fadeDuration: TimeInterval = 0.18
+
+    /// Where the beams are in their loop at `date` (0 ..< 1).
+    static func cycle(at date: Date) -> Double {
+        date.timeIntervalSinceReferenceDate
+            .truncatingRemainder(dividingBy: loopDuration) / loopDuration
+    }
+
+    /// The live fade as an `activation`, `seconds` after `isActive` changed:
+    /// what the eased opacity animation shows at that moment. For offscreen
+    /// renders of the entrance (`appearing`) and the exit.
+    static func liveActivation(seconds: TimeInterval, appearing: Bool) -> Double {
+        let eased = easeOut(max(0, min(1, seconds / fadeDuration)))
+        return appearing ? eased : 1 - eased
+    }
+
+    /// SwiftUI's `.easeOut` timing curve, the cubic Bézier (0, 0, 0.58, 1).
+    static func easeOut(_ x: Double) -> Double {
+        // Solve x(s) = x for the curve's parameter, then return y(s).
+        func bezier(_ s: Double, _ p1: Double, _ p2: Double) -> Double {
+            let u = 1 - s
+            return 3 * u * u * s * p1 + 3 * u * s * s * p2 + s * s * s
+        }
+        var lo = 0.0, hi = 1.0
+        for _ in 0..<40 {
+            let mid = (lo + hi) / 2
+            if bezier(mid, 0, 0.58) < x { lo = mid } else { hi = mid }
+        }
+        return bezier((lo + hi) / 2, 0, 1)
+    }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !isActive || paused || reduceMotion)) { context in
+        let frozen = now != nil
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: frozen || !isActive || paused || reduceMotion)) { context in
             GeometryReader { geometry in
                 let physicalRect = CGRect(
                     x: Self.supportInset,
@@ -117,12 +159,11 @@ struct NeoWakeOutlineView: View {
                     width: geometry.size.width - Self.supportInset * 2,
                     height: geometry.size.height - Self.supportInset * 2
                 )
-                let path = wakeContour(in: physicalRect)
+                let path = Self.contour(shape, in: physicalRect)
                 // The open contour is a circular track for the beams: they
                 // flow left → down → right, then wrap to the left without
                 // drawing across the deliberately clear top span.
-                let cycle = context.date.timeIntervalSinceReferenceDate
-                    .truncatingRemainder(dividingBy: Self.loopDuration) / Self.loopDuration
+                let cycle = Self.cycle(at: now ?? context.date)
 
                 ZStack {
                     // Support only at the edge; this is not another filled badge.
@@ -141,8 +182,8 @@ struct NeoWakeOutlineView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .opacity(isActive ? 1 : 0)
-        .animation(.easeOut(duration: 0.18), value: isActive)
+        .opacity(activation ?? (isActive ? 1 : 0))
+        .animation(activation == nil ? .easeOut(duration: Self.fadeDuration) : nil, value: isActive)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("NEO is listening")
         .accessibilityHidden(!isActive)
@@ -151,7 +192,7 @@ struct NeoWakeOutlineView: View {
     /// The outline's open contour: from the top edge down the left side, around
     /// the bottom, and back up to the top on the right, without a stroke across
     /// the top edge itself.
-    private func wakeContour(in rect: CGRect) -> Path {
+    static func contour(_ shape: NotchShape, in rect: CGRect) -> Path {
         let handle: CGFloat = 0.4477
         let topLeft = max(0, min(shape.topLeadingRadius, rect.height / 2))
         let topRight = max(0, min(shape.topTrailingRadius, rect.height / 2))

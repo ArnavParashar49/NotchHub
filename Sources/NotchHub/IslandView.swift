@@ -59,6 +59,11 @@ struct IslandView: View {
     var neoListeningActive: Bool = false
     /// AppKit context menus need smooth pointer tracking; hold the highlight still while one is open.
     var neoListeningAnimationPaused: Bool = false
+    /// Offscreen rendering only (`--neo-outline-frames`): the wake outline's
+    /// clock and its entrance/exit progress (`NeoWakeOutlineView.now` and
+    /// `.activation`). Always `nil` live.
+    var neoListeningClock: Date? = nil
+    var neoListeningActivation: Double? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -194,7 +199,9 @@ struct IslandView: View {
             shape: surfaceShape,
             isActive: neoListeningActive && hasNotch,
             paused: neoListeningAnimationPaused,
-            tint: pet?.glow.map(PetCanvas.color) ?? DesignTokens.accent
+            tint: pet?.glow.map(PetCanvas.color) ?? DesignTokens.accent,
+            now: neoListeningClock,
+            activation: neoListeningActivation
         )
             .frame(width: localFrame.width + NeoWakeOutlineView.supportInset * 2,
                    height: localFrame.height + NeoWakeOutlineView.supportInset * 2)

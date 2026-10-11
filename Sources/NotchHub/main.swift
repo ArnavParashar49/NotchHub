@@ -378,6 +378,20 @@ if let index = arguments.firstIndex(of: "--neo-glow-zoom") {
     exit(MainActor.assumeIsolated { NeoSnapshots.renderGlowZoom(directory: directory) })
 }
 
+// --neo-outline-frames DIR [LABEL]: NEO's wake outline frame by frame at a fixed clock — a loop,
+// the entrance and exit, a real-time episode — in four island shapes on grey and white desktops
+// (and an x-ray of the notch), with contact sheets and 4× zooms → DIR/LABEL (headless).
+// See `NeoOutlineFrames`; `scripts/outline_gif.py` turns a frame folder into a GIF.
+if arguments.contains("--neo-outline-frames") {
+    exit(MainActor.assumeIsolated { NeoOutlineFrames.run(arguments: arguments) })
+}
+
+// --neo-outline-morph DIR [LABEL]: the wake outline LIVE while the island springs between shapes
+// and while the light comes and goes, sampled from an invisible (alpha 0) window → DIR/LABEL/morph.
+if arguments.contains("--neo-outline-morph") {
+    MainActor.assumeIsolated { NeoOutlineMorph.run(arguments: arguments) }
+}
+
 // --neo-confirm-snapshot DIR: NEO's Allow / Cancel under the notch → DIR/notch-confirm.png (headless).
 if let index = arguments.firstIndex(of: "--neo-confirm-snapshot") {
     let directory = index + 1 < arguments.count ? arguments[index + 1] : "."
