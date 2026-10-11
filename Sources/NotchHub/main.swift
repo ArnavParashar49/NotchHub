@@ -191,6 +191,18 @@ func runSelfTest() -> Int32 {
     listening.update(listening: false, at: heard.addingTimeInterval(5.5))
     check(listening.mark(for: .idle, at: heard.addingTimeInterval(5.5)) == nil, "the mark is gone the moment NEO stops listening, mid-pulse or not")
 
+    // --- The compact bar's visualizer ---
+    // It widens with a centred bar, but always keeps an inset clear at the
+    // notch end; on a short row it is its usual size.
+    let musicRow = IslandMetrics.compact(Activity.music(title: "Midnight City", artist: "M83"), petSlot: PetLayout.barSlot)
+    check(IslandView.compactVisualizerWidth(side: musicRow.compactTrail, petReserve: PetLayout.barSlot) == IslandMetrics.musicVisualizerWidth,
+          "visualizer: its usual width on a short music row")
+    for side: CGFloat in [120, 200, 300] {
+        let width = IslandView.compactVisualizerWidth(side: side, petReserve: PetLayout.barSlot)
+        let notchGap = side - DesignTokens.compactInset - PetLayout.barSlot - width
+        check(notchGap == DesignTokens.compactInset, "visualizer: an inset clear of the notch in a \(Int(side))-pt lane")
+    }
+
     // --- NEO's Allow / Cancel under the notch ---
     // A staged confirmation drops two buttons under the notch, over whatever
     // the island shows (but never doubled with NEO's own chat); Allow counts
