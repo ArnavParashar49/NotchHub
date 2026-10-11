@@ -160,11 +160,16 @@ extension NotchHubApp {
         case .camera:
             camera.close()
         case .neoCamera:
-            monitor?.neoCameraStop()
+            // The ×, or another panel taking the island: stop that session
+            // (by name, so a late stop never ends a newer one), and remember
+            // it so nothing NEO still says about it — its `off`, its close —
+            // brings the panel back (`NeoCameraSurface`). After NEO's own
+            // close there is no session left to stop.
+            if let sid = neoCameraSurface.release() {
+                monitor?.neoCameraStop(sid: sid)
+            }
             monitor?.neoCameraVisible(false)
-            neoCameraStream.frame = nil
-            neoCameraStream.boxes = []
-            neoCameraState = nil
+            clearNeoCameraStream()
         case .teleprompter:
             teleprompter.pause()
         case .fileDrop:

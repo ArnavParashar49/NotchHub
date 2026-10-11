@@ -1,6 +1,7 @@
 import AppKit
 import NotchHubCore
 import NotchHubSystem
+import SwiftUI
 
 // MARK: - Headless self-test
 
@@ -182,7 +183,7 @@ func runSelfTest() -> Int32 {
     var dockedContent = IslandContentSize.default
     dockedContent.petDock = .home
     let selftestGeometry = NotchGeometry.make(screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982), safeAreaInsets: NSEdgeInsets(top: 32, left: 0, bottom: 0, right: 0))
-    check(selftestGeometry.frame(for: .idle, content: dockedContent) == selftestGeometry.compactBar(lead: 0, trail: PetLayout.idleDock),
+    check(selftestGeometry.frame(for: .idle, content: dockedContent) == selftestGeometry.dockBar(lead: 0, trail: PetLayout.idleDock),
           "listening takes no room: the idle dock is the pet's dock and nothing more")
     listening.update(listening: false, at: heard.addingTimeInterval(4))
     listening.update(listening: true, at: heard.addingTimeInterval(5))
@@ -190,6 +191,27 @@ func runSelfTest() -> Int32 {
           "a new stretch of listening pulses again")
     listening.update(listening: false, at: heard.addingTimeInterval(5.5))
     check(listening.mark(for: .idle, at: heard.addingTimeInterval(5.5)) == nil, "the mark is gone the moment NEO stops listening, mid-pulse or not")
+
+    // --- NEO's camera preview ---
+    // The picture flips with the Mirror setting, as its boxes do: a frame red
+    // on its left half and blue on its right shows blue on the left mirrored.
+    let mirrorSides = MainActor.assumeIsolated {
+        (plain: selfTestCameraSides(mirrored: false), mirrored: selfTestCameraSides(mirrored: true))
+    }
+    check(mirrorSides.plain.map { !$0.left && $0.right } ?? false, "NEO camera: unmirrored, the picture is as NEO sent it")
+    check(mirrorSides.mirrored.map { $0.left && !$0.right } ?? false, "NEO camera: mirrored, the picture flips with its boxes")
+
+    // --- The compact bar's visualizer ---
+    // It widens with a centred bar, but always keeps an inset clear at the
+    // notch end; on a short row it is its usual size.
+    let musicRow = IslandMetrics.compact(Activity.music(title: "Midnight City", artist: "M83"), petSlot: PetLayout.barSlot)
+    check(IslandView.compactVisualizerWidth(side: musicRow.compactTrail, petReserve: PetLayout.barSlot) == IslandMetrics.musicVisualizerWidth,
+          "visualizer: its usual width on a short music row")
+    for side: CGFloat in [120, 200, 300] {
+        let width = IslandView.compactVisualizerWidth(side: side, petReserve: PetLayout.barSlot)
+        let notchGap = side - DesignTokens.compactInset - PetLayout.barSlot - width
+        check(notchGap == DesignTokens.compactInset, "visualizer: an inset clear of the notch in a \(Int(side))-pt lane")
+    }
 
     // --- NEO's Allow / Cancel under the notch ---
     // A staged confirmation drops two buttons under the notch, over whatever
@@ -267,6 +289,35 @@ func runSelfTest() -> Int32 {
     print("")
     print(failures == 0 ? "SELF-TEST PASSED" : "SELF-TEST FAILED (\(failures) failures)")
     return failures == 0 ? 0 : 1
+}
+
+/// Draws a frame red on its left half and blue on its right through NEO's
+/// camera preview, and says which of its two sides came out blue.
+@MainActor
+func selfTestCameraSides(mirrored: Bool) -> (left: Bool, right: Bool)? {
+    guard let frame = selfTestSplitFrame() else { return nil }
+    let stream = NeoCameraStream()
+    stream.frame = frame
+    let renderer = ImageRenderer(content: NeoCameraStreamPreview(stream: stream, mirrored: mirrored).frame(width: 160, height: 90))
+    renderer.scale = 1
+    guard let image = renderer.cgImage else { return nil }
+    let rep = NSBitmapImageRep(cgImage: image)
+    guard let left = rep.colorAt(x: 20, y: 45), let right = rep.colorAt(x: 140, y: 45) else { return nil }
+    return (left.blueComponent > left.redComponent, right.blueComponent > right.redComponent)
+}
+
+/// A 16×9 PNG, red on its left half and blue on its right: which way round
+/// the NEO camera preview draws it says whether it mirrored the picture.
+func selfTestSplitFrame() -> Data? {
+    guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 16, pixelsHigh: 9, bitsPerSample: 8,
+                                     samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                     colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+    for x in 0..<16 {
+        for y in 0..<9 {
+            rep.setColor(x < 8 ? NSColor(deviceRed: 1, green: 0, blue: 0, alpha: 1) : NSColor(deviceRed: 0, green: 0, blue: 1, alpha: 1), atX: x, y: y)
+        }
+    }
+    return rep.representation(using: .png, properties: [:])
 }
 
 // MARK: - Geometry dump

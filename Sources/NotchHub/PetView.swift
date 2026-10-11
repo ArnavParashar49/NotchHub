@@ -14,7 +14,8 @@ struct PetRenderModel: Equatable {
     /// How big it is in the notch strip: where every shape places it, and the
     /// room the bars keep for it.
     var size: PetSize = .normal
-    /// The wake outline's tint (0xRRGGBB); `nil` is the design token's teal.
+    /// The wake outline's tint (0xRRGGBB); `nil` is the design token's blue
+    /// (`DesignTokens.wakeLight`, the "Blue" setting).
     var glow: UInt32? = nil
     /// What it is called, for assistive technology.
     var name: String = PetIdentity.name

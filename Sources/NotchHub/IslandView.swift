@@ -329,14 +329,18 @@ struct IslandView: View {
     /// pill hanging underneath it. Both wings share one width so the cutout
     /// stays centred on the real notch; the glyph sits at the extreme left of
     /// its wing rather than hugging the cutout, so the side reads snug.
+    /// The compact bar's visualizer: it fills the open right lane when a
+    /// longer title widens the centred bar, and keeps its usual size on short
+    /// rows. The lane is the side less the trailing inset and the pet's slot
+    /// — and less an inset at the notch end too, so the bars never touch the
+    /// cutout (`IslandMetrics.compact` measures the same two insets).
+    static func compactVisualizerWidth(side: CGFloat, petReserve: CGFloat) -> CGFloat {
+        max(IslandMetrics.musicVisualizerWidth, side - 2 * DesignTokens.compactInset - petReserve)
+    }
+
     private func compactContent(for activity: Activity) -> some View {
         let balancedSide = max(contentSize.compactLead, contentSize.compactTrail)
-        // Let the visualizer fill the open right lane when a longer title
-        // widens the centered bar, while keeping its usual size on short rows.
-        let visualizerWidth = max(
-            IslandMetrics.musicVisualizerWidth,
-            balancedSide - DesignTokens.compactInset - petBarReserve
-        )
+        let visualizerWidth = Self.compactVisualizerWidth(side: balancedSide, petReserve: petBarReserve)
         return HStack(spacing: 0) {
             // Left wing
             HStack(spacing: 8) {

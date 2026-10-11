@@ -231,10 +231,10 @@ public struct NotchGeometry: Equatable {
         case .idle:
             // The pet's dock beside the notch (see `PetDock`); without one — or
             // while the pet hides in the notch — idle is exactly the notch.
-            let lead = content.petDock?.lead ?? 0
-            let trail = content.petDock?.trail ?? 0
-            guard lead + trail > 0 else { return notchFrame }
-            return compactBar(lead: lead, trail: trail)
+            // One-sided, unlike the centred bars: the resting island is the
+            // notch plus the pet's spot and nothing more.
+            guard let dock = content.petDock, dock.reach > 0 else { return notchFrame }
+            return dockBar(lead: dock.lead, trail: dock.trail)
         case .wings: return compactBar(lead: content.wingLead ?? content.wingSide, trail: content.wingSide)
         case .compact: return compactBar(lead: content.compactLead, trail: content.compactTrail)
         case .expanded:
@@ -315,6 +315,26 @@ public struct NotchGeometry: Equatable {
             x: notchFrame.midX - width / 2,
             y: screenFrame.maxY - notchFrame.height,
             width: width,
+            height: notchFrame.height
+        )
+    }
+
+    /// The idle island with the pet's dock: the notch, grown by `lead` on the
+    /// left and `trail` on the right — and only there.
+    ///
+    /// Unlike `compactBar(lead:trail:)` this is deliberately ONE-SIDED. The
+    /// dock is the pet's spot beside the notch, so the resting island is the
+    /// notch plus that spot: centring it would put an empty black block of
+    /// the same width on the far side, cover that much more of the menu bar,
+    /// and stop the island morphing when the pet changes sides. The notch
+    /// region inside it stays on the real notch.
+    public func dockBar(lead: CGFloat, trail: CGFloat) -> CGRect {
+        let l = min(max(0, lead), Self.maxContentOverhang)
+        let t = min(max(0, trail), Self.maxContentOverhang)
+        return CGRect(
+            x: notchFrame.minX - l,
+            y: screenFrame.maxY - notchFrame.height,
+            width: notchFrame.width + l + t,
             height: notchFrame.height
         )
     }

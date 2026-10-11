@@ -281,6 +281,66 @@ struct IslandStateMachineTests {
         #expect(m.send(.activityEnded) == .compact)
     }
 
+    /// A found song as NEO's popup shows it: the bar, grown by the app's
+    /// `priorityChanged`, held open for its minimum display time.
+    private func heldSongPopup(for seconds: TimeInterval) -> (IslandStateMachine, Date) {
+        let m = IslandStateMachine()
+        m.setActivity(Activity(kind: .identifiedSong, title: "Midnight City", subtitle: "M83"))
+        m.send(.activityStarted) // compact
+        let start = Date()
+        m.holdExpanded(until: start.addingTimeInterval(seconds))
+        #expect(m.send(.priorityChanged) == .expanded)
+        return (m, start)
+    }
+
+    @Test("a held expansion outlasts the idle timer and the cursor leaving, then rests as usual")
+    func holdExpanded() {
+        let (m, start) = heldSongPopup(for: 4.25)
+        // Past the auto-collapse delay, and the cursor passing through: still open.
+        #expect(m.tick(start.addingTimeInterval(m.autoCollapseDelay + 0.5)) == .expanded)
+        m.send(.hoverEntered)
+        #expect(m.send(.hoverExited) == .expanded)
+        #expect(!m.shouldCollapse(now: start.addingTimeInterval(3)))
+        #expect(m.tick(start.addingTimeInterval(4)) == .expanded)
+        // Its time is up: back to the bar in one step.
+        #expect(m.tick(start.addingTimeInterval(4.3)) == .compact)
+        // The hold is spent: the next expansion is an ordinary one.
+        m.send(.priorityChanged)
+        #expect(m.presentation == .expanded)
+        #expect(m.tick(Date().addingTimeInterval(m.autoCollapseDelay + 0.5)) == .compact)
+    }
+
+    @Test("a hold only ever lengthens, and only keeps the expanded shape")
+    func holdOnlyLengthens() {
+        let (m, start) = heldSongPopup(for: 5)
+        m.holdExpanded(until: start.addingTimeInterval(2)) // a shorter one changes nothing
+        #expect(m.tick(start.addingTimeInterval(3)) == .expanded)
+        #expect(m.tick(start.addingTimeInterval(5.1)) == .compact)
+        // A hold set while the island is not expanded keeps nothing in place.
+        let idle = IslandStateMachine()
+        idle.holdExpanded(until: Date().addingTimeInterval(60))
+        idle.send(.hoverEntered)
+        #expect(idle.send(.hoverExited) == .wings)
+        #expect(idle.tick(Date().addingTimeInterval(idle.hoverCollapseDelay + 0.1)) == .idle)
+    }
+
+    @Test("a cleared hold, a click or a dismissal lets the popup go at once")
+    func holdReleased() {
+        // Replaced or cleared (a new song, the result gone): the usual timers apply.
+        var (m, start) = heldSongPopup(for: 60)
+        m.clearExpandedHold()
+        #expect(m.tick(start.addingTimeInterval(m.autoCollapseDelay + 0.5)) == .compact)
+        // A click is the user's: it opens the dashboard, and the hold is gone.
+        (m, _) = heldSongPopup(for: 60)
+        #expect(m.send(.clicked) == .interactive)
+        #expect(m.send(.clicked) == .compact)
+        m.send(.priorityChanged)
+        #expect(m.tick(Date().addingTimeInterval(m.autoCollapseDelay + 0.5)) == .compact)
+        // Dismissed: straight back to the bar.
+        (m, _) = heldSongPopup(for: 60)
+        #expect(m.send(.dismissed) == .compact)
+    }
+
     @Test("isTransitioning is true after a send and clears over ticks")
     func isTransitioningLifecycle() {
         let m = IslandStateMachine()

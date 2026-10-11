@@ -7,26 +7,38 @@ import NotchHubCore
 /// only admits clients that know the token NEO.app keeps in `~/.neo/ws-token`.
 /// This listener is a second client beside NEO's own overlay: it reads that
 /// one file (nothing else under `~/.neo`), connects with the token, and turns
-/// the core's `hello` / `state` / `transcript` / `note` / `error` messages and
-/// its card openings (`browser_open` …) and its `woke` (NEO summoned by hand)
-/// into `NeoFact`s — and what NEO.app's shell reported (the hello's `shell`,
-/// and `shell_status`) into a `NeoShellStatus`. A confirmation NEO stages
-/// (`confirm`, or the one pending in the `hello`) and its end
+/// the core's `hello` / `state` / `transcript` / `note` / `error` messages,
+/// its cards (`browser_open` / `browser_close`; the camera's `camera_open`,
+/// `camera_state`, `camera_close` and the hello's `camera.live`; the song's
+/// `song_open`, `song_state`, `song_close`) and its `woke` (NEO summoned by
+/// hand) into `NeoFact`s — and what NEO.app's shell reported (the hello's
+/// `shell`, and `shell_status`) into a `NeoShellStatus`. A confirmation NEO
+/// stages (`confirm`, or the one pending in the `hello`) and its end
 /// (`confirm_done`) are facts too: the island's Allow / Cancel. What the core
 /// says about its own settings (the hello's `wake_word` and
-/// `wellbeing_checkins`, and `settings`) is a
-/// `NeoCoreSettings`. It sends five
-/// kinds of command and nothing else, ever: `camera_view visible:false`, so
-/// the core never streams camera frames to a client that cannot show them;
-/// when NotchHub hosts NEO's UI (`hostsUI`), `ui_host notch` on every
-/// connection and `ui_host window` as it stops, so NEO.app keeps its own
-/// window hidden while the notch shows NEO and brings it back afterwards;
-/// `shell` (`send(_:)`), one of NEO.app's menu actions, when the user
-/// asks for it in Settings; `set` (`send(_:)` with a setting), when the user
-/// flips "Listen for 'Neo'" there — the core takes it from a host; and
-/// `confirm` (`send(_:)` with an answer), when
-/// the user presses Allow or Cancel under the notch — the very command NEO's
-/// own page sends from its card, naming the card's action id.
+/// `wellbeing_checkins`, and `settings`) is a `NeoCoreSettings`. Of the
+/// binary frames, only the live camera session's preview (NBF1, kind 3) is
+/// read — at most 24 a second, held in memory and never written anywhere.
+///
+/// The commands it sends, and nothing else, ever:
+/// - `camera_view` — `visible:false` on every connection, so the core never
+///   streams camera frames to a client that is not showing them, then
+///   `visible:true` only while NotchHub's NEO camera panel is on screen and
+///   `visible:false` again as it goes (`setCameraVisible(_:)`);
+/// - `camera_stop`, naming the session, when the user closes that panel or
+///   another one covers it (`stopCamera(sid:)`);
+/// - `song_hello` on every connection, so a song card already open when
+///   NotchHub connects is shown;
+/// - when NotchHub hosts NEO's UI (`hostsUI`), `ui_host notch` on every
+///   connection and `ui_host window` as it stops, so NEO.app keeps its own
+///   window hidden while the notch shows NEO and brings it back afterwards;
+/// - `shell` (`send(_:)`), one of NEO.app's menu actions, when the user asks
+///   for it in Settings;
+/// - `set` (`send(_:)` with a setting), when the user flips "Listen for
+///   'Neo'" or "Gentle check-ins" there — the core takes it from a host;
+/// - `confirm` (`send(_:)` with an answer), when the user presses Allow or
+///   Cancel under the notch — the very command NEO's own page sends from its
+///   card, naming the card's action id.
 ///
 /// It connects as a HOST: `role=host` in the query beside the token. The
 /// core gives the menu's actions to a host alone, and only a native client
@@ -49,8 +61,11 @@ public final class NeoListener: NSObject, SystemListener {
     public static let defaultReconnectDelay: TimeInterval = 1.5
     /// No camera preview frames, please.
     public static let cameraOffCommand = #"{"cmd":"camera_view","visible":false}"#
+    /// The camera panel is on screen: its preview frames, please.
     public static let cameraOnCommand = #"{"cmd":"camera_view","visible":true}"#
+    /// Turn the camera off (whichever session is live; see `cameraStopCommand(sid:)`).
     public static let cameraStopCommand = #"{"cmd":"camera_stop"}"#
+    /// The song card's state again, if one is open.
     public static let songHelloCommand = #"{"cmd":"song_hello"}"#
     /// NEO's UI lives in the notch: NEO.app keeps its window hidden.
     public static let hostNotchCommand = #"{"cmd":"ui_host","host":"notch"}"#
@@ -218,12 +233,23 @@ public final class NeoListener: NSObject, SystemListener {
         }
     }
 
-    /// Stops NEO's camera session when the user closes its native notch card.
-    public func stopCamera() {
+    /// Stops NEO's camera session when the user closes its native notch card
+    /// (or another panel covers it). Naming the session means a stop that
+    /// arrives late never stops a newer one: the core ignores a stop for a
+    /// session that is not its current one.
+    public func stopCamera(sid: String? = nil) {
         queue.async { [self] in
             guard isRunning, isConnected, let task else { return }
-            task.send(.string(Self.cameraStopCommand)) { _ in }
+            task.send(.string(Self.cameraStopCommand(sid: sid))) { _ in }
         }
+    }
+
+    /// `camera_stop`, naming the session when it is known.
+    static func cameraStopCommand(sid: String?) -> String {
+        guard let sid, !sid.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: ["cmd": "camera_stop", "sid": sid], options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else { return cameraStopCommand }
+        return text
     }
 
     private func connect() {
@@ -239,8 +265,8 @@ public final class NeoListener: NSObject, SystemListener {
         let task = session.webSocketTask(with: request)
         self.task = task
         task.resume()
-        // Queued behind the handshake; the core ignores a client's camera
-        // messages until it shows the card, and this one never will.
+        // Queued behind the handshake: no camera frames until NotchHub's
+        // camera panel is actually on screen (`setCameraVisible(true)`).
         task.send(.string(Self.cameraOffCommand)) { _ in }
         if hostsUI {
             // NEO's UI is in the notch from here on: NEO.app hides its window.
@@ -297,12 +323,15 @@ public final class NeoListener: NSObject, SystemListener {
                         }
                     } else if case let .data(frame) = message,
                               let (sid, image) = Self.cameraImage(in: frame),
-                              sid == self.cameraSID,
-                              Date.timeIntervalSinceReferenceDate - self.lastCameraFrameAt >= (1.0 / 24.0) {
-                        self.lastCameraFrameAt = Date.timeIntervalSinceReferenceDate
-                        self.emit(SystemEvent(source: .neo, payload: .neo(.cameraFrame(image))))
+                              sid == self.cameraSID {
+                        let now = Date.timeIntervalSinceReferenceDate
+                        if Self.cameraFrameDue(at: now, after: self.lastCameraFrameAt) {
+                            self.lastCameraFrameAt = now
+                            self.emit(SystemEvent(source: .neo, payload: .neo(.cameraFrame(image))))
+                        }
                     }
-                    // Binary frames (page and camera pictures) are not for us.
+                    // Every other binary frame (a browser card's page, another
+                    // session's camera, a malformed packet) is not for us.
                     self.receive(on: task)
                 case .failure:
                     self.dropped(task)
@@ -370,11 +399,14 @@ public final class NeoListener: NSObject, SystemListener {
             if let pending = (payload["confirm"] as? [String: Any]).flatMap(NeoConfirmCard.init(payload:)) {
                 facts.append(.confirm(pending))
             }
+            // A camera NEO already has on (NotchHub connected after it
+            // opened): its state, then its opening — the session first, so
+            // the island knows which one it is before it shows it.
             if let camera = payload["camera"] as? [String: Any],
                let live = camera["live"] as? [String: Any],
                let card = cameraCard(live) {
-                facts.append(.card(.camera, open: true))
                 facts.append(.cameraCard(card))
+                facts.append(.card(.camera, open: true))
             }
             return facts
         case "state":
@@ -392,8 +424,12 @@ public final class NeoListener: NSObject, SystemListener {
         case "browser_open": return [.card(.browser, open: true)]
         case "browser_close": return [.card(.browser, open: false)]
         case "camera_open":
-            var facts: [NeoFact] = [.card(.camera, open: true)]
-            if let card = cameraCard(payload) { facts.append(.cameraCard(card)) }
+            // The new session's first state ("starting", which NEO says next
+            // anyway), then the opening: the island learns which session
+            // opens before it opens it.
+            var facts: [NeoFact] = []
+            if let card = cameraCard(payload, status: "starting") { facts.append(.cameraCard(card)) }
+            facts.append(.card(.camera, open: true))
             return facts
         case "camera_state": return cameraCard(payload).map { [.cameraCard($0)] } ?? []
         case "camera_close": return [.card(.camera, open: false)]
@@ -419,9 +455,11 @@ public final class NeoListener: NSObject, SystemListener {
         }
     }
 
-    private static func cameraCard(_ payload: [String: Any]) -> NeoCameraCardState? {
+    /// A camera card's state; `status` stands in when the payload has none
+    /// (`camera_open` carries only the session and its reason).
+    private static func cameraCard(_ payload: [String: Any], status fallback: String? = nil) -> NeoCameraCardState? {
         guard let sid = payload["sid"] as? String, !sid.isEmpty,
-              let status = payload["status"] as? String else { return nil }
+              let status = payload["status"] as? String ?? fallback else { return nil }
         let labels = (payload["labels"] as? [String] ?? []).prefix(8).map { String($0.prefix(40)) }
         let boxes = ((payload["boxes"] as? [[String: Any]]) ?? []).prefix(20).enumerated().compactMap { index, raw -> NeoCameraBox? in
             guard let x = (raw["x"] as? NSNumber)?.doubleValue,
@@ -466,7 +504,9 @@ public final class NeoListener: NSObject, SystemListener {
             title: (result["title"] as? String).map { String($0.prefix(120)) },
             artist: (result["artist"] as? String).map { String($0.prefix(120)) },
             album: (result["album"] as? String).map { String($0.prefix(120)) },
-            year: result["year"].map { String(describing: $0).prefix(12).description },
+            // NEO sends the year as text, or null when it has none: only text
+            // is a year (a null used to show as "<null>").
+            year: (result["year"] as? String).map { String($0.prefix(12)) },
             cover: imageDataURI(result["cover"] as? String)
         )
     }
@@ -496,9 +536,20 @@ public final class NeoListener: NSObject, SystemListener {
         }
     }
 
+    /// The preview's pace: at most 24 camera frames a second reach the island,
+    /// however fast NEO sends them.
+    static let cameraFrameInterval: TimeInterval = 1.0 / 24.0
+
+    /// Whether a camera frame arriving at `now` goes on to the island, the
+    /// last one having gone at `last` (both reference-date seconds).
+    static func cameraFrameDue(at now: TimeInterval, after last: TimeInterval) -> Bool {
+        now - last >= cameraFrameInterval
+    }
+
     /// NBF1 v1 camera packet: the first 64 bytes are metadata, the rest JPEG.
     /// Reject other frame kinds, oversized payloads and stale/malformed headers.
-    private static func cameraImage(in packet: Data) -> (String, Data)? {
+    /// Returns the session id (as NEO writes it in JSON) and the image bytes.
+    static func cameraImage(in packet: Data) -> (String, Data)? {
         guard packet.count >= 64, packet.count <= 2_000_000,
               packet.prefix(4) == Data("NBF1".utf8), packet[4] == 1, packet[5] == 3 else { return nil }
         let header = Int(packet[6]) | Int(packet[7]) << 8

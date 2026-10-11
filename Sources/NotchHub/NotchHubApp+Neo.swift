@@ -9,8 +9,11 @@ import NotchHubSystem
 /// held state and whether its core is there — and, from that state and the
 /// card facts, `NeoPanelModel` (`+NeoPanel`). The pet takes NEO's state
 /// through `petContext` (`PetContext.neoState`) and poses as what NEO is
-/// doing. While NEO listens, a small animated voiceprint appears inside the
-/// physical notch. It needs no extra island space and does not trace the edge.
+/// doing. While NEO listens (its mic is live), the island's own edge lights
+/// up (`NeoWakeOutlineView`, its arithmetic `NeoWakeLight`): a soft rim just
+/// outside the black, whatever shape the island has, that takes no room and
+/// never changes the island's size. Camera and song cards get NotchHub's own
+/// native surfaces (`NeoCameraSurface`, the song activity).
 /// The models are pure and clock-driven: they say when something will change
 /// on its own (a held state becoming due, the settle after idle, the panel
 /// folding), and
@@ -53,18 +56,25 @@ extension NotchHubApp {
             case .browser:
                 neoPanel.card(kind, open: open, at: now)
             case .camera:
-                if open { openNeoCamera() } else { closeNeoCamera() }
+                // Only NEO opening its camera opens the panel (`NeoCameraSurface`).
+                switch neoCameraSurface.receive(fact, showing: panel == .neoCamera) {
+                case .open: openNeoCamera()
+                case .close: closeNeoCamera()
+                case let .stop(sid):
+                    log("neo camera: a session closed here is live again — stopping it")
+                    monitor?.neoCameraStop(sid: sid)
+                case .update, .none: break
+                }
             case .song:
                 if open { updateNeoSongActivity(at: now) } else { finishNeoSongActivity(at: now) }
             }
         case let .cameraCard(state):
-            let previous = neoCameraState
-            neoCameraState = state
-            if panel != .neoCamera { openNeoCamera() }
-            neoCameraStream.boxes = state.boxes
-            if panel == .neoCamera,
-               previous?.status != state.status || previous?.answer != state.answer || previous?.labels != state.labels {
-                refreshPanel()
+            // News for the panel that shows it — never an opening: NEO's
+            // `off` just before its close would reopen a camera the user
+            // closed, or take the island back from what replaced it.
+            if case let .update(refresh) = neoCameraSurface.receive(fact, showing: panel == .neoCamera) {
+                neoCameraStream.boxes = state.boxes
+                if refresh { refreshPanel() }
             }
         case let .cameraFrame(frame):
             guard panel == .neoCamera else { return }
@@ -86,6 +96,9 @@ extension NotchHubApp {
         case .connected(false):
             neoPanel.disconnected(at: now)
             if panel == .neoCamera { closePanel() }
+            // Not the user's close: the hello after a reconnect may bring a
+            // camera that is still on back (`NeoCameraSurface`).
+            _ = neoCameraSurface.receive(fact, showing: false)
             finishNeoSongActivity(at: now)
             log("neo: core away — panel open=\(neoPanel.isOpen) waiting=\(neoPanel.isWaitingForCore)")
         case .connected(true):
@@ -109,6 +122,11 @@ extension NotchHubApp {
         scheduleNeoWake(neoNextWake(at: now))
     }
 
+    /// The state of the NEO camera card on the island, if one shows.
+    var neoCameraState: NeoCameraCardState? {
+        neoCameraSurface.card
+    }
+
     /// Camera and song cards have native NotchHub surfaces; only browser cards
     /// need NEO's embedded page. Camera pixels stay in memory while visible.
     func openNeoCamera() {
@@ -117,20 +135,28 @@ extension NotchHubApp {
             return
         }
         neoCameraStream.frame = nil
-        neoCameraStream.boxes = []
+        // The session's state arrived just before its opening.
+        neoCameraStream.boxes = neoCameraSurface.card?.boxes ?? []
         takePanel(.neoCamera)
         monitor?.neoCameraVisible(true)
         renderIsland()
     }
 
+    /// NEO closed its camera. The panel closes if it shows it; NEO's own
+    /// close is not the user's, so nothing is stopped again.
     func closeNeoCamera() {
         guard panel == .neoCamera else {
-            neoCameraStream.frame = nil
-            neoCameraStream.boxes = []
-            neoCameraState = nil
+            clearNeoCameraStream()
             return
         }
-        closePanel() // releaseCurrentPanel stops the session and hides its stream
+        closePanel() // releaseCurrentPanel hides the stream; NEO's own close leaves nothing to stop
+    }
+
+    /// Drops the last preview frame and its boxes: camera pixels live only
+    /// while the panel shows them.
+    func clearNeoCameraStream() {
+        neoCameraStream.frame = nil
+        neoCameraStream.boxes = []
     }
 
     func updateNeoSongActivity(at now: Date) {
@@ -301,9 +327,10 @@ extension NotchHubApp {
         }
     }
 
-    /// The left wing's width as the hit layouts need it.
+    /// Where the notch sits inside the hover wings, as the hit layouts need
+    /// it (`IslandContentSize.wingHitLead`): the centred strip's wider side.
     var wingHitLead: CGFloat? {
-        islandModel.contentSize.wingLead
+        islandModel.contentSize.wingHitLead
     }
 
     // MARK: - Demo

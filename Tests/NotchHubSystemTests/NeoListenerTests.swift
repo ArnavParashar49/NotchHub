@@ -111,13 +111,167 @@ struct NeoListenerParsingTests {
     func cards() {
         #expect(NeoListener.facts(in: #"{"type":"browser_open","data":{"sid":"s","job":"j"},"ts":1}"#) == [.card(.browser, open: true)])
         #expect(NeoListener.facts(in: #"{"type":"browser_close","data":{"sid":"s","reason":"done"},"ts":1}"#) == [.card(.browser, open: false)])
-        #expect(NeoListener.facts(in: #"{"type":"camera_open","data":{"sid":"c"},"ts":1}"#) == [.card(.camera, open: true)])
+        // The camera's session first (its "starting", which NEO says next
+        // anyway), then the opening: the island knows which one it shows.
+        #expect(NeoListener.facts(in: #"{"type":"camera_open","data":{"sid":"c","reason":"look"},"ts":1}"#)
+            == [.cameraCard(NeoCameraCardState(sid: "c", status: "starting")), .card(.camera, open: true)])
+        #expect(NeoListener.facts(in: #"{"type":"camera_open","data":{},"ts":1}"#) == [.card(.camera, open: true)])
         #expect(NeoListener.facts(in: #"{"type":"camera_close","data":{"sid":"c","reason":"stopped"},"ts":1}"#) == [.card(.camera, open: false)])
         #expect(NeoListener.facts(in: #"{"type":"song_open","data":{"sid":"m"},"ts":1}"#) == [
             .songCard(NeoSongCardState(sid: "m", status: "listening")),
             .card(.song, open: true),
         ])
         #expect(NeoListener.facts(in: #"{"type":"song_close","data":{"sid":"m"},"ts":1}"#) == [.card(.song, open: false)])
+    }
+
+    @Test("a camera already on when NotchHub connects comes back from the hello: its state, then its opening")
+    func helloCameraLive() {
+        let live = #"{"sid":"cam-9","status":"analysing","labels":["mug"],"boxes":[{"id":1,"x":0.1,"y":0.1,"w":0.2,"h":0.2,"label":"mug","score":0.8}],"popout":false,"reason":"look"}"#
+        let facts = NeoListener.facts(in: #"{"type":"hello","data":{"state":"thinking","recent":[],"camera":{"live":\#(live)}},"ts":1}"#)
+        #expect(facts == [
+            .state(.thinking),
+            .cameraCard(NeoCameraCardState(sid: "cam-9", status: "analysing", labels: ["mug"],
+                                           boxes: [NeoCameraBox(id: 1, x: 0.1, y: 0.1, w: 0.2, h: 0.2, label: "mug", score: 0.8)])),
+            .card(.camera, open: true),
+        ])
+        // Off, or a hello from a core without a camera: nothing to recover.
+        #expect(NeoListener.facts(in: #"{"type":"hello","data":{"state":"idle","recent":[],"camera":{"live":null}},"ts":1}"#) == [.state(.idle)])
+        #expect(NeoListener.facts(in: #"{"type":"hello","data":{"state":"idle","recent":[],"camera":{"live":{"status":"live"}}},"ts":1}"#) == [.state(.idle)])
+    }
+
+    @Test("closing NEO's camera here stops that session by name, so a late stop never ends a newer one")
+    func cameraStopNamesTheSession() throws {
+        let named = NeoListener.cameraStopCommand(sid: "Ab-_09")
+        let object = try #require(try JSONSerialization.jsonObject(with: Data(named.utf8)) as? [String: String])
+        #expect(object == ["cmd": "camera_stop", "sid": "Ab-_09"])
+        #expect(NeoListener.cameraStopCommand(sid: nil) == NeoListener.cameraStopCommand)
+        #expect(NeoListener.cameraStopCommand(sid: "") == NeoListener.cameraStopCommand)
+    }
+
+    @Test("a song's state: its result trimmed, a null year is no year, and only a modest image data URI is a cover")
+    func songState() throws {
+        func song(_ result: String) -> NeoSongCardState? {
+            let facts = NeoListener.facts(in: #"{"type":"song_state","data":{"sid":"m1","status":"found","level":1.7,"elapsed_s":-3,"result":\#(result)},"ts":1}"#)
+            guard case let .songCard(state)? = facts.first, facts.count == 1 else { return nil }
+            return state
+        }
+        let found = try #require(song(#"{"title":"Midnight City","artist":"M83","album":"Hurry Up, We're Dreaming","year":"2011"}"#))
+        #expect(found.sid == "m1" && found.status == "found")
+        #expect(found.title == "Midnight City" && found.artist == "M83" && found.album == "Hurry Up, We're Dreaming")
+        #expect(found.year == "2011")
+        // The meter is clamped to 0…1 and the clock never runs backwards.
+        #expect(found.level == 1 && found.elapsed == 0)
+        // NEO sends null when it has no year: no "<null>" on the island.
+        #expect(try #require(song(#"{"title":"t","year":null}"#)).year == nil)
+        #expect(try #require(song(#"{"title":"t"}"#)).year == nil)
+        #expect(try #require(song(#"{"title":"t","year":2011}"#)).year == nil)
+        #expect(try #require(song(#"{"title":"t","year":"\#(String(repeating: "9", count: 40))"}"#)).year?.count == 12)
+        #expect(try #require(song(#"{"title":"\#(String(repeating: "x", count: 400))"}"#)).title?.count == 120)
+
+        // The cover: an image data URI, decoded; anything else, nothing.
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        let uri = "data:image/png;base64,\(png.base64EncodedString())"
+        #expect(try #require(song(#"{"title":"t","cover":"\#(uri)"}"#)).cover == png)
+        for bad in ["https://example.com/cover.png", "data:text/html;base64,\(png.base64EncodedString())",
+                    "data:image/png;base64,not base64!", "data:image/png;base64"] {
+            #expect(try #require(song(#"{"title":"t","cover":"\#(bad)"}"#)).cover == nil, "\(bad)")
+        }
+        // Past 1.5 MB of base64 it is dropped unread.
+        let huge = "data:image/jpeg;base64," + String(repeating: "A", count: 1_500_004)
+        #expect(try #require(song(#"{"title":"t","cover":"\#(huge)"}"#)).cover == nil)
+        let justUnder = "data:image/jpeg;base64," + String(repeating: "A", count: 1_500_000)
+        #expect(try #require(song(#"{"title":"t","cover":"\#(justUnder)"}"#)).cover?.count == 1_125_000)
+        // No session, or no status: no state.
+        #expect(NeoListener.facts(in: #"{"type":"song_state","data":{"status":"found"},"ts":1}"#).isEmpty)
+        #expect(NeoListener.facts(in: #"{"type":"song_state","data":{"sid":"m1"},"ts":1}"#).isEmpty)
+    }
+
+    /// An NBF1 v1 packet as NEO's `pack_frame` lays it out: 64 header bytes
+    /// (magic, version, kind, header length, the 16-byte session, …, the
+    /// MIME code at byte 56), then the image.
+    private func packet(sid: [UInt8] = Array(0..<16), version: UInt8 = 1, kind: UInt8 = 3, header: Int = 64,
+                        mime: UInt8 = 1, image: Data = Data([0xFF, 0xD8, 0xFF, 0xD9])) -> Data {
+        var bytes = [UInt8](repeating: 0, count: 64)
+        bytes.replaceSubrange(0..<4, with: Array("NBF1".utf8))
+        bytes[4] = version
+        bytes[5] = kind
+        bytes[6] = UInt8(header & 0xFF)
+        bytes[7] = UInt8(header >> 8)
+        bytes.replaceSubrange(8..<24, with: sid)
+        bytes[56] = mime
+        return Data(bytes) + image
+    }
+
+    @Test("a camera frame is read from NEO's NBF1 packet, and anything else is not a frame")
+    func cameraFrames() {
+        let jpeg = Data([0xFF, 0xD8, 0xFF, 0xD9])
+        let parsed = NeoListener.cameraImage(in: packet(image: jpeg))
+        // The session as NEO writes it in JSON: base64url, unpadded.
+        #expect(parsed?.0 == Data(Array(0..<16) as [UInt8]).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: ""))
+        #expect(parsed?.0.count == 22)
+        #expect(parsed?.1 == jpeg)
+        // A session id with the characters base64url swaps.
+        #expect(NeoListener.cameraImage(in: packet(sid: [UInt8](repeating: 0xFB, count: 16)))?.0.contains { "+/=".contains($0) } == false)
+
+        var wrongMagic = packet()
+        wrongMagic[0] = UInt8(ascii: "X")
+        let rejected: [(String, Data)] = [
+            ("wrong magic", wrongMagic),
+            ("another version", packet(version: 2)),
+            ("a browser page, not the camera", packet(kind: 1)),
+            ("a still", packet(kind: 2)),
+            ("not a JPEG", packet(mime: 2)),
+            ("a header shorter than the layout", packet(header: 32)),
+            ("a header past the packet", packet(header: 200)),
+            ("no image", packet(image: Data())),
+            ("too short", Data(packet().prefix(63))),
+            ("too big", packet(image: Data(count: 2_000_000))),
+        ]
+        for (name, data) in rejected {
+            #expect(NeoListener.cameraImage(in: data) == nil, "\(name)")
+        }
+    }
+
+    @Test("camera frames reach the island at most 24 times a second, however fast NEO sends them")
+    func cameraFramePace() {
+        let interval = NeoListener.cameraFrameInterval
+        #expect(abs(interval - 1.0 / 24.0) < 1e-12)
+        #expect(NeoListener.cameraFrameDue(at: 100 + interval, after: 100))
+        #expect(!NeoListener.cameraFrameDue(at: 100 + interval * 0.9, after: 100))
+        // The first frame always goes.
+        #expect(NeoListener.cameraFrameDue(at: Date.timeIntervalSinceReferenceDate, after: 0))
+        // NEO at 60 fps for one second: 20 frames go on, never more than 24.
+        for fps in [30.0, 60.0, 120.0] {
+            var last: TimeInterval = 0
+            var shown = 0
+            for i in 0..<Int(fps) {
+                let now = 1000 + Double(i) / fps
+                if NeoListener.cameraFrameDue(at: now, after: last) {
+                    last = now
+                    shown += 1
+                }
+            }
+            #expect(shown <= 24 && shown >= Int(min(fps, 24)) / 2, "\(fps) fps → \(shown)")
+        }
+    }
+
+    @Test("gentle check-ins: where the switch stands is read like the wake word, and goes out as the core's set command")
+    func wellbeingCheckins() {
+        #expect(NeoListener.coreSettings(in: #"{"type":"hello","data":{"state":"idle","wake_word":true,"wellbeing_checkins":false},"ts":1}"#)
+            == NeoCoreSettings(wakeWord: true, wellbeingCheckins: false))
+        // A settings event about check-ins alone is still where the switches stand.
+        #expect(NeoListener.coreSettings(in: #"{"type":"settings","data":{"wellbeing_checkins":true},"ts":1}"#)
+            == NeoCoreSettings(wellbeingCheckins: true))
+        // Only a real boolean is an answer.
+        for odd in [#""true""#, "1", "null"] {
+            #expect(NeoListener.coreSettings(in: #"{"type":"settings","data":{"wellbeing_checkins":\#(odd)},"ts":1}"#) == nil, "\(odd)")
+            #expect(NeoListener.coreSettings(in: #"{"type":"hello","data":{"state":"idle","wellbeing_checkins":\#(odd)},"ts":1}"#)
+                == NeoCoreSettings(), "\(odd)")
+        }
+        #expect(NeoSetting.wellbeingCheckins(true).name == "wellbeing_checkins")
+        #expect(NeoSetting.wellbeingCheckins(true).command == #"{"cmd":"set","name":"wellbeing_checkins","value":true}"#)
+        #expect(NeoSetting.wellbeingCheckins(false).command == #"{"cmd":"set","name":"wellbeing_checkins","value":false}"#)
     }
 
     @Test("NEO summoned by hand (the hotkey, the tray) is a fact for the panel")
@@ -269,7 +423,7 @@ struct NeoListenerStubTests {
         return condition()
     }
 
-    @Test("connects with the token, sends only camera_view off, and relays the island's facts", .enabled(if: NeoListenerStubTests.available))
+    @Test("connects with the token, sends camera_view off and song_hello and nothing else, and relays the island's facts", .enabled(if: NeoListenerStubTests.available))
     func connectAndRelay() async throws {
         let stub = try Stub(drop: false)
         defer { stub.stop() }

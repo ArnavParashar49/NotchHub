@@ -114,7 +114,7 @@ struct AppContextTests {
         }
     }
 
-    @Test("hover wings size each side to its content; browser buttons stay clear of the notch")
+    @Test("hover wings grow equally around the notch from the wider side; browser buttons stay clear of the notch")
     func asymmetricWings() {
         let g = NotchGeometry.make(
             screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982),
@@ -124,11 +124,32 @@ struct AppContextTests {
         )
         var content = IslandContentSize(compactLead: 0, compactTrail: 0, wingSide: 120)
         content.wingLead = 56
+        // Each side measures its own content, but the strip is centred: the
+        // wider side (120) on both.
         let frame = g.frame(for: .wings, content: content)
-        #expect(abs(frame.minX - (g.notchFrame.minX - 56)) < 0.001)
+        #expect(abs(frame.minX - (g.notchFrame.minX - 120)) < 0.001)
         #expect(abs(frame.maxX - (g.notchFrame.maxX + 120)) < 0.001)
-        let buttons = WingControlLayout.browserButtons(in: frame, notchWidth: 185, inset: 16, lead: 56)
-        #expect(buttons.allSatisfy { $0.rect.minX >= g.notchFrame.maxX + 16 && frame.contains($0.rect) })
+        #expect(abs(frame.midX - g.notchFrame.midX) < 0.001)
+        // The hit layouts take the lead the app passes them — where the notch
+        // really is inside the strip, not the left wing's own content width
+        // (which put their notch 64 pt too far left).
+        #expect(content.wingHitLead == 120)
+        #expect(abs(frame.minX + content.wingHitLead! - g.notchFrame.minX) < 0.001)
+        // With a reserve big enough to push the buttons inward, the notch
+        // clamp is what keeps them off the cutout.
+        for reserve in [0, PetLayout.barSlot, 100] as [CGFloat] {
+            let buttons = WingControlLayout.browserButtons(in: frame, notchWidth: g.notchFrame.width, inset: 16,
+                                                           trailingReserve: reserve, lead: content.wingHitLead)
+            #expect(buttons.allSatisfy { $0.rect.minX >= g.notchFrame.maxX + 16 }, "reserve \(reserve)")
+            #expect(buttons.allSatisfy { frame.contains($0.rect) }, "reserve \(reserve)")
+        }
+        // Unmeasured left wing: an even split, which is where the notch is.
+        content.wingLead = nil
+        #expect(content.wingHitLead == nil)
+        // The lead never claims more than the strip can reach.
+        content.wingLead = 10_000
+        let widest = g.frame(for: .wings, content: content)
+        #expect(abs(widest.minX + content.wingHitLead! - g.notchFrame.minX) < 0.001)
     }
 
     @Test("app panel controls fit, never overlap, and select the right tabs")

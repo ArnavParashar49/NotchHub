@@ -455,7 +455,7 @@ enum PetStoryboard {
             let targets: [CGRect]
             if row.state == .wings {
                 targets = WingControlLayout.browserButtons(in: row.frame, notchWidth: notch.width, inset: DesignTokens.wingInset,
-                                                           trailingReserve: PetLayout.barSlot, lead: row.content.wingLead)
+                                                           trailingReserve: PetLayout.barSlot, lead: row.content.wingHitLead)
                     .filter { _ in row.status.strip != nil }.map(\.rect)
             } else {
                 targets = AppPanelLayout.actions(in: row.frame, notchInset: notch.height, browserTabs: browser.nearbyTabs(limit: AppPanelLayout.maxTabRows)).map(\.rect)

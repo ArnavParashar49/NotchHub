@@ -44,6 +44,20 @@ public struct IslandContentSize: Equatable, Sendable {
         self.wingSide = max(0, wingSide)
     }
 
+    /// Where the notch starts inside the hover wings, from their left edge —
+    /// the `lead` the hit layouts (`WingControlLayout`) take, so a click
+    /// lands on the button drawn under it.
+    ///
+    /// Each wing measures its own content, but the strip grows equally around
+    /// the notch (`NotchGeometry.compactBar`), and `WingView` draws both wings
+    /// at the wider side. So the notch sits that far in — not at the left
+    /// wing's own content width, which put the hit layouts' notch edge short
+    /// by the difference. Clamped as the strip is. `nil` (the left wing not
+    /// measured) is an even split, which is where the notch is.
+    public var wingHitLead: CGFloat? {
+        wingLead.map { min(max(0, $0, wingSide), NotchGeometry.maxContentOverhang) }
+    }
+
     /// The resting sizes, used when nothing has been measured yet (and as the
     /// fallback for the pure-geometry tests).
     public static let `default` = IslandContentSize(
