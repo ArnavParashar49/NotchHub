@@ -607,10 +607,10 @@ struct PetMischiefTests {
         #expect(placement.anchor == .leading)
         #expect(left.minX + placement.origin.x + placement.size == notch.minX - PetLayout.dockInset)
 
-        let docked = g.compactBar(lead: 0, trail: PetLayout.idleDock)
+        let docked = g.dockBar(lead: 0, trail: PetLayout.idleDock)
         #expect(IslandMotion.between(from: notch, fromIdle: true, to: docked, toIdle: true) == .peek)
         #expect(IslandMotion.between(from: docked, fromIdle: true, to: notch, toIdle: true) == .collapse)
-        #expect(IslandMotion.between(from: docked, fromIdle: true, to: g.compactBar(lead: PetLayout.idleDock, trail: 0), toIdle: true) == .morph)
+        #expect(IslandMotion.between(from: docked, fromIdle: true, to: g.dockBar(lead: PetLayout.idleDock, trail: 0), toIdle: true) == .morph)
     }
 
     @Test("the pet panel's content is centred, wherever the pet was when it was clicked")

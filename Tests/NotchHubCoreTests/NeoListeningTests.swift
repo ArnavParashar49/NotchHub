@@ -380,8 +380,8 @@ struct NeoListeningLayoutTests {
             }
         }
         // The idle dock is the pet's dock and nothing more, either side.
-        #expect(geometry.frame(for: .idle, content: docked) == geometry.compactBar(lead: 0, trail: PetLayout.idleDock))
-        #expect(geometry.frame(for: .idle, content: dockedLeft) == geometry.compactBar(lead: PetLayout.idleDock, trail: 0))
+        #expect(geometry.frame(for: .idle, content: docked) == geometry.dockBar(lead: 0, trail: PetLayout.idleDock))
+        #expect(geometry.frame(for: .idle, content: dockedLeft) == geometry.dockBar(lead: PetLayout.idleDock, trail: 0))
         // Every other shape: the default content gives the pre-NEO frames.
         #expect(geometry.frame(for: .idle, content: .default) == geometry.notchFrame)
         #expect(geometry.frame(for: .wings, content: .default) == geometry.wingsBar(sideWidth: NotchGeometry.wingWidth))
@@ -397,7 +397,8 @@ struct NeoListeningLayoutTests {
     @Test("the content size has no room for listening: only the pet's dock, the measured widths, and NEO's panel")
     func noListeningRoom() {
         let labels = Mirror(reflecting: IslandContentSize.default).children.compactMap(\.label)
-        #expect(labels == ["compactLead", "compactTrail", "wingSide", "wingLead", "panelHeight", "petDock", "neoPanel"])
+        // `expandedSize` is the song popup's own measured size, not listening's.
+        #expect(labels == ["compactLead", "compactTrail", "wingSide", "wingLead", "panelHeight", "expandedSize", "petDock", "neoPanel"])
     }
 
     @Test("Ghost Mode hides the glow with the island: it adds no shape of its own")

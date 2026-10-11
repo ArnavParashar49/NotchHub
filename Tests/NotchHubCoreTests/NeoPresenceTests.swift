@@ -151,7 +151,7 @@ struct NeoAbsentTests {
         // The pet's idle dock is the pet's — NEO busy or not, it is the same dock.
         var pet = content
         pet.petDock = .home
-        #expect(geometry.frame(for: .idle, content: pet) == geometry.compactBar(lead: 0, trail: PetLayout.idleDock))
+        #expect(geometry.frame(for: .idle, content: pet) == geometry.dockBar(lead: 0, trail: PetLayout.idleDock))
         // Nothing in the content size speaks of NEO but its panel's page size,
         // and that moves only NEO's own shape.
         var neo = content

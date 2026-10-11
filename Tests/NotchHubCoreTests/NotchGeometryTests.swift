@@ -148,6 +148,55 @@ struct NotchGeometryTests {
         #expect(g.envelopeFrame.contains(compact))
     }
 
+    @Test("the idle dock grows only on the pet's side; compact and wings stay centred")
+    func idleDockIsOneSided() {
+        let g = makeGeometry()
+        let notch = g.notchFrame
+        // The pet's spot beside the notch, and nothing on the far side: a
+        // centred bar would leave an empty black block over the menu bar.
+        let right = g.dockBar(lead: 0, trail: 30)
+        #expect(right.minX == notch.minX && right.maxX == notch.maxX + 30)
+        #expect(right.minY == notch.minY && right.height == notch.height)
+        let left = g.dockBar(lead: 30, trail: 0)
+        #expect(left.minX == notch.minX - 30 && left.maxX == notch.maxX)
+        // The idle island is that dock, on whichever side the pet sits…
+        var content = IslandContentSize.default
+        content.petDock = PetDock(side: .left, reach: 30)
+        #expect(g.frame(for: .idle, content: content) == left)
+        content.petDock = PetDock(side: .right, reach: 30)
+        #expect(g.frame(for: .idle, content: content) == right)
+        // …and exactly the notch while the pet hides in it.
+        content.petDock = PetDock(side: .right, reach: 0)
+        #expect(g.frame(for: .idle, content: content) == notch)
+        // Clamped like the compact bar: never negative, never past the envelope.
+        #expect(g.dockBar(lead: -10, trail: 0) == notch)
+        #expect(g.dockBar(lead: 0, trail: 10_000).maxX == notch.maxX + NotchGeometry.maxContentOverhang)
+        #expect(g.envelopeFrame.contains(g.dockBar(lead: 10_000, trail: 10_000)))
+        // The compact bar with the same sides is still the centred one.
+        let compact = g.compactBar(lead: 0, trail: 30)
+        #expect(abs(compact.midX - notch.midX) < 0.001)
+        #expect(compact.width == notch.width + 60)
+    }
+
+    @Test("a song popup's own size sets the expanded surface, centred and hung from the notch")
+    func expandedSizeSetsTheExpandedSurface() {
+        let g = makeGeometry()
+        var content = IslandContentSize.default
+        #expect(g.frame(for: .expanded, content: content) == g.expandedFrame)
+        content.expandedSize = CGSize(width: 340, height: 80)
+        let popup = g.frame(for: .expanded, content: content)
+        #expect(popup.size == CGSize(width: 340, height: 80))
+        #expect(abs(popup.midX - g.notchFrame.midX) < 0.001)
+        #expect(abs(popup.maxY - g.notchFrame.maxY) < 0.001)
+        // Never wider than the screen.
+        content.expandedSize = CGSize(width: 5000, height: 80)
+        #expect(g.frame(for: .expanded, content: content).width == g.screenFrame.width)
+        // Only the expanded shape reads it.
+        for state in IslandState.allCases where state != .expanded {
+            #expect(g.frame(for: state, content: content) == g.frame(for: state), "\(state)")
+        }
+    }
+
     @Test("the envelope contains every surface, including settings")
     func envelopeContainsSettings() {
         let g = makeGeometry()

@@ -182,7 +182,7 @@ func runSelfTest() -> Int32 {
     var dockedContent = IslandContentSize.default
     dockedContent.petDock = .home
     let selftestGeometry = NotchGeometry.make(screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982), safeAreaInsets: NSEdgeInsets(top: 32, left: 0, bottom: 0, right: 0))
-    check(selftestGeometry.frame(for: .idle, content: dockedContent) == selftestGeometry.compactBar(lead: 0, trail: PetLayout.idleDock),
+    check(selftestGeometry.frame(for: .idle, content: dockedContent) == selftestGeometry.dockBar(lead: 0, trail: PetLayout.idleDock),
           "listening takes no room: the idle dock is the pet's dock and nothing more")
     listening.update(listening: false, at: heard.addingTimeInterval(4))
     listening.update(listening: true, at: heard.addingTimeInterval(5))
