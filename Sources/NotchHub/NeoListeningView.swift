@@ -430,8 +430,10 @@ private struct NeoWakeRim: View, Animatable {
                 near: Self.nearAlphas.indices.map { band(0, row * CGFloat($0 + 2)) },
                 inner: Self.innerAlphas.indices.map { band(-row * CGFloat($0 + 1), 0) },
                 line: band(0, row),
-                // The haze is blurred over points: a third of the samples do.
-                hazeGradient: gradient(Self.thinned(stops, every: 3), colour: palette.haze, level: NeoWakeLight.hazeLevel),
+                // The haze on its own fixed grid (`NeoWakeLight.hazeStops`),
+                // so it never steps when the wake ends.
+                hazeGradient: gradient(NeoWakeLight.hazeStops(half: half, size: size, phase: phase, notch: notch),
+                                       colour: palette.haze, level: NeoWakeLight.hazeLevel),
                 nearGradient: gradient(stops, colour: palette.near, level: 1),
                 innerGradient: gradient(stops, colour: palette.inner, level: 1, keepOffNotch: true),
                 lineGradient: gradient(stops, colour: palette.line, level: NeoWakeLight.lineLevel, whiten: true),
@@ -495,11 +497,6 @@ private struct NeoWakeRim: View, Animatable {
         let palette = NeoWakeLight.palette(tint: tint)
         lastPalette = (tint, palette)
         return palette
-    }
-
-    /// Every `n`th stop, and the last.
-    static func thinned(_ stops: [NeoWakeLight.Stop], every n: Int) -> [NeoWakeLight.Stop] {
-        stops.indices.filter { $0 % n == 0 || $0 == stops.count - 1 }.map { stops[$0] }
     }
 
     /// One half's gradient axis, in the canvas's points: laid diagonally

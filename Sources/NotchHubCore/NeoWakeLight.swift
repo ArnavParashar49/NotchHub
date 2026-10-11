@@ -303,6 +303,36 @@ public enum NeoWakeLight {
         return locations.map { sample(at: $0, half: half, size: size, phase: phase, notch: notch) }
     }
 
+    /// The light along one half for the HAZE, as gradient stops: the same
+    /// light as `stops`, sampled on one FIXED grid — `sideSamples` down the
+    /// side and `bottomSamples` along the bottom, whatever the phase — plus,
+    /// through the wake, the samples round the sweep's head that keep its
+    /// front sharp (once the sweep has met itself they sit still, at the
+    /// meeting point, until the wake ends).
+    ///
+    /// Not `stops` itself (nor every third of them, as it once was): that
+    /// grid doubles through the wake and halves when it ends, and a soft
+    /// haze drawn from a coarse grid is a polygon of the light — off by up
+    /// to 14/255 at the highlight — so the haze stepped by 6–9/255 the
+    /// moment the wake ended. On this grid, linear between stops as a
+    /// gradient draws it, the haze is within about 3/255 of the light
+    /// everywhere, and when the wake ends only the head's samples go,
+    /// changing it by under 1/255.
+    public static func hazeStops(half: Half, size: CGSize, phase: Phase, notch: CGRect? = nil) -> [Stop] {
+        let height = max(1, Double(size.height))
+        let reach = reach(half: half, size: size, split: split(size: size, notch: notch))
+        let corner = height / reach
+        var locations = (0...sideSamples).map { corner * Double($0) / Double(sideSamples) }
+            + (1...bottomSamples).map { corner + (1 - corner) * Double($0) / Double(bottomSamples) }
+        if let wake = phase.wake, !phase.reduceMotion {
+            let head = headPosition(wake: wake)
+            locations += (-6...6).map { head + Double($0) * headLead * 0.5 }
+            locations = locations.filter { $0 >= 0 && $0 <= 1 }.sorted()
+            locations = locations.enumerated().filter { $0.offset == 0 || $0.element - locations[$0.offset - 1] > 1e-9 }.map(\.element)
+        }
+        return locations.map { sample(at: $0, half: half, size: size, phase: phase, notch: notch) }
+    }
+
     /// The light at `location` (`D`) along `half`.
     public static func sample(at location: Double, half: Half, size: CGSize, phase: Phase, notch: CGRect? = nil) -> Stop {
         let width = max(1, Double(size.width)), height = max(1, Double(size.height))

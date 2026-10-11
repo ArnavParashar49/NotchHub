@@ -249,6 +249,55 @@ struct NeoWakeLightTests {
         }
     }
 
+    /// A gradient's value at `location`: linear between its stops, as drawn.
+    func drawn(_ stops: [NeoWakeLight.Stop], at location: Double) -> Double {
+        guard let next = stops.firstIndex(where: { $0.location >= location }) else { return stops.last!.alpha }
+        guard next > 0 else { return stops[0].alpha }
+        let a = stops[next - 1], b = stops[next]
+        return a.alpha + (b.alpha - a.alpha) * (location - a.location) / max(1e-12, b.location - a.location)
+    }
+
+    @Test("the haze's light is sampled on one fixed grid, fine enough to be the light, so it never steps when the wake ends")
+    func hazeGrid() {
+        for island in islands {
+            for half in NeoWakeLight.Half.allCases {
+                let rest = NeoWakeLight.hazeStops(half: half, size: island.size, phase: settled, notch: island.notch)
+                let grid = rest.map(\.location)
+                // The same places through the wake as after it (and, through
+                // the wake, a few more round the sweep's head).
+                for wake in stride(from: 0.0, to: NeoWakeLight.enterDuration, by: 0.03) {
+                    let waking = NeoWakeLight.hazeStops(half: half, size: island.size, phase: .init(clock: wake, wake: wake), notch: island.notch)
+                    let locations = Set(waking.map(\.location))
+                    #expect(grid.allSatisfy(locations.contains), "\(island.name) \(half) at \(wake) s: grid moved")
+                }
+                for clock in [0.0, 3.1, 7.7] {
+                    #expect(NeoWakeLight.hazeStops(half: half, size: island.size, phase: .init(clock: clock), notch: island.notch).map(\.location) == grid)
+                }
+                // No step when the wake ends and the head's stops go: under
+                // an 8-bit step, drawn.
+                let end = NeoWakeLight.enterDuration - 1e-6
+                let before = NeoWakeLight.hazeStops(half: half, size: island.size, phase: .init(clock: end, wake: end), notch: island.notch)
+                let after = NeoWakeLight.hazeStops(half: half, size: island.size, phase: .init(clock: end), notch: island.notch)
+                for x in stride(from: 0.0, through: 1, by: 0.002) {
+                    let step = abs(drawn(before, at: x) - drawn(after, at: x)) * NeoWakeLight.hazeLevel
+                    #expect(step < 1.0 / 255, "\(island.name) \(half): a step of \(step * 255)/255 at \(x)")
+                }
+                // Drawn as a gradient, the resting haze is within an 8-bit step
+                // or so of the light itself everywhere along the rim.
+                for clock in stride(from: 0.0, to: NeoWakeLight.loopDuration, by: 0.4) {
+                    let phase = NeoWakeLight.Phase(clock: clock)
+                    let stops = NeoWakeLight.hazeStops(half: half, size: island.size, phase: phase, notch: island.notch)
+                    var worst = 0.0
+                    for x in stride(from: 0.0, through: 1, by: 0.001) {
+                        let truth = NeoWakeLight.sample(at: x, half: half, size: island.size, phase: phase, notch: island.notch).alpha
+                        worst = max(worst, abs(drawn(stops, at: x) - truth) * NeoWakeLight.hazeLevel)
+                    }
+                    #expect(worst < 4.0 / 255, "\(island.name) \(half) at \(clock) s: off the light by \(worst * 255)/255")
+                }
+            }
+        }
+    }
+
     @Test("the haze is blurred through the wake's sweep and masked once settled, crossfaded between")
     func hazeHandover() {
         #expect(NeoWakeLight.hazeMasked(NeoWakeLight.Phase(clock: 0, wake: 0)) == 0)
