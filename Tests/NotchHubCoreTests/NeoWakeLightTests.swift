@@ -185,6 +185,57 @@ struct NeoWakeLightTests {
         #expect(abs(NeoWakeLight.angle(violetHaze.h, NeoWakeLight.OKLCH(violet).h)) < 8)
     }
 
+    @Test("the default blue's palette is exactly the one the light was designed in")
+    func defaultPalettePinned() {
+        let blue = NeoWakeLight.palette(tint: NeoWakeLight.Colour(DesignTokens.wakeLightRGB))
+        #expect([blue.line.hex, blue.near.hex, blue.haze.hex, blue.inner.hex] == [0x7DC5FF, 0x3E9EFF, 0x2670FF, 0x4EAEFF],
+                "\([blue.line, blue.near, blue.haze, blue.inner].map { String(format: "%06X", $0.hex) })")
+        // Every coloured swatch keeps its palette too (only neutral tints changed).
+        let swatches: [(UInt32, [UInt32])] = [
+            (0x3FD8C2, [0x62E8D0, 0x00CDB5, 0x009C8A, 0x42D9C1]),
+            (0x6FA8FF, [0xA1D4FF, 0x73B5FF, 0x407FF7, 0x84C4FF]),
+            (0xB18CFF, [0xCEC5FF, 0xB79EFF, 0x995CF6, 0xC1B0FF]),
+            (0xFF7FA8, [0xFFB6CA, 0xFF83AA, 0xE5367D, 0xFF9BB8]),
+            (0xFFC24D, [0xFDC357, 0xE4A400, 0xAE7C00, 0xEEB239]),
+        ]
+        for (tint, expected) in swatches {
+            let p = NeoWakeLight.palette(tint: NeoWakeLight.Colour(hex: tint))
+            #expect([p.line.hex, p.near.hex, p.haze.hex, p.inner.hex] == expected, "\(String(format: "%06X", tint))")
+        }
+    }
+
+    @Test("a neutral glow (white, a cool white, a grey) stays neutral: no yellow cast, and a white lights a near-white line")
+    func neutralTints() {
+        // A pure white or grey has no hue: its OKLCH hue is noise (about 90°,
+        // yellow), so any chroma the palette adds at that hue turns it khaki.
+        for tint: UInt32 in [0xFFFFFF, 0x808080] {
+            let p = NeoWakeLight.palette(tint: NeoWakeLight.Colour(hex: tint))
+            for (name, c) in [("line", p.line), ("near", p.near), ("haze", p.haze), ("inner", p.inner)] {
+                let spread = max(c.red, c.green, c.blue) - min(c.red, c.green, c.blue)
+                #expect(spread <= 1.0 / 255, "\(String(format: "%06X", tint)) \(name) is tinted: \(String(format: "%06X", c.hex))")
+            }
+        }
+        // The cool white keeps its own faint blue — never warmer than neutral,
+        // and only a little more saturated than itself.
+        let coolTint = NeoWakeLight.Colour(hex: 0xF2F6FF)
+        let cool = NeoWakeLight.palette(tint: coolTint)
+        for (name, c) in [("line", cool.line), ("near", cool.near), ("haze", cool.haze), ("inner", cool.inner)] {
+            #expect(c.blue >= c.red && c.blue >= c.green, "F2F6FF \(name) leans warm: \(String(format: "%06X", c.hex))")
+            let oklch = NeoWakeLight.OKLCH(c)
+            #expect(oklch.c < 0.035, "F2F6FF \(name) too saturated: \(oklch.c)")
+            #expect(abs(NeoWakeLight.angle(oklch.h, NeoWakeLight.OKLCH(coolTint).h)) < 25, "F2F6FF \(name) hue \(oklch.h)")
+        }
+        // A white glow lights a near-white line, still the brightest part;
+        // a mid grey's line is as bright as a coloured tint's.
+        let white = NeoWakeLight.palette(tint: NeoWakeLight.Colour(hex: 0xFFFFFF))
+        let line = NeoWakeLight.OKLCH(white.line), near = NeoWakeLight.OKLCH(white.near), haze = NeoWakeLight.OKLCH(white.haze)
+        #expect(line.l >= 0.94, "white's line only \(line.l)")
+        #expect(line.l > near.l && near.l > haze.l)
+        #expect(NeoWakeLight.OKLCH(cool.line).l > 0.9)
+        let grey = NeoWakeLight.OKLCH(NeoWakeLight.palette(tint: NeoWakeLight.Colour(hex: 0x808080)).line)
+        #expect(abs(grey.l - 0.76) < 0.005)
+    }
+
     @Test("nested bands, drawn one over another, give each row its share of the light")
     func nestedBands() {
         for profile in [NeoWakeLight.nearProfile, NeoWakeLight.innerProfile] {
