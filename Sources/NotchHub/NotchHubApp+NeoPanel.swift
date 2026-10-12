@@ -34,7 +34,14 @@ extension NotchHubApp {
     /// it opened, gives it back when it closed.
     func applyNeoPanel() {
         let shouldOpen = neoPanel.isOpen && featureSettings.isEnabled(.neo) && hasNeoUI
-        if shouldOpen, panel != .neo {
+        if shouldOpen, panel == .neoCamera {
+            // NEO's camera has the island: its native panel IS that card's
+            // UI. Taking the island from it would release the session — a
+            // `camera_stop` while NEO is still turning the camera on, and the
+            // question fails ("the camera was turned off before it looked").
+            neoPanel.close(at: Date())
+            log("neo: the chat stays folded — NEO's camera has the island")
+        } else if shouldOpen, panel != .neo {
             guard neoWebHost() != nil else { return }
             takePanel(.neo)
             renderIsland()
@@ -84,6 +91,13 @@ extension NotchHubApp {
             // while one waits the chat stays folded.
             guard neoConfirm.pageAsksToShow(at: now) else {
                 log("neo: the page asked to show — declined, the buttons are up")
+                break
+            }
+            // The page asks to be seen when NEO's camera goes live (its card
+            // is in the chat in NEO's own window); here the camera has its
+            // own panel, which the chat must never take over.
+            guard panel != .neoCamera else {
+                log("neo: the page asked to show — declined, NEO's camera has the island")
                 break
             }
             neoPanel.show(at: now)
