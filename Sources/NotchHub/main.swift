@@ -317,6 +317,34 @@ func runSelfTest() -> Int32 {
     check(firstClick.window, "first click: the window hit-tests a button the moment the surface is applied, before any mouse-move")
     check(firstClick.container && firstClick.hosting && firstClick.web, "first click: the island's views and NEO's web view accept the first mouse")
 
+    // --- Lid closed ---
+    // Keep working with the lid closed: the exact helper rule, pmset's
+    // SleepDisabled read, a guard, and the crash reconcile. (Nothing here
+    // runs pmset or sudo.)
+    check(LidAwakeHelperRule(user: "arnav")?.content == "arnav ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1\n"
+            && LidAwakeHelperRule(user: "a b") == nil && LidAwakeHelperRule.path == "/private/etc/sudoers.d/notchhub-lid",
+          "lid: the helper rule grants exactly pmset -a disablesleep 0 / 1, and a name needing escapes is refused")
+    check(LidAwakeCommands.sleepDisabled(inPmsetOutput: "System-wide power settings:\n SleepDisabled\t\t1\nCurrently in use:\n") == true
+            && LidAwakeCommands.sleepDisabled(inPmsetOutput: "System-wide power settings:\nCurrently in use:\n standby 1\n") == false
+            && LidAwakeCommands.sleepDisabled(inPmsetOutput: "") == nil,
+          "lid: pmset -g's SleepDisabled is read; its absence is normal sleep")
+    check(LidAwakePolicy.verdict(settings: LidAwakeSettings(enabled: true), power: PowerSnapshot(onAC: false, batteryPercent: 90),
+                                 running: [], now: Date(), lowLatched: false).verdict == .held(.onBattery),
+          "lid: on battery, “Only on the power adapter” lets the Mac sleep")
+    var lidEngine = LidAwakeEngine(settings: LidAwakeSettings(), record: LidAwakeRecord(ownsSleepDisabled: true), helperInstalled: true)
+    check(lidEngine.launch(observed: true, power: nil, running: [], helperInstalled: true, now: Date()) == [.apply(sleepDisabled: false, interactive: true)],
+          "lid: a SleepDisabled NotchHub left behind (a crash) is put back at launch")
+    check(AppleScriptSource.quoted(#"a "b" \c"#) == #""a \"b\" \\c""#, "lid: the admin script's string is escaped for AppleScript")
+    var lidFirst = LidAwakeEngine(settings: LidAwakeSettings(), record: LidAwakeRecord(), helperInstalled: false)
+    _ = lidFirst.launch(observed: false, power: PowerSnapshot(onAC: true, batteryPercent: 80), running: [], helperInstalled: false, now: Date())
+    check(lidFirst.setEnabled(true, now: Date()) == [.saveSettings, .installHelper]
+            && LidAwakeHelperRule(user: "arnav")?.installScript().contains("; /usr/bin/pmset") == false
+            && LidAwakeHelperRule(user: "ALL") == nil,
+          "lid: sleep is never turned off through the password dialog — only through the helper, once installed")
+    check(LidAwakeCommands.watchdogScript(pid: 42, uid: 501, processName: "NotchHub")
+            .hasSuffix("exec /usr/bin/sudo -n /usr/bin/pmset -a disablesleep 0"),
+          "lid: the dead-man's switch puts normal sleep back through the helper")
+
     print("")
     print(failures == 0 ? "SELF-TEST PASSED" : "SELF-TEST FAILED (\(failures) failures)")
     return failures == 0 ? 0 : 1

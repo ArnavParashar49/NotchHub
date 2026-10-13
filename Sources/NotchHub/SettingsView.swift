@@ -140,6 +140,10 @@ extension IslandSettings {
 /// beside its caption: "Customise" opens the pet's page
 /// (`PetSettingsSection`) — its look, what it wears, its size and side, its
 /// personality and its name.
+///
+/// And one card is a door of its own, between the pet's group and the
+/// weather: "Lid Closed" opens Settings → Lid (`LidSettingsSection`) — keep
+/// the Mac working with the lid closed, and the guards that let it sleep.
 struct SettingsView: View {
     /// Which page of the panel shows.
     enum Page: Equatable {
@@ -147,6 +151,8 @@ struct SettingsView: View {
         case neo
         /// Making the pet one's own.
         case pet
+        /// Keeping the Mac working with the lid closed.
+        case lid
     }
 
     @Binding var settings: IslandSettings
@@ -155,6 +161,12 @@ struct SettingsView: View {
     /// What the NEO section shows, and where its taps go.
     let neo: NeoSettingsModel
     let onNeo: (NeoSettingsIntent) -> Void
+    /// What Settings → Lid shows, the apps it lists, and where its taps go.
+    let lid: LidSettingsModel
+    let lidApps: LidAppChoices
+    let onLid: (LidIntent) -> Void
+    /// The clock the Lid page's "Turns off at" reads (fixed in snapshots).
+    let lidNow: Date?
     /// `false` only for headless snapshots: an image renderer cannot draw a
     /// scroll view, so the page is laid out bare.
     let scrolls: Bool
@@ -166,6 +178,10 @@ struct SettingsView: View {
         onClose: @escaping () -> Void = {},
         neo: NeoSettingsModel = NeoSettingsModel(featureOn: false, connected: false, shell: nil),
         onNeo: @escaping (NeoSettingsIntent) -> Void = { _ in },
+        lid: LidSettingsModel = LidSettingsModel(),
+        lidApps: LidAppChoices = LidAppChoices(),
+        onLid: @escaping (LidIntent) -> Void = { _ in },
+        lidNow: Date? = nil,
         page: Page = .features,
         scrolls: Bool = true
     ) {
@@ -174,6 +190,10 @@ struct SettingsView: View {
         self.onClose = onClose
         self.neo = neo
         self.onNeo = onNeo
+        self.lid = lid
+        self.lidApps = lidApps
+        self.onLid = onLid
+        self.lidNow = lidNow
         self.scrolls = scrolls
         self._page = State(initialValue: page)
     }
@@ -245,10 +265,12 @@ struct SettingsView: View {
 
     private var enabledCount: Int {
         groups.flatMap(\.items).filter { settings[keyPath: $0.key] }.count + (settings.weather ? 1 : 0)
+            + (lid.switchOn ? 1 : 0)
     }
 
+    /// The tiles, the weather card and the lid card.
     private var totalCount: Int {
-        groups.flatMap(\.items).count + 1
+        groups.flatMap(\.items).count + 2
     }
 
     private static let columns = Array(repeating: GridItem(.flexible(), spacing: SettingsMetrics.tileSpacing), count: 3)
@@ -284,6 +306,7 @@ struct SettingsView: View {
                 ForEach(groups) { group in
                     groupView(group)
                 }
+                lidCard
                 weatherCard
                 footer
             case .neo:
@@ -304,6 +327,8 @@ struct SettingsView: View {
                         onChange()
                     }
                 ), headless: !scrolls)
+            case .lid:
+                LidSettingsSection(model: lid, apps: lidApps, now: lidNow ?? Date(), headless: !scrolls, onIntent: onLid)
             }
         }
         .padding(.horizontal, SettingsMetrics.inset)
@@ -356,6 +381,7 @@ struct SettingsView: View {
         case .features: return "Settings"
         case .neo: return "NEO"
         case .pet: return "Pet"
+        case .lid: return "Lid Closed"
         }
     }
 
@@ -364,6 +390,7 @@ struct SettingsView: View {
         case .features: return "\(enabledCount) of \(totalCount) features on"
         case .neo: return neo.subtitle
         case .pet: return "\(settings.pet.displayName) the fox — look, wear, size, personality"
+        case .lid: return lid.headline
         }
     }
 
@@ -433,6 +460,15 @@ struct SettingsView: View {
 
     private func sectionLabel(_ text: String) -> some View {
         SettingsSectionLabel(text: text)
+    }
+
+    // MARK: - Lid
+
+    private var lidCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionLabel("Power")
+            LidSettingsCard(model: lid) { page = .lid }
+        }
     }
 
     // MARK: - Weather

@@ -31,6 +31,7 @@ enum SurfaceSnapshots {
         rows.append(contentsOf: cameraRows(geometry: geometry))
         rows.append(contentsOf: dashboardRows(geometry: geometry))
         rows.append(contentsOf: settingsRows(geometry: geometry))
+        rows.append(contentsOf: lidRows(geometry: geometry))
         if let filter, !filter.isEmpty {
             rows = rows.filter { $0.name.localizedCaseInsensitiveContains(filter) }
         }
@@ -255,6 +256,54 @@ enum SurfaceSnapshots {
         // page, so every row before keeps its place.
         let timersOff = NeoSettingsModel(featureOn: true, connected: true, shell: ready, core: listens, showsTimers: false)
         return cases.map { neoRow($0.0, $0.1, $0.2) } + petRows + [neoRow("NEO — its timers off the island", .neo, timersOff)]
+    }
+
+    // MARK: - Lid
+
+    /// Settings → Lid ("Keep working with the lid closed") in its states,
+    /// and the features page with its Lid card — after every other settings
+    /// row, so those keep their places. The page is drawn whole (taller than
+    /// the panel, which scrolls), at a fixed clock.
+    static func lidRows(geometry: NotchGeometry) -> [Row] {
+        let panel = geometry.frame(for: .settings, content: .default)
+        let tall = CGRect(x: panel.minX, y: panel.maxY - 800, width: panel.width, height: 800)
+        let now = Date(timeIntervalSince1970: 1_760_350_000)
+        let icon = NSWorkspace.shared.icon(for: .application)
+        let agent = LidAppRow(bundleID: "com.example.agent", name: "Agent Studio", icon: icon, isOpen: true)
+        let chat = LidAppRow(bundleID: "com.example.chat", name: "Chat", icon: icon, isOpen: false)
+        let candidates = LidAppChoices(chosen: [], candidates: [agent, chat])
+        let both = LidAppChoices(chosen: [agent, chat], candidates: [])
+
+        var awake = LidAwakeSettings(enabled: true, onlyWhileApps: true, apps: [agent.bundleID, chat.bundleID],
+                                     autoOffHours: 2, clockStart: now.addingTimeInterval(-1800))
+        awake.keepAfterQuit = false
+        let floor = LidAwakeSettings(enabled: true, onlyOnPower: false, batteryFloor: 25)
+        let cases: [(String, LidSettingsModel, LidAppChoices)] = [
+            ("as it opens: off, the helper not set up", LidSettingsModel(status: .normal), candidates),
+            ("keeping the Mac awake: two apps, a 2 h clock", LidSettingsModel(
+                settings: awake, status: .awake, helperInstalled: true, openApps: [agent.bundleID]), both),
+            ("paused on battery", LidSettingsModel(
+                settings: LidAwakeSettings(enabled: true), status: .held(.onBattery), helperInstalled: true), candidates),
+            ("the battery floor at 25 % (adapter guard off)", LidSettingsModel(
+                settings: floor, status: .held(.batteryLow(floor: 25)), helperInstalled: true), candidates),
+            ("needs your password to resume", LidSettingsModel(
+                settings: LidAwakeSettings(enabled: true), status: .needsYou, helperInstalled: true, helperRefused: true), candidates),
+            ("sleep turned off outside NotchHub", LidSettingsModel(status: .outside), candidates),
+        ]
+        func row(_ name: String, _ page: SettingsView.Page, _ model: LidSettingsModel, _ apps: LidAppChoices, frame: CGRect) -> Row {
+            Row(
+                name: "settings — \(name)",
+                state: .settings,
+                frame: frame,
+                content: AnyView(SettingsView(
+                    settings: .constant(IslandSettings()), onChange: {}, lid: model, lidApps: apps, lidNow: now,
+                    page: page, scrolls: false
+                ))
+            )
+        }
+        let features = row("Lid card on the features page, keeping awake", .features,
+                           LidSettingsModel(settings: awake, status: .awake, helperInstalled: true), both, frame: tall)
+        return [features] + cases.map { row("Lid — \($0.0)", .lid, $0.1, $0.2, frame: tall) }
     }
 
     // MARK: - Camera

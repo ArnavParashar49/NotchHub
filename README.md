@@ -51,6 +51,9 @@ wrapper). Three layers, strictly separated:
   - `GhostMode` — which surfaces are hidden from screen capture, and why
   - `BrowserMedia` — normalising a media tab's title, and telling "no media
     tab" apart from "could not ask"
+  - `LidAwakeEngine` · `LidAwakePolicy` · `LidAwakeHelperRule` — keeping
+    the Mac working with the lid closed: the guards, the state machine
+    (crash reconcile included), and the exact helper rule and commands
   - `TrayClip` / `TrayStore` — the clipboard history (text only)
   - `ClipboardPrivacy` — which copies never enter the Tray
   - `Spring` / `SpringAnimator` — damped spring physics + presets
@@ -64,6 +67,10 @@ wrapper). Three layers, strictly separated:
   - `NeoListener` — a client of NEO's core websocket, relaying its state,
     transcript and pending confirmation as `NeoFact`s, and sending the
     answer to one
+  - `LidAwakeController` — the Mac's sleep with the lid closed: watches the
+    power source and the apps, runs the two `pmset` commands, puts normal
+    sleep back at quit, and keeps a dead-man's switch armed for a crash.
+    `@MainActor`, the one truth about it
   - `CameraController` — the camera. `@MainActor`, and its own `phase` is the
     only truth about whether the hardware is on, so nothing can infer it from
     a panel being open
@@ -455,6 +462,126 @@ real island (idle, the wake outline, Allow / Cancel, the bars, mischief),
 and the Settings page. `python3 scripts/pet_art.py sheet OUT.png --wear NAME
 [--hat NAME] [--look NAME]` shows an accessory on every frame of the art.
 
+## Keep working with the lid closed
+
+Settings → **Lid Closed** (the Power card, under the pet's group): long AI
+jobs — an agent app, a chat app writing code, an agent in a terminal — keep
+running when you close the lid.
+
+**How macOS works.** Closing a MacBook's lid sleeps it whatever power
+assertions are held: `caffeinate` and every IOPMAssertion only stop *idle*
+sleep, and clamshell mode needs an external display and power. The one
+supported switch that keeps a closed Mac running is the system setting
+`pmset -a disablesleep 1` (`SleepDisabled 1` in `pmset -g`); `pmset -a
+disablesleep 0` puts normal sleep back. Closed, the screen goes off and
+everything keeps running. It needs root, so NotchHub makes only those two
+changes, and reads the state back from `pmset -g` (no root) every time.
+
+**The page.**
+
+- **Keep working with the lid closed** — the switch, with what closing the
+  lid does right now under it, and a warning: a closed Mac that doesn't
+  sleep can overheat in a bag and drain its battery.
+- **Only on the power adapter** (on by default) — on battery the Mac sleeps
+  as usual, and it picks up again when you plug in. Off, a **battery floor**
+  applies instead: at or below it (20 % by default, 10–50 %) the Mac is let
+  sleep, and not kept awake again until it is 3 % above the floor or on the
+  adapter. A battery whose charge can't be read counts as below the floor.
+- **Turn off after** — Never (the default), 1, 2, 4 or 8 hours: the switch
+  turns itself off, counted from when it was turned on (or the hours were
+  changed).
+- **Keep after NotchHub quits** (off by default) — off, quitting NotchHub
+  (or NotchHub crashing) puts normal sleep back, because nothing would be
+  left to watch the guards.
+- **Only while these apps are open** — pick apps from the ones running, or
+  any app in Applications; they are stored by bundle identifier, never by
+  name. When none of them is open, the Mac sleeps as usual; when one opens,
+  it keeps working again. An agent running in a terminal counts through the
+  terminal app. Menu-bar and agent apps count too (they are heard through
+  the running-apps list, not only the launch / quit notifications).
+- **Password-free switching** — the helper (below): Set Up… / Remove….
+
+The status reads "Your Mac will keep working with the lid closed", "Normal
+sleep", "Paused: on battery", "Paused: battery at 20 % or below", "Paused:
+none of your apps is open", "Paused: needs your password to resume" (with
+Resume…), or "Sleep is turned off outside NotchHub" (a `SleepDisabled 1`
+something else set — left alone, with Restore normal sleep…). The island
+never changes for any of it: the only sign outside the page is a small bolt
+on the features page's card while the Mac is being kept awake.
+
+**The helper.** The guards must be able to put sleep back with nobody at the
+Mac — unplugged in a bag, the clock run out, the apps quit — and a password
+prompt waiting behind a closed lid would keep it awake until someone opened
+it. A privileged helper daemon (SMJobBless / SMAppService) needs a real
+Developer ID signature, which an ad-hoc-signed NotchHub does not have. So the
+first time the switch goes on, one macOS admin dialog (AppleScript's `do
+shell script … with administrator privileges`, run by `osascript`: macOS asks
+for the password, NotchHub never sees it) installs a one-line sudoers
+drop-in, and sleep is then turned off *through* it:
+
+```
+/private/etc/sudoers.d/notchhub-lid   (root:wheel, 0440)
+<you> ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1
+```
+
+It grants exactly those two command lines and nothing else (no shell, no
+other `pmset` setting, no wildcard). The file is written under a dotted temp
+name (sudo ignores names with a dot), checked with `visudo -cf`, owned
+root:wheel, mode 0440, moved into place, and the whole policy is re-checked
+with `visudo -c` (it is removed again if that fails); a user name that would
+need sudoers escaping, or that sudoers reads specially (`ALL`, an all-capitals
+alias), is refused. From then on every switch is `sudo -n /usr/bin/pmset -a
+disablesleep 0|1` (`-n`: it never prompts).
+
+The Mac is only ever kept awake while that silent way back works. Sleep is
+turned off through the rule and never through the dialog — the command
+working proves the same rule will put sleep back with nobody there — and the
+rule is checked again right after it is installed, at launch, and at most
+every ten minutes on a wake or when Settings opens (by re-asserting the value
+already set: `disablesleep 0` while sleep is normal, `1` while NotchHub holds
+it). If it stops working while NotchHub holds the setting, normal sleep goes
+back. Putting sleep back may fall back on the admin dialog: any time for a
+tap on the page; for the guards on their own at most once per hold, and never
+while the lid is closed — otherwise the rule is retried, silently, on every
+later change and every minute until it lands. Keeping the Mac awake never
+prompts on its own, and nor does any row but the main switch — the page says
+"needs your password" and Resume… asks. **Remove…** deletes the rule and puts
+normal sleep back in one dialog, and turns the switch off. By hand: `sudo
+pmset -a disablesleep 0; sudo rm /etc/sudoers.d/notchhub-lid`.
+
+**Crash-safe.** NotchHub records in its own settings that *it* turned sleep
+off — written before the change is made, cleared only once normal sleep is
+confirmed back. On launch it compares that with `pmset -g`: its own
+`SleepDisabled 1` with the switch off or a guard holding is put back; a
+stale record is cleared; a `SleepDisabled 1` it did not set is left alone. On
+quit (`applicationWillTerminate`) a command still running is stopped (a
+password dialog closed, a helper command waited for), `pmset -g` is read
+afresh, and sleep goes back synchronously through the helper — never a
+dialog at quit; if that fails, the record stays for the next launch — unless
+"Keep after NotchHub quits" is on and the guards still want the Mac awake.
+While it holds the setting, SIGTERM quits through that path instead of
+killing the process. For a crash, Force Quit or `kill -9`, a dead-man's
+switch is armed whenever NotchHub going away should put sleep back: a small
+`/bin/sh` outside NotchHub that waits for its process to be gone, then runs
+the helper's `sudo -n pmset -a disablesleep 0` (it steps aside if NotchHub is
+already running again, and is stopped on a clean quit). When a guard puts
+sleep back while the lid is closed with no external display, NotchHub checks
+20 s later and, if the Mac is still up, asks it to sleep (`pmset sleepnow`,
+no root). While it keeps the Mac awake it holds a process activity so App Nap
+cannot slow its timers.
+
+Power changes come from IOKit (`IOPSNotificationCreateRunLoopSource`, in the
+run loop's common modes so an open menu doesn't hold them up), app launches
+and quits (the notifications and the running-apps list's KVO) and wakes from
+NSWorkspace, all in `LidAwakeController`; the decisions are
+`LidAwakeEngine`'s, pure and tested with fakes for the privileged runner, the
+power source, the workspace and the dead-man's switch — the tests never run
+`pmset -a`, `sudo` or the dialog (the dead-man's switch is run for real with
+`touch` standing in for the restore). A normal launch is the only one that
+starts it; inspection launches (`--settings`, `--demo`, the snapshots) show
+the page but never touch the Mac's sleep. `--surface-snapshots DIR Lid`
+renders the page in each state.
+
 ## Permissions
 
 - **Automation** — reading the track from Spotify, and the page and tabs of
@@ -462,6 +589,9 @@ and the Settings page. `python3 scripts/pet_art.py sheet OUT.png --wear NAME
 - **Accessibility** — the call controls and browser back / forward / new tab
   send the app's own keyboard shortcuts, and window titles are read through it;
   macOS prompts the first time a control is used.
+- **Administrator** — once, for Settings → Lid Closed's helper (macOS's own
+  password dialog; see "Keep working with the lid closed"), and again only if
+  the helper is removed or stops working.
 - **Camera** — the preview only. The session carries a preview layer and no
   frame output, so there is nothing in the path that could record, and closing
   the preview tears the session down rather than pausing it.

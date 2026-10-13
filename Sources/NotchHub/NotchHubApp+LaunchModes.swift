@@ -158,6 +158,9 @@ extension NotchHubApp {
             // system before any listener reaches for files, scripts or
             // permissions.
             after(0.2) { $0.startMonitor() }
+            // Only a normal launch manages the Mac's sleep (and puts right a
+            // SleepDisabled a crash left behind).
+            startLidAwake()
         }
     }
 

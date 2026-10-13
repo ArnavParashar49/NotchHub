@@ -176,6 +176,14 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     /// The running stopwatch's elapsed time, for the dashboard's timer chip.
     var timerElapsed: TimeInterval?
 
+    /// "Keep working with the lid closed" (Settings → Lid). Made and started
+    /// only by a normal launch, so an inspection run never touches the
+    /// Mac's sleep. See `+LidAwake`.
+    var lidAwake: LidAwakeController?
+    /// While NotchHub holds SleepDisabled, SIGTERM quits through
+    /// `applicationWillTerminate` (which puts sleep back) instead of dying.
+    var lidTerminateSignal: DispatchSourceSignal?
+
     /// The settings panel's view model, seeded from the persisted features and
     /// the separately-stored weather city.
     lazy var settingsModel: IslandSettings = {
@@ -295,6 +303,8 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         ticker?.invalidate()
         monitor?.stop()
+        // A closed Mac must not stay awake because NotchHub went away.
+        lidAwake?.prepareForQuit()
         // Quitting must let go of the camera, not leave the indicator light on
         // until the process is reaped.
         camera.close()

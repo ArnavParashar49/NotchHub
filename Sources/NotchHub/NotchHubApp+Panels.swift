@@ -56,6 +56,9 @@ extension NotchHubApp {
                     onClose: { [weak self] in self?.closeSettings() },
                     neo: neoSettings,
                     onNeo: { [weak self] in self?.neoSettingsIntent($0) },
+                    lid: lidSettings,
+                    lidApps: lidAppChoices(),
+                    onLid: { [weak self] in self?.lidIntent($0) },
                     page: settingsStartPage
                 )
             )
@@ -271,6 +274,8 @@ extension NotchHubApp {
         // to take key status to receive their clicks.
         window.needsInteraction = true
         log("settings: open")
+        // The Lid card shows what `pmset -g` says now, not a memory of it.
+        lidAwake?.refresh()
         refreshPanel()
     }
 
