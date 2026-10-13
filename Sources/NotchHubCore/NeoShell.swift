@@ -185,6 +185,9 @@ public enum NeoSettingsIntent: Equatable, Sendable {
     case wakeWord(Bool)
     /// Switch local wellbeing sound check-ins on or off.
     case wellbeingCheckins(Bool)
+    /// Show NEO's timers on the island, or not: NotchHub's own preference
+    /// (`NeoTimerPreference`), which NEO never hears of.
+    case showTimers(Bool)
     /// NEO is not running: launch NEO.app.
     case start
     /// Open the pane of System Settings where the permission is granted.
@@ -200,7 +203,7 @@ public enum NeoSettingsIntent: Equatable, Sendable {
         case .eraseMemory: return .eraseMemory
         case let .openAtLogin(on): return .openAtLogin(on)
         case .quit: return .quit
-        case .openChat, .start, .openPermission, .wakeWord, .wellbeingCheckins: return nil
+        case .openChat, .start, .openPermission, .wakeWord, .wellbeingCheckins, .showTimers: return nil
         }
     }
 
@@ -216,7 +219,8 @@ public enum NeoSettingsIntent: Equatable, Sendable {
 
 /// What the NEO section of Settings shows, from four facts: whether the NEO
 /// feature is on, whether NEO's core is connected, what NEO.app's shell last
-/// reported, and what the core said about its own settings.
+/// reported, and what the core said about its own settings — and one
+/// preference of NotchHub's own, whether the island shows NEO's timers.
 public struct NeoSettingsModel: Equatable, Sendable {
 
     /// How much of NEO is there to talk to.
@@ -265,9 +269,13 @@ public struct NeoSettingsModel: Equatable, Sendable {
     public let wakeWord: Bool?
     /// Local wellbeing check-ins, or nil when the connected core predates this setting.
     public let wellbeingCheckins: Bool?
+    /// "Show NEO's timers": NotchHub's own switch, so it is known whether or
+    /// not NEO runs.
+    public let showsTimers: Bool
 
-    public init(featureOn: Bool, connected: Bool, shell: NeoShellStatus?, core: NeoCoreSettings? = nil) {
+    public init(featureOn: Bool, connected: Bool, shell: NeoShellStatus?, core: NeoCoreSettings? = nil, showsTimers: Bool = true) {
         self.featureOn = featureOn
+        self.showsTimers = showsTimers
         let live = featureOn && connected
         // Like the shell's word: a setting from before NEO quit says nothing now.
         wakeWord = live ? core?.wakeWord : nil
@@ -351,6 +359,13 @@ public struct NeoSettingsModel: Equatable, Sendable {
         "Detection stays on-device. With Gemini Live, the check-in line and 5s reply audio go to Gemini."
     }
 
+    /// The line under "Show NEO's timers": what the island does with them.
+    public var timersCaption: String {
+        showsTimers
+            ? "A countdown in the notch while one runs."
+            : "NEO's timers stay off the island."
+    }
+
     /// "Start NEO" shows only when NotchHub is looking for NEO and it is not there.
     public var canStart: Bool { availability == .away }
 
@@ -379,6 +394,9 @@ public struct NeoSettingsModel: Equatable, Sendable {
             return isRunning && wakeWord != nil
         case .wellbeingCheckins:
             return isRunning && wellbeingCheckins != nil
+        case .showTimers:
+            // NotchHub's own switch: it needs NEO on in the notch, not running.
+            return featureOn
         case .start:
             return canStart
         case let .openPermission(permission):

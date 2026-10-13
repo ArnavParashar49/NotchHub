@@ -28,6 +28,12 @@ public enum ActivityKind: String, CaseIterable, Codable, Equatable {
     case songRecognition
     /// A song NEO identified, with cover art and a compact detail popup.
     case identifiedSong
+    /// One of NEO's timers counting down (the soonest), or its short "done"
+    /// moment (`NeoTimerSurface`). NEO's own kind, never `.timer`: that one
+    /// is NotchHub's focus timer, which replaces itself twice a second — the
+    /// two sharing a kind would replace each other. Drawn in tabular digits,
+    /// so the bar holds still as the seconds tick.
+    case neoTimer
     /// The frontmost app, dressed for the island.
     case skin
     case custom
@@ -57,6 +63,7 @@ public enum ActivityKind: String, CaseIterable, Codable, Equatable {
         case .codingAgent: return "chevron.left.forwardslash.chevron.right"
         case .songRecognition: return "waveform"
         case .identifiedSong: return "music.note"
+        case .neoTimer: return "timer"
         case .skin: return "app.fill"
         case .custom: return "sparkles"
         }
@@ -68,7 +75,7 @@ public enum ActivityKind: String, CaseIterable, Codable, Equatable {
         case .lowBattery, .songRecognition, .identifiedSong: return 90
         case .recording, .microphone, .camera: return 80
         case .meeting: return 75
-        case .timer: return 70
+        case .timer, .neoTimer: return 70
         case .codingAgent: return 65
         case .music: return 60
         case .download: return 55
@@ -92,7 +99,7 @@ public enum ActivityKind: String, CaseIterable, Codable, Equatable {
         case .clipboard, .notification: return 3.0
         case .music, .timer, .download, .recording, .microphone, .camera,
              .lowBattery, .focus, .dnd, .calendar, .meeting, .skin,
-             .codingAgent, .custom, .songRecognition, .identifiedSong:
+             .codingAgent, .custom, .songRecognition, .identifiedSong, .neoTimer:
             return 0 // persistent until replaced or explicitly removed
         }
     }
@@ -239,6 +246,10 @@ public struct Activity: Identifiable, Equatable {
             return subtitle
         case .timer:
             return compactValue
+        case .neoTimer:
+            // NEO's name for the timer, then its clock (or "· done"): one
+            // line, which the bar draws as two (`IslandView`).
+            return [title, subtitle].compactMap { $0 }.joined(separator: " ")
         default:
             return title
         }
@@ -268,7 +279,7 @@ public struct Activity: Identifiable, Equatable {
         case .volume, .brightness, .battery, .lowBattery, .wifi, .bluetooth,
              .airpods, .recording, .microphone, .camera, .calendar, .focus,
              .dnd, .clipboard, .notification, .codingAgent, .songRecognition, .skin, .custom,
-             .timer, .download:
+             .timer, .download, .neoTimer:
             return false
         }
     }

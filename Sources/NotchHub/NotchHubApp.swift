@@ -140,6 +140,13 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     var neoSongSID: String?
     var neoSongCardState: NeoSongCardState?
     var neoSongDismissTask: Task<Void, Never>?
+    /// NEO's timers, as its core last said, and the countdown they put on the
+    /// island (`NeoTimerSurface`: NEO's own activities, never NotchHub's
+    /// `.timer`). The ticker keeps the countdown's seconds current. See `+Neo`.
+    var neoTimers = NeoTimers()
+    var neoTimerSurface = NeoTimerSurface()
+    /// "Show NEO's timers" (Settings → NEO), NotchHub's own preference.
+    var neoShowsTimers = NeoTimerPreference.load()
     /// Comes back when NEO's presence or the panel will change on its own (a
     /// held state, the settle after idle, the panel folding).
     var neoWakeTask: Task<Void, Never>?
@@ -802,6 +809,10 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             machine.forceWings()
         }
         let changed = queue.tick(now: now)
+        // NEO's countdown: its seconds, worked out here from when the timer
+        // ends — nothing is sent per second. A title-only change to the
+        // activity on the island is picked up by the check below.
+        let neoTimersChanged = syncNeoTimers(at: now)
 
         if NotchLog.isVerbose {
             let loc = NSEvent.mouseLocation
@@ -812,7 +823,7 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             log("mouse=\(Int(loc.x)),\(Int(loc.y)) island=\(Int(frame.minX)),\(Int(frame.minY)),\(Int(frame.width))x\(Int(frame.height)) window=\(Int(win.width))x\(Int(win.height)) inside=\(frame.contains(loc)) state=\(machine.presentation) panel=\(panelName) islandState=\(currentIslandState()) key=\(window.isKeyWindow) needsInt=\(window.needsInteraction)")
         }
 
-        if machine.presentation != presentationBefore || !changed.isEmpty || currentActivity != queue.current {
+        if machine.presentation != presentationBefore || !changed.isEmpty || currentActivity != queue.current || neoTimersChanged {
             renderQueue()
         }
     }

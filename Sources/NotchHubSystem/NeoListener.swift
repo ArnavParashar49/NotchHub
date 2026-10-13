@@ -16,7 +16,12 @@ import NotchHubCore
 /// stages (`confirm`, or the one pending in the `hello`) and its end
 /// (`confirm_done`) are facts too: the island's Allow / Cancel. What the core
 /// says about its own settings (the hello's `wake_word` and
-/// `wellbeing_checkins`, and `settings`) is a `NeoCoreSettings`. Of the
+/// `wellbeing_checkins`, and `settings`) is a `NeoCoreSettings`. NEO's timers
+/// are facts for the island's countdown (`NeoTimers`): the ones counting down
+/// when NotchHub connects (the hello's `timers`), then each one starting or
+/// ending (`activity` events of kind `timer`; any other kind is not ours).
+/// Their names are the user's words, kept in memory for the island and never
+/// logged; nothing is ever sent back about them. Of the
 /// binary frames, only the live camera session's preview (NBF1, kind 3) is
 /// read — at most 24 a second, held in memory and never written anywhere.
 ///
@@ -380,8 +385,10 @@ public final class NeoListener: NSObject, SystemListener {
     /// The facts in one message from the core. A card's opening and closing
     /// (`browser_open` / `browser_close`, camera, song) are facts for the
     /// panel; a confirmation staged or over is one for the island's Allow /
-    /// Cancel; everything else — the cards' own state, tool calls, turn
-    /// metadata — is not the island's business and yields nothing.
+    /// Cancel; NEO's timers (the hello's, and `activity` events of kind
+    /// `timer`) are for its countdown; everything else — the cards' own
+    /// state, tool calls, turn metadata — is not the island's business and
+    /// yields nothing.
     public static func facts(in text: String) -> [NeoFact] {
         guard let data = text.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -407,6 +414,13 @@ public final class NeoListener: NSObject, SystemListener {
                let card = cameraCard(live) {
                 facts.append(.cameraCard(card))
                 facts.append(.card(.camera, open: true))
+            }
+            // NEO's timers counting down now: all of them, replacing whatever
+            // the island knew (an empty list says there are none). A core too
+            // old to have timers says nothing, and nothing new comes of it.
+            if let timers = payload["timers"] as? [Any] {
+                let entries = timers.prefix(NeoTimers.maxTimers).compactMap { ($0 as? [String: Any]).flatMap(NeoTimerInfo.init(payload:)) }
+                facts.append(.neoTimers(entries))
             }
             return facts
         case "state":
@@ -450,8 +464,29 @@ public final class NeoListener: NSObject, SystemListener {
         case "confirm_done":
             guard let id = payload["action_id"] as? String, !id.isEmpty else { return [] }
             return [.confirmDone(id)]
+        case "activity":
+            return timerActivity(payload).map { [$0] } ?? []
         default:
             return []
+        }
+    }
+
+    /// One of NEO's timers starting (`op: present`) or over (`op: end`,
+    /// `done` when it went off rather than being cancelled). `nil` for any
+    /// other kind of activity — later kinds may share the event — and for
+    /// anything without an id, or a start without its end time.
+    private static func timerActivity(_ payload: [String: Any]) -> NeoFact? {
+        guard payload["kind"] as? String == "timer" else { return nil }
+        switch payload["op"] as? String {
+        case "present":
+            return NeoTimerInfo(payload: payload).map(NeoFact.neoTimer)
+        case "end":
+            guard let id = NeoTimerInfo.id(payload["id"]) else { return nil }
+            // Only a real boolean says it went off: anything else is a cancel.
+            let done = (payload["done"] as? NSNumber).map { CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue } ?? false
+            return .neoTimerEnd(id: id, title: NeoTimerInfo.title(payload["title"]), done: done)
+        default:
+            return nil
         }
     }
 

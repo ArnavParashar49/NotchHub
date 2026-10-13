@@ -204,8 +204,9 @@ enum SurfaceSnapshots {
     /// the notch hosts NEO — in each state NEO can be in: running with
     /// everything allowed, missing a permission, a core with no NEO.app, not
     /// running, and switched off — and with "Listen for “Neo”" off (the
-    /// microphone only while summoned). Plus the features page, for the NEO tile
-    /// that opens the section. (No scroll view: an image renderer cannot draw one.)
+    /// microphone only while summoned) and with "Show NEO's timers" off. Plus
+    /// the features page, for the NEO tile that opens the section. (No scroll
+    /// view: an image renderer cannot draw one.)
     static func settingsRows(geometry: NotchGeometry) -> [Row] {
         let frame = geometry.frame(for: .settings, content: .default)
         let ready = NeoShellStatus(app: true, accessibility: true, screenRecording: true, openAtLogin: true, version: "2.1.0", hotkey: "⌥⌘")
@@ -238,7 +239,7 @@ enum SurfaceSnapshots {
                 content: AnyView(SettingsView(settings: .constant(settings), onChange: {}, page: .pet, scrolls: false))
             )
         }
-        return cases.map { name, page, model in
+        func neoRow(_ name: String, _ page: SettingsView.Page, _ model: NeoSettingsModel) -> Row {
             var settings = IslandSettings()
             settings.neo = model.featureOn
             return Row(
@@ -249,7 +250,11 @@ enum SurfaceSnapshots {
                     settings: .constant(settings), onChange: {}, neo: model, page: page, scrolls: false
                 ))
             )
-        } + petRows
+        }
+        // NotchHub's own "Show NEO's timers" switched off — after the pet's
+        // page, so every row before keeps its place.
+        let timersOff = NeoSettingsModel(featureOn: true, connected: true, shell: ready, core: listens, showsTimers: false)
+        return cases.map { neoRow($0.0, $0.1, $0.2) } + petRows + [neoRow("NEO — its timers off the island", .neo, timersOff)]
     }
 
     // MARK: - Camera

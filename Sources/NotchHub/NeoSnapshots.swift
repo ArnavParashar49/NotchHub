@@ -9,7 +9,9 @@ import UniformTypeIdentifiers
 /// core or a screen recording. While NEO listens, the island's rim lights
 /// (`NeoWakeOutlineView`). The hardware cutout is masked in black over each
 /// row. An optional filter keeps only
-/// the rows whose name contains it (`--neo-snapshots DIR listening`). The
+/// the rows whose name contains it (`--neo-snapshots DIR listening`; `NEO
+/// timer`: NEO's countdown in the compact bar, from the real model and
+/// surface at a fixed clock). The
 /// last row is NEO's panel (its chat hangs down from the notch, with no pet)
 /// with a stand-in for the page: a web view cannot be rendered offscreen.
 ///
@@ -59,6 +61,47 @@ enum NeoSnapshots {
 
     /// The margin of desktop drawn on either side of the notch.
     static let margin: CGFloat = 360
+
+    /// NEO's countdown as the island carries it: `timers` fed through the
+    /// real model and surface at `now`, as the app drives them — and, with
+    /// `goingOff`, one more that just went off.
+    static func neoTimerActivity(_ timers: [NeoTimerInfo], goingOff: String? = nil, at now: Date) -> Activity? {
+        var model = NeoTimers()
+        var surface = NeoTimerSurface()
+        let queue = ActivityQueue()
+        let started = model.receive(.neoTimers(timers))
+        surface.apply(started, timers: model, shows: true, in: queue, at: now)
+        if let goingOff {
+            let ended = model.receive(.neoTimerEnd(id: "timer:000000000000", title: goingOff, done: true))
+            surface.apply(ended, timers: model, shows: true, in: queue, at: now)
+        }
+        return queue.current
+    }
+
+    /// The compact bar with NEO's timers: the soonest counting down (and a
+    /// second later, as wide), a long name and a wide script cut before the
+    /// clock, an unnamed one past an hour, one restored late, the "done"
+    /// moment, and the countdown while NEO listens.
+    static func neoTimerRows() -> [Row] {
+        let clock = Date(timeIntervalSince1970: 1_760_270_000)
+        func timer(_ id: String, _ title: String, _ seconds: TimeInterval) -> NeoTimerInfo {
+            NeoTimerInfo(id: "timer:\(id)", title: title, endsAt: clock.addingTimeInterval(seconds))
+        }
+        let two = [timer("3f2a9c1b7d4e", "Pasta", 252), timer("a1b2c3d4e5f6", "Timer", 900.5)]
+        let cases: [(String, NeoState, Activity?)] = [
+            ("NEO idle — the soonest of two counts down", .idle, neoTimerActivity(two, at: clock)),
+            ("one second later — the same width", .idle, neoTimerActivity(two, at: clock.addingTimeInterval(1))),
+            ("a long name — cut, the clock whole", .idle, neoTimerActivity([timer("1", "Take the bread out of the oven", 90)], at: clock)),
+            ("a wide script — cut at a music title's width", .idle, neoTimerActivity([timer("2", "パスタを茹でるタイマー長い名前です", 90)], at: clock)),
+            ("unnamed, past an hour", .idle, neoTimerActivity([timer("3", "Timer", 3_852)], at: clock)),
+            ("restored late — 0:00 until NEO says it went off", .idle, neoTimerActivity([timer("4", "Pasta", -40)], at: clock)),
+            ("went off — the done moment", .idle, neoTimerActivity([timer("5", "Tea", 900)], goingOff: "Pasta", at: clock)),
+            ("NEO listening — wake rim lit", .listening, neoTimerActivity(two, at: clock)),
+        ]
+        return cases.map { name, neo, activity in
+            Row(name: "compact (NEO timer), \(name)", state: .compact, neo: neo, activity: activity)
+        }
+    }
 
     /// The island's content size and its frame on the screen for `row`, as
     /// the app would lay it out.
@@ -175,6 +218,7 @@ enum NeoSnapshots {
             Row(name: "expanded (music), thinking", state: .expanded, neo: .thinking, activity: song),
             Row(name: "NEO panel (the chat, \(Int(NeoPanelLayout.standard.width))×\(Int(NeoPanelLayout.standard.height)) under the notch), speaking — no pet", state: .neoPanel, neo: .speaking),
         ]
+        rows += neoTimerRows()
 
         if let filter, !filter.isEmpty {
             rows = rows.filter { $0.name.localizedCaseInsensitiveContains(filter) }
@@ -221,6 +265,9 @@ enum NeoSnapshots {
                 context.restoreGState()
             }
             var line = String(format: "row %d: %@ — island %.0f×%.0f", index, row.name, frame.width, frame.height)
+            if row.activity?.kind == .neoTimer, let text = row.activity?.compactText {
+                line += " — “\(text)”"
+            }
             if row.neo == .listening {
                 let plain = self.scene(Row(name: "", state: row.state, neo: .idle, activity: row.activity, wings: row.wings, dock: row.dock), geometry: geometry).frame
                 let delta = frame.width - plain.width

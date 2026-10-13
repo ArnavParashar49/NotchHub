@@ -12,7 +12,7 @@ command a client sends is echoed to stdout as `CMD <json>`, each connection
 as `OPEN <n>`, the Origin it came with as `ORIGIN <origin>` and its role as
 `ROLE <role>` (`-` for none), so the test can check what a client said.
 
-    neo_stub.py PORT TOKEN [drop | confirm | settings]
+    neo_stub.py PORT TOKEN [drop | confirm | settings | timers]
 
 With `drop`, the first connection is closed by the server after the script,
 so the client's reconnect can be watched; later connections stay open.
@@ -34,6 +34,13 @@ it is refused (`forbidden`); a name it does not know is `unknown`, a value
 that is not a boolean `invalid` — and nothing changes. (The other modes'
 hello says `wake_word` too, except `confirm`'s: an older core, which has no
 such setting.)
+
+With `timers`, the stub plays a core with timers running, as
+neo2/core/tools/system.py and ws.py announce them: the `hello` lists the
+timers counting down now (`timers`, soonest first), then `activity` events
+start one (`op: present`), say one went off (`op: end`, `done: true`) and
+cancel one (`op: end`, `done: false`), with an activity of a later kind in
+between that is not the island's. Nothing a client sends is answered.
 """
 import asyncio
 import json
@@ -47,6 +54,7 @@ TOKEN = sys.argv[2]
 DROP = len(sys.argv) > 3 and sys.argv[3] == "drop"
 CONFIRM = len(sys.argv) > 3 and sys.argv[3] == "confirm"
 SETTINGS = len(sys.argv) > 3 and sys.argv[3] == "settings"
+TIMERS = len(sys.argv) > 3 and sys.argv[3] == "timers"
 CARD_A = {"action_id": "trash:4d15b0099e5a9d0a", "tool": "trash", "summary": "move report.pdf to the Trash",
           "detail": "/Users/me/Documents/report.pdf", "scopes": [], "app": ""}
 CARD_B = {"action_id": "shell:b7f034d65f0f4e1a", "tool": "shell", "summary": "run a command",
@@ -136,6 +144,21 @@ async def handle(ws):
         await send("hello", {"state": "idle", "recent": [], "confirm": None, "problems": [], "host_attached": True,
                              "wake_word": wake_word["on"]})
 
+    async def timers_script():
+        await send("hello", {"state": "thinking", "recent": [], "confirm": None, "problems": [], "host_attached": True,
+                             "timers": [{"id": "timer:3f2a9c1b7d4e", "title": "Pasta", "ends_at": 1760270252.0},
+                                        {"id": "timer:a1b2c3d4e5f6", "title": "Timer", "ends_at": 1760270900.5}]})
+        await asyncio.sleep(0.05)
+
+        def activity(op, id_, title, ends_at, done, kind="timer"):
+            return {"op": op, "id": id_, "kind": kind, "title": title, "ends_at": ends_at, "done": done}
+
+        await send("activity", activity("present", "timer:0123456789ab", "Eggs", 1760270400.0, False))
+        await send("activity", activity("end", "timer:3f2a9c1b7d4e", "Pasta", 1760270252.0, True))
+        await send("activity", activity("present", "reminder:1", "Call mum", 1760270500.0, False, kind="reminder"))
+        await send("activity", activity("end", "timer:0123456789ab", "Eggs", 1760270400.0, False))
+        await send("state", {"state": "idle", "job": ""})
+
     async def set_(cmd):
         """`set`, as the core answers it."""
         name, value = str(cmd.get("name") or ""), cmd.get("value")
@@ -154,7 +177,8 @@ async def handle(ws):
         await send("set_result", {"name": name, "ok": not error, **({"error": error} if error else {})})
 
     clients.add(ws)
-    sender = asyncio.create_task(confirm_script() if CONFIRM else settings_script() if SETTINGS else script())
+    sender = asyncio.create_task(
+        confirm_script() if CONFIRM else settings_script() if SETTINGS else timers_script() if TIMERS else script())
     try:
         if DROP and n == 1:
             await sender

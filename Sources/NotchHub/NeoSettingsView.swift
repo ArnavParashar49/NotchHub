@@ -7,7 +7,8 @@ import SwiftUI
 /// showed and did is here instead — whether NEO runs, the two permissions
 /// macOS grants it, its chat, its keys, its logs, restart, erase, Open at
 /// Login, quit — and one switch of the core's own: "Listen for “Neo”", the
-/// microphone always on for the wake word, or closed until NEO is summoned. A view of `NeoSettingsModel` and nothing more: every tap is a
+/// microphone always on for the wake word, or closed until NEO is summoned —
+/// and one of NotchHub's: "Show NEO's timers", the countdown on the island. A view of `NeoSettingsModel` and nothing more: every tap is a
 /// `NeoSettingsIntent` handed to the app, which alone decides what it means.
 /// Rows whose control has nobody to act on it (NEO is off, or not running)
 /// stay in place, dimmed, so the section never jumps around as NEO comes and
@@ -24,6 +25,8 @@ struct NeoSettingsSection: View {
         VStack(alignment: .leading, spacing: SettingsMetrics.groupSpacing) {
             group("In the notch") {
                 featureRow
+                separator
+                timersRow
             }
             group("Status") {
                 statusRow(
@@ -113,6 +116,42 @@ struct NeoSettingsSection: View {
             .accessibilityValue(featureOn ? "On" : "Off")
         }
         .padding(10)
+    }
+
+    /// "Show NEO's timers": NotchHub's own switch — a countdown on the island
+    /// while one of NEO's timers runs. It works whether or not NEO is
+    /// running (it is the island's, not NEO's); only NEO off in the notch
+    /// dims it.
+    private var timersRow: some View {
+        let isOn = model.showsTimers
+        let enabled = model.isEnabled(.showTimers(!isOn))
+        return HStack(spacing: 0) {
+            rowIcon("timer", lit: enabled && isOn)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Show NEO's timers")
+                    .font(NeoSettingsMetrics.titleFont)
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .lineLimit(1)
+                Text(model.timersCaption)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(DesignTokens.textTertiary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Button { onIntent(.showTimers(!isOn)) } label: {
+                SwitchIndicator(isOn: isOn, tint: SettingsMetrics.ink)
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Show NEO's timers")
+            .accessibilityValue(isOn ? "On" : "Off")
+            .accessibilityHint(model.timersCaption)
+        }
+        .padding(.trailing, 10)
+        .padding(.vertical, 8)
+        .frame(minHeight: NeoSettingsMetrics.rowHeight)
+        .opacity(enabled ? 1 : NeoSettingsMetrics.disabledOpacity)
+        .disabled(!enabled)
     }
 
     // MARK: - Status

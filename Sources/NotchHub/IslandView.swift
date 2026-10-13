@@ -415,6 +415,8 @@ struct IslandView: View {
                         .truncationMode(.tail)
                 } else if activity.kind == .meeting {
                     meetingCompactControls
+                } else if activity.kind == .neoTimer {
+                    neoTimerCompactLine(activity)
                 } else if let text = activity.compactText {
                     Text(text)
                         .font(DesignTokens.compactFont)
@@ -427,6 +429,29 @@ struct IslandView: View {
             .frame(width: balancedSide, alignment: .trailing)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// NEO's countdown on the compact bar: the timer's name (cut short past
+    /// `IslandMetrics.maxCompactNeoTimerNameWidth`, never the clock), then
+    /// the time left — or "· done" — in tabular digits, so the seconds tick
+    /// without the bar moving. Laid out as `IslandMetrics.compact` measures it.
+    private func neoTimerCompactLine(_ activity: Activity) -> some View {
+        HStack(spacing: IslandMetrics.neoTimerValueSpacing) {
+            Text(activity.title)
+                .font(DesignTokens.compactFont)
+                .foregroundStyle(DesignTokens.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: IslandMetrics.maxCompactNeoTimerNameWidth, alignment: .trailing)
+            if let value = activity.subtitle {
+                Text(value)
+                    .font(DesignTokens.compactFont)
+                    .monospacedDigit()
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+        }
     }
 
     /// Mute and leave on a call's compact bar, placed where

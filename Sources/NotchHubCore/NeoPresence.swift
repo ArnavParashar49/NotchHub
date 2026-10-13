@@ -53,7 +53,10 @@ public struct NeoPresenceModel: Equatable, Sendable {
             let wasIdle = hold.current == .idle
             hold.receive(next, at: now)
             noteIdle(wasIdle: wasIdle, at: now)
-        case .transcript, .note, .error, .card, .songCard, .cameraCard, .cameraFrame, .woke, .confirm, .confirmDone:
+        case .transcript, .note, .error, .card, .songCard, .cameraCard, .cameraFrame, .woke, .confirm, .confirmDone,
+             .neoTimers, .neoTimer, .neoTimerEnd:
+            // NEO's timers count down on their own surface (`NeoTimers`): a
+            // timer running is not NEO being busy, and never poses the pet.
             break
         }
         lastReported = (state, isActive(at: now))

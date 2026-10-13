@@ -80,6 +80,17 @@ public enum NeoFact: Equatable, Sendable {
     /// The confirmation with this action id is over (`confirm_done`):
     /// answered — here, by voice, in NEO's page — superseded or expired.
     case confirmDone(String)
+    /// Every timer of NEO's counting down now, from the hello's `timers`
+    /// (soonest first): it replaces whatever the island knew. Only a core
+    /// that has timers to tell says it; an older one's hello yields nothing.
+    case neoTimers([NeoTimerInfo])
+    /// One of NEO's timers started, or came back after a restart (an
+    /// `activity` event, `op: present`): kept by its id.
+    case neoTimer(NeoTimerInfo)
+    /// One of NEO's timers is over (`activity`, `op: end`): it went off
+    /// (`done`), or it was cancelled. `title` is the core's, for a timer the
+    /// island had not heard of.
+    case neoTimerEnd(id: String, title: String, done: Bool)
 }
 
 /// Keeps each NEO state on screen for at least `minDwell`, as NEO's own

@@ -97,6 +97,15 @@ enum IslandMetrics {
             // The call timer beside the glyph; mute and leave on the trail.
             lead += DesignTokens.space8 + textWidth("00:00:00")
             trail += MeetingControlLayout.compactControlsWidth
+        } else if activity.kind == .neoTimer {
+            // NEO's countdown: its name, cut past a music title's width, then
+            // the clock in tabular digits (`IslandView`), measured the same
+            // way — every second is as wide as the last, so the bar holds
+            // still as the clock runs instead of breathing.
+            trail += min(textWidth(activity.title), maxCompactNeoTimerNameWidth)
+            if let value = activity.subtitle {
+                trail += neoTimerValueSpacing + textWidth(value, monospacedDigits: true)
+            }
         } else if let text = activity.compactText {
             trail += textWidth(text)
             if let detail = activity.compactDetail {
@@ -135,14 +144,26 @@ enum IslandMetrics {
     /// Keeps the island proportional and prevents long titles from sprawling across the menu bar.
     static var maxCompactMusicTextWidth: CGFloat { 110 }
 
+    /// The widest a NEO timer's name grows in the compact bar before it is
+    /// cut: a music title's width, so a long name (or a wide script) never
+    /// pushes the clock out of the island.
+    static var maxCompactNeoTimerNameWidth: CGFloat { maxCompactMusicTextWidth }
+    /// The gap between a NEO timer's name and its clock.
+    static var neoTimerValueSpacing: CGFloat { DesignTokens.space4 }
+
     /// Measures a string in the rounded system font, matching how the compact
     /// label renders, so the island sizes itself to the text it will draw.
     ///
     /// Rounded UP: SwiftUI lays text out on whole pixels, so a fractional
     /// measurement of e.g. 40.4pt would allocate 40 and truncate. Ceiling it
     /// guarantees the frame is never narrower than the glyphs.
-    static func textWidth(_ string: String) -> CGFloat {
-        let base = NSFont.systemFont(ofSize: DesignTokens.compactFontSize, weight: .semibold)
+    ///
+    /// `monospacedDigits` measures tabular figures (`.monospacedDigit()`), for
+    /// a readout whose digits change while it shows.
+    static func textWidth(_ string: String, monospacedDigits: Bool = false) -> CGFloat {
+        let base = monospacedDigits
+            ? NSFont.monospacedDigitSystemFont(ofSize: DesignTokens.compactFontSize, weight: .semibold)
+            : NSFont.systemFont(ofSize: DesignTokens.compactFontSize, weight: .semibold)
         let font: NSFont
         if let descriptor = base.fontDescriptor.withDesign(.rounded),
            let rounded = NSFont(descriptor: descriptor, size: DesignTokens.compactFontSize) {

@@ -213,6 +213,37 @@ func runSelfTest() -> Int32 {
         check(notchGap == DesignTokens.compactInset, "visualizer: an inset clear of the notch in a \(Int(side))-pt lane")
     }
 
+    // --- NEO's timers on the island ---
+    // The soonest of NEO's timers counts down in the compact bar, as NEO's
+    // own kind (never the focus timer's); its seconds tick without the bar
+    // changing width, a long name is cut so the clock always shows, and with
+    // no timer nothing of NEO's is on the island.
+    let timerClock = Date(timeIntervalSince1970: 1_760_270_000)
+    var neoTimerModel = NeoTimers()
+    var neoTimerSurface = NeoTimerSurface()
+    let timerQueue = ActivityQueue()
+    check(!neoTimerSurface.sync(neoTimerModel, shows: true, in: timerQueue, at: timerClock) && timerQueue.isEmpty,
+          "NEO timers: none running, nothing on the island")
+    let pastaTimer = NeoTimerInfo(id: "timer:3f2a9c1b7d4e", title: "Pasta", endsAt: timerClock.addingTimeInterval(252))
+    let timerChange = neoTimerModel.receive(.neoTimers([pastaTimer]))
+    neoTimerSurface.apply(timerChange, timers: neoTimerModel, shows: true, in: timerQueue, at: timerClock)
+    check(timerQueue.current?.kind == .neoTimer && timerQueue.current?.compactText == "Pasta 4:12" && timerQueue.current?.priority == 70,
+          "NEO timers: the soonest counts down as NEO's own kind, at the timer's priority (\(timerQueue.current?.compactText ?? "none"))")
+    let secondWidths = Set(["4:12", "4:11", "4:10", "1:11", "0:00", "8:88"].map {
+        IslandMetrics.compact(Activity(kind: .neoTimer, title: "Pasta", subtitle: $0), petSlot: PetLayout.barSlot).compactTrail
+    })
+    check(secondWidths.count == 1, "NEO timers: the compact bar holds still as the seconds tick (\(secondWidths.sorted()))")
+    let tabular = IslandMetrics.textWidth("0:00", monospacedDigits: true)
+    check(tabular == IslandMetrics.textWidth("1:11", monospacedDigits: true) && tabular == IslandMetrics.textWidth("8:88", monospacedDigits: true),
+          "NEO timers: the clock is measured in tabular digits, as it is drawn")
+    let longLine = NeoTimers.countdownLine(
+        NeoTimerInfo(id: "timer:a", title: String(repeating: "W", count: 40), endsAt: timerClock.addingTimeInterval(3_852)), at: timerClock)
+    let longRow = IslandMetrics.compact(Activity(kind: .neoTimer, title: longLine.name, subtitle: longLine.value), petSlot: PetLayout.barSlot)
+    let plainRow = IslandMetrics.compact(Activity(kind: .neoTimer, title: "Pasta", subtitle: "1:04:12"), petSlot: PetLayout.barSlot)
+    check(longLine.value == "1:04:12"
+            && longRow.compactTrail - plainRow.compactTrail <= IslandMetrics.maxCompactNeoTimerNameWidth - IslandMetrics.textWidth("Pasta"),
+          "NEO timers: a long name is cut at a music title's width, so the clock always fits (\(Int(longRow.compactTrail)) pt a side)")
+
     // --- NEO's Allow / Cancel under the notch ---
     // A staged confirmation drops two buttons under the notch, over whatever
     // the island shows (but never doubled with NEO's own chat); Allow counts

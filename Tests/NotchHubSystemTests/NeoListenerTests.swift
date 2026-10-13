@@ -274,6 +274,58 @@ struct NeoListenerParsingTests {
         #expect(NeoSetting.wellbeingCheckins(false).command == #"{"cmd":"set","name":"wellbeing_checkins","value":false}"#)
     }
 
+    @Test("NEO's timers: the hello's list replaces them all; activity events start and end one; other kinds are not ours")
+    func timers() {
+        let pasta = NeoTimerInfo(id: "timer:3f2a9c1b7d4e", title: "Pasta", endsAt: Date(timeIntervalSince1970: 1_760_270_252))
+        let unnamed = NeoTimerInfo(id: "timer:a1b2c3d4e5f6", title: "Timer", endsAt: Date(timeIntervalSince1970: 1_760_270_900.5))
+        // The hello: after everything else it says, the timers counting down now.
+        let hello = #"{"type":"hello","data":{"state":"idle","recent":[],"confirm":null,"timers":[{"id":"timer:3f2a9c1b7d4e","title":"Pasta","ends_at":1760270252.0},{"id":"timer:a1b2c3d4e5f6","title":"Timer","ends_at":1760270900.5}]}}"#
+        #expect(NeoListener.facts(in: hello) == [.state(.idle), .neoTimers([pasta, unnamed])])
+        // None running: said, so whatever the island knew is replaced by nothing.
+        #expect(NeoListener.facts(in: #"{"type":"hello","data":{"state":"idle","timers":[]}}"#) == [.state(.idle), .neoTimers([])])
+        // An older core says nothing about timers, and nothing new comes of its hello.
+        #expect(NeoListener.facts(in: #"{"type":"hello","data":{"state":"idle","recent":[]}}"#) == [.state(.idle)])
+        #expect(NeoListener.facts(in: #"{"type":"hello","data":{"state":"idle","timers":null}}"#) == [.state(.idle)])
+        // A broken entry is skipped, the rest kept.
+        let mixed = #"{"type":"hello","data":{"state":"idle","timers":[{"title":"no id","ends_at":1},{"id":"timer:3f2a9c1b7d4e","title":"Pasta","ends_at":1760270252},{"id":"timer:x","ends_at":"soon"},7]}}"#
+        #expect(NeoListener.facts(in: mixed) == [.state(.idle), .neoTimers([pasta])])
+
+        // Started (or restored after a restart), went off, cancelled.
+        let present = #"{"type":"activity","data":{"op":"present","id":"timer:3f2a9c1b7d4e","kind":"timer","title":"Pasta","ends_at":1760270252.0,"done":false},"ts":1760270000.12}"#
+        #expect(NeoListener.facts(in: present) == [.neoTimer(pasta)])
+        let wentOff = #"{"type":"activity","data":{"op":"end","id":"timer:3f2a9c1b7d4e","kind":"timer","title":"Pasta","ends_at":1760270252.0,"done":true},"ts":1760270252.31}"#
+        #expect(NeoListener.facts(in: wentOff) == [.neoTimerEnd(id: "timer:3f2a9c1b7d4e", title: "Pasta", done: true)])
+        let cancelled = #"{"type":"activity","data":{"op":"end","id":"timer:3f2a9c1b7d4e","kind":"timer","title":"Pasta","ends_at":1760270252.0,"done":false},"ts":1760270100.02}"#
+        #expect(NeoListener.facts(in: cancelled) == [.neoTimerEnd(id: "timer:3f2a9c1b7d4e", title: "Pasta", done: false)])
+        // An end needs only its id: the island removes by id.
+        #expect(NeoListener.facts(in: #"{"type":"activity","data":{"op":"end","id":"timer:3f2a9c1b7d4e","kind":"timer"}}"#)
+            == [.neoTimerEnd(id: "timer:3f2a9c1b7d4e", title: "Timer", done: false)])
+        // Only a real boolean says it went off.
+        #expect(NeoListener.facts(in: #"{"type":"activity","data":{"op":"end","id":"timer:3f2a9c1b7d4e","kind":"timer","title":"Pasta","done":1}}"#)
+            == [.neoTimerEnd(id: "timer:3f2a9c1b7d4e", title: "Pasta", done: false)])
+        // Already past (restored late after the Mac slept): still a timer — the island shows 0:00.
+        #expect(NeoListener.facts(in: #"{"type":"activity","data":{"op":"present","id":"timer:3f2a9c1b7d4e","kind":"timer","title":"Pasta","ends_at":1000.0,"done":false}}"#)
+            == [.neoTimer(NeoTimerInfo(id: "timer:3f2a9c1b7d4e", title: "Pasta", endsAt: Date(timeIntervalSince1970: 1000)))])
+        // The title is the user's (or a model's) words: one plain line, at most 40 characters.
+        #expect(NeoListener.facts(in: #"{"type":"activity","data":{"op":"present","id":"timer:3f2a9c1b7d4e","kind":"timer","title":"Pasta\nboil‮","ends_at":1760270252.0,"done":false}}"#)
+            == [.neoTimer(NeoTimerInfo(id: "timer:3f2a9c1b7d4e", title: "Pasta boil", endsAt: pasta.endsAt))])
+
+        // Later kinds may share the event: not ours. Nor is anything malformed.
+        for other in [
+            #"{"op":"present","id":"reminder:1","kind":"reminder","title":"Call","ends_at":1760270252.0,"done":false}"#,
+            #"{"op":"present","id":"timer:3f2a9c1b7d4e","title":"Pasta","ends_at":1760270252.0,"done":false}"#,
+            #"{"op":"update","id":"timer:3f2a9c1b7d4e","kind":"timer","title":"Pasta","ends_at":1760270252.0,"done":false}"#,
+            #"{"op":"present","kind":"timer","title":"Pasta","ends_at":1760270252.0,"done":false}"#,
+            #"{"op":"present","id":"timer:3f2a9c1b7d4e","kind":"timer","title":"Pasta","done":false}"#,
+            #"{"op":"present","id":"timer:3f2a9c1b7d4e","kind":"timer","title":"Pasta","ends_at":true,"done":false}"#,
+            #"{"op":"end","kind":"timer","title":"Pasta","done":true}"#,
+            #"{"op":"end","id":42,"kind":"timer","done":true}"#,
+        ] {
+            #expect(NeoListener.facts(in: #"{"type":"activity","data":\#(other),"ts":1}"#).isEmpty, "\(other)")
+        }
+        #expect(NeoListener.facts(in: #"{"type":"activity","ts":1}"#).isEmpty)
+    }
+
     @Test("NEO summoned by hand (the hotkey, the tray) is a fact for the panel")
     func woke() {
         #expect(NeoListener.facts(in: #"{"type":"woke","data":{"source":"ui"},"ts":1}"#) == [.woke])
@@ -590,6 +642,39 @@ struct NeoListenerStubTests {
         ])
         #expect(recorder.snapshot.suffix(2) == [.confirmDone(second.actionID), .state(.idle)])
         #expect(recorder.snapshot.filter { $0 == .confirmDone(first.actionID) }.count == 1) // the stale answer closed nothing
+    }
+
+    @Test("NEO's timers arrive over the socket: the hello's, then started, went off and cancelled — and nothing is sent back for them", .enabled(if: NeoListenerStubTests.available))
+    func timers() async throws {
+        let stub = try Stub(drop: false, mode: "timers")
+        defer { stub.stop() }
+        #expect(await waitFor { stub.lines.contains("READY") })
+
+        let recorder = Recorder()
+        let listener = NeoListener(url: URL(string: "ws://127.0.0.1:\(stub.port)/")!, tokenFile: stub.tokenFile, reconnectDelay: 0.2) { recorder.record($0) }
+        listener.start()
+        defer { listener.stop() }
+
+        let pasta = NeoTimerInfo(id: "timer:3f2a9c1b7d4e", title: "Pasta", endsAt: Date(timeIntervalSince1970: 1_760_270_252))
+        let unnamed = NeoTimerInfo(id: "timer:a1b2c3d4e5f6", title: "Timer", endsAt: Date(timeIntervalSince1970: 1_760_270_900.5))
+        let eggs = NeoTimerInfo(id: "timer:0123456789ab", title: "Eggs", endsAt: Date(timeIntervalSince1970: 1_760_270_400))
+        #expect(await waitFor { recorder.snapshot.contains(.state(.idle)) })
+        #expect(recorder.snapshot == [
+            .connected(true),
+            .state(.thinking),
+            .neoTimers([pasta, unnamed]),
+            .neoTimer(eggs),
+            .neoTimerEnd(id: pasta.id, title: "Pasta", done: true),
+            .neoTimerEnd(id: eggs.id, title: "Eggs", done: false),
+            // (a later kind of activity in between: not ours)
+            .state(.idle),
+        ])
+        // The island drives them through its own model: what is left is the unnamed one.
+        var model = NeoTimers()
+        recorder.snapshot.forEach { model.receive($0) }
+        #expect(model.running == [unnamed.id: unnamed])
+        // Display only: no timer command ever leaves.
+        #expect(stub.lines.filter { $0.hasPrefix("CMD ") } == ["CMD " + NeoListener.cameraOffCommand, "CMD " + NeoListener.songHelloCommand])
     }
 
     @Test("hosting NEO's UI it says so on connecting, and hands the UI back as it stops", .enabled(if: NeoListenerStubTests.available))

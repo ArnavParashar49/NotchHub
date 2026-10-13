@@ -13,7 +13,10 @@ import NotchHubSystem
 /// up (`NeoWakeOutlineView`, its arithmetic `NeoWakeLight`): a soft rim just
 /// outside the black, whatever shape the island has, that takes no room and
 /// never changes the island's size. Camera and song cards get NotchHub's own
-/// native surfaces (`NeoCameraSurface`, the song activity).
+/// native surfaces (`NeoCameraSurface`, the song activity). NEO's timers get
+/// a countdown (`NeoTimers`, `NeoTimerSurface`): the one thing of NEO's the
+/// island shows while NEO itself is idle, because the user set the timer —
+/// and only while "Show NEO's timers" is on.
 /// The models are pure and clock-driven: they say when something will change
 /// on its own (a held state becoming due, the settle after idle, the panel
 /// folding), and
@@ -50,6 +53,8 @@ extension NotchHubApp {
         // A confirmation staged, answered elsewhere or lapsed — or the core
         // gone, with whatever it was waiting on.
         let confirmChanged = neoConfirm.receive(fact, at: now)
+        // A timer started, over or gone off — or the core gone, with them all.
+        let timersChanged = neoTimersReceive(fact, at: now)
         switch fact {
         case let .card(kind, open):
             switch kind {
@@ -119,7 +124,37 @@ extension NotchHubApp {
         } else {
             refreshNeoPet()
         }
+        if timersChanged {
+            renderQueue()
+        }
         scheduleNeoWake(neoNextWake(at: now))
+    }
+
+    // MARK: - NEO's timers
+
+    /// Whether NEO's timers may be on the island now: the user's switch, and
+    /// NEO here to have them.
+    var neoTimersShow: Bool {
+        neoShowsTimers && neoPresent
+    }
+
+    /// Takes a fact into NEO's timers and the countdown. Returns whether the
+    /// island must render for it.
+    func neoTimersReceive(_ fact: NeoFact, at now: Date) -> Bool {
+        let change = neoTimers.receive(fact)
+        if change != .none {
+            // Counts only: the names are the user's words and stay off the log.
+            log("neo timers: \(neoTimers.running.count) running\(change == .changed ? "" : ", one went off")")
+        }
+        return neoTimerSurface.apply(change, timers: neoTimers, shows: neoTimersShow, in: queue, at: now)
+    }
+
+    /// Brings the countdown in line with NEO's timers and the switch — every
+    /// tick (its seconds), and when the switch moves. Returns whether the
+    /// island must render for it. Costs nothing while NEO has no timers.
+    @discardableResult
+    func syncNeoTimers(at now: Date = Date()) -> Bool {
+        neoTimerSurface.sync(neoTimers, shows: neoTimersShow, in: queue, at: now)
     }
 
     /// The state of the NEO camera card on the island, if one shows.
@@ -378,5 +413,30 @@ extension NotchHubApp {
 
     func runNeoDemoRound(_ round: Int) {
         neoDemoRound?(round)
+    }
+
+    /// `--neo-timer-demo`: NEO's timers on the island without a core, fed
+    /// in as the listener would: two set (the soonest, Pasta, counts down),
+    /// Pasta going off at 20 s ("Pasta · done" for 5 s, then Tea), Eggs set
+    /// at 30 s and cancelled at 40 s, Tea going off at 95 s — and then
+    /// nothing of NEO's on the island.
+    func runNeoTimerDemo() {
+        let start = Date()
+        let pasta = NeoTimerInfo(id: "timer:000000000001", title: "Pasta", endsAt: start.addingTimeInterval(20))
+        let tea = NeoTimerInfo(id: "timer:000000000002", title: "Tea", endsAt: start.addingTimeInterval(95))
+        let eggs = NeoTimerInfo(id: "timer:000000000003", title: "Eggs", endsAt: start.addingTimeInterval(50))
+        let steps: [(TimeInterval, NeoFact)] = [
+            (0, .connected(true)),
+            (0, .state(.idle)),
+            (0, .neoTimers([pasta, tea])),
+            (20, .neoTimerEnd(id: pasta.id, title: pasta.title, done: true)),
+            (30, .neoTimer(eggs)),
+            (40, .neoTimerEnd(id: eggs.id, title: eggs.title, done: false)),
+            (95, .neoTimerEnd(id: tea.id, title: tea.title, done: true)),
+        ]
+        for (delay, fact) in steps {
+            after(delay) { app in app.neoReceive(fact) }
+        }
+        log("neo-timer-demo: Pasta goes off at 20 s, Eggs is set at 30 s and cancelled at 40 s, Tea goes off at 95 s")
     }
 }

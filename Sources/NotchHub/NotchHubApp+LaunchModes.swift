@@ -139,6 +139,13 @@ extension NotchHubApp {
         } else if arguments.contains("--camera") {
             startMonitor()
             after(0.6) { $0.toggleCamera() }
+        } else if arguments.contains("--neo-timer-demo") {
+            // NEO's timers counting down on the real island, scripted — NEO's
+            // own listener is never started, so no core is asked anything.
+            featureSettings.setEnabled(.neo, enabled: false)
+            startMonitor()
+            featureSettings.setEnabled(.neo, enabled: true)
+            after(0.6) { $0.runNeoTimerDemo() }
         } else if arguments.contains("--neo-demo") {
             // The pet posing as NEO through a scripted turn, with the live
             // listeners (but not NEO's own) so it can be seen on the real island.
@@ -261,6 +268,9 @@ extension NotchHubApp {
     /// Returns the island to its invisible idle state.
     func returnToIdle() {
         queue.removeAll()
+        // NEO's countdown went with everything else, and stays away until
+        // NEO's timers change — rather than coming straight back on the next tick.
+        neoTimerSurface.dismiss()
         machine.setActivity(nil)
         machine.send(.dismissed)
         renderIsland(stackCount: 0)

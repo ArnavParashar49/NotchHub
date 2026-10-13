@@ -151,7 +151,8 @@ public struct NeoConfirmModel: Equatable, Sendable {
             if card?.actionID == id { clear() }
         case .connected(false):
             clear() // nobody is there to take an answer
-        case .connected(true), .state, .transcript, .note, .error, .card, .songCard, .cameraCard, .cameraFrame, .woke:
+        case .connected(true), .state, .transcript, .note, .error, .card, .songCard, .cameraCard, .cameraFrame, .woke,
+             .neoTimers, .neoTimer, .neoTimerEnd:
             break
         }
         return before.0 != card || before.1 != isShowing

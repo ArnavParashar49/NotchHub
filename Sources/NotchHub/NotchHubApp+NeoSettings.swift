@@ -19,6 +19,9 @@ import NotchHubSystem
 /// (`SystemMonitor.neoSet`); the switch moves when the core says it did
 /// (`neoSettings` events) — never on the tap alone, so it always shows what
 /// the microphone is really doing.
+///
+/// And one row is NotchHub's own: "Show NEO's timers", whether the island
+/// counts NEO's timers down (`NeoTimerPreference`). NEO never hears of it.
 extension NotchHubApp {
 
     /// What the NEO section shows right now.
@@ -28,7 +31,8 @@ extension NotchHubApp {
             featureOn: panel == .settings ? settingsModel.neo : featureSettings.isEnabled(.neo),
             connected: neoPresence.isConnected,
             shell: neoShellStatus,
-            core: neoCoreSettings
+            core: neoCoreSettings,
+            showsTimers: neoShowsTimers
         )
     }
 
@@ -68,6 +72,13 @@ extension NotchHubApp {
             // The core's own setting: asked of the core, which answers
             // everyone with where the switch now stands.
             if let setting = intent.setting { monitor?.neoSet(setting) }
+        case let .showTimers(on):
+            // NotchHub's own: kept here, applied at once — off takes NEO's
+            // countdown off the island, on brings back any still running.
+            neoShowsTimers = on
+            NeoTimerPreference.save(on)
+            if syncNeoTimers() { renderQueue() }
+            if panel == .settings { refreshPanel() }
         }
     }
 
