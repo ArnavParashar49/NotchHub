@@ -527,6 +527,77 @@ struct LidAwakeControllerTests {
         #expect(rig.changes == before + 5)
         #expect(rig.mac.calls.isEmpty)
     }
+
+    @Test("the dashboard's lid chip: a click is the Settings switch — on (lit, through the same first-time setup), paused (the dot), off — and every change is heard, so the open dashboard redraws")
+    func dashboardChip() {
+        let rig = Rig()
+        rig.controller.start()
+        var chip: DashboardLidChip { DashboardLidChip(rig.controller.model) }
+        /// What the dashboard does with `.lidAwake`: the chip's click through
+        /// the page's own entry point.
+        func click() {
+            if let intent = DashboardLidChip.click(rig.controller.model) { rig.controller.handle(intent) }
+        }
+        #expect(chip == .off)
+
+        // The first time: the same one dialog installs the helper, then sleep
+        // goes off through it — exactly as the switch in Settings.
+        var heard = rig.changes
+        click()
+        #expect(rig.mac.calls.count == 2 && rig.mac.calls[0].hasPrefix("admin: set -e") && rig.mac.calls[1] == "sudo -n pmset 1")
+        #expect(rig.savedSettings.enabled && rig.mac.sleepDisabled && rig.controller.engine.isKeepingAwake)
+        #expect(chip == .awake && rig.changes > heard)
+
+        // Unplugged: the guard lets the Mac sleep; the switch stays on.
+        heard = rig.changes
+        rig.power.set(PowerSnapshot(onAC: false, batteryPercent: 90))
+        #expect(!rig.mac.sleepDisabled && rig.savedSettings.enabled && chip == .waiting && rig.changes > heard)
+
+        // A click while paused turns the switch off, as the page's would.
+        click()
+        #expect(!rig.savedSettings.enabled && !rig.mac.sleepDisabled && chip == .off)
+
+        // Plugged in and clicked with the command still running: the dot at
+        // once, a second click does nothing, and the light when it lands.
+        rig.power.set(PowerSnapshot(onAC: true, batteryPercent: 90))
+        rig.background.inline = false
+        click()
+        #expect(rig.controller.model.status == .switching(.on) && chip == .waiting)
+        let calls = rig.mac.calls
+        click()
+        #expect(rig.savedSettings.enabled && DashboardLidChip.click(rig.controller.model) == nil)
+        rig.background.runPending()
+        #expect(rig.mac.calls == calls + ["sudo -n pmset 1"] && chip == .awake)
+    }
+
+    @Test("the dashboard's lid chip never looks idle while a closed lid won't sleep the Mac: switched off with the dialog cancelled, or sleep turned off outside NotchHub — the dot")
+    func dashboardChipSleepStillOff() {
+        // Kept awake, then the helper stops working: the chip's click turns
+        // the switch off, the helper is refused, and the one dialog to put
+        // sleep back is cancelled — the switch is off, sleep is not.
+        let rig = Rig(settings: LidAwakeSettings(enabled: true), owns: true, sleepDisabled: true, helper: true)
+        rig.controller.start()
+        var chip: DashboardLidChip { DashboardLidChip(rig.controller.model) }
+        #expect(chip == .awake)
+        rig.mac.helperWorks = false
+        rig.mac.adminAnswer = .cancelled
+        let intent = DashboardLidChip.click(rig.controller.model)
+        #expect(intent == .setEnabled(false))
+        if let intent { rig.controller.handle(intent) }
+        #expect(rig.mac.calls.suffix(2) == ["sudo -n pmset 0", "admin: /usr/bin/pmset -a disablesleep 0"])
+        #expect(!rig.savedSettings.enabled && rig.mac.sleepDisabled && rig.controller.engine.isKeepingAwake)
+        #expect(rig.controller.model.status == .stillOff && chip == .waiting)
+        // The helper works again and the retry puts sleep back: plain.
+        rig.mac.helperWorks = true
+        rig.scheduler.fire(delay: LidAwakeController.restoreRetryInterval)
+        #expect(!rig.mac.sleepDisabled && rig.controller.model.status == .normal && chip == .off)
+
+        // SleepDisabled 1 that NotchHub did not set, the switch off: the dot.
+        let outside = Rig(sleepDisabled: true)
+        outside.controller.start()
+        #expect(outside.controller.model.status == .outside && DashboardLidChip(outside.controller.model) == .waiting)
+        #expect(outside.mac.calls.isEmpty)
+    }
 }
 
 /// An NSWorkspace whose running list is set by hand, with KVO as the real one.

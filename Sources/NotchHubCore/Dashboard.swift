@@ -144,6 +144,9 @@ public enum DashboardAction: String, CaseIterable, Sendable {
     case settings
     case join
     case openPlayer
+    /// "Keep working with the lid closed": the same switch as Settings →
+    /// Lid Closed (`DashboardLidChip`).
+    case lidAwake
     case timer
     case teleprompter
     case camera
@@ -175,10 +178,32 @@ public enum DashboardLayout {
 
     public static let barHeight: CGFloat = 24
     public static let chipSpacing: CGFloat = 10
-    public static let timerChipWidth: CGFloat = 76
-    /// The glyph-only chips: the teleprompter and the camera.
+    /// The glyph-only chips: the lid, the timer, the teleprompter and the
+    /// camera. (The timer's chip is a glyph too: a running stopwatch shows
+    /// on the compact island, so the chip only lights up.)
     public static let glyphChipWidth: CGFloat = 28
+    /// The Tray's chip, which carries its count.
     public static let trayChipWidth: CGFloat = 56
+
+    /// The quick actions on the bottom bar, left to right. They are placed
+    /// from the trailing inset, so the Tray stays put as chips join it.
+    public static let quickActions: [DashboardAction] = [.lidAwake, .timer, .teleprompter, .camera, .tray]
+
+    /// A quick action's chip width (`0` for an action that isn't on the bar).
+    public static func chipWidth(_ action: DashboardAction) -> CGFloat {
+        switch action {
+        case .tray: return trayChipWidth
+        case .lidAwake, .timer, .teleprompter, .camera: return glyphChipWidth
+        case .settings, .join, .openPlayer: return 0
+        }
+    }
+
+    /// The row of chips, the gaps between them included: 4 × 28 + 56 +
+    /// 4 × 10 = 208 pt — 10 pt less than the worded 76-pt Timer chip took
+    /// before the lid chip joined, so the status on the left has more room.
+    public static var quickActionsWidth: CGFloat {
+        quickActions.map(chipWidth).reduce(0, +) + chipSpacing * CGFloat(quickActions.count - 1)
+    }
 
     /// The "···" settings control, in the notch strip beside the cutout.
     public static let moreSize = CGSize(width: 32, height: 22)
@@ -223,15 +248,12 @@ public enum DashboardLayout {
         // Tray stays put as chips are added beside it.
         let barY = frame.minY + bottomInset
         var x = frame.maxX - horizontalInset
-        func chip(_ action: DashboardAction, _ width: CGFloat) {
+        for action in quickActions.reversed() {
+            let width = chipWidth(action)
             x -= width
             result.append((action, CGRect(x: x, y: barY, width: width, height: barHeight)))
             x -= chipSpacing
         }
-        chip(.tray, trayChipWidth)
-        chip(.camera, glyphChipWidth)
-        chip(.teleprompter, glyphChipWidth)
-        chip(.timer, timerChipWidth)
         return result
     }
 
@@ -240,5 +262,53 @@ public enum DashboardLayout {
         actions(in: frame, notchInset: notchInset, focus: focus)
             .first { $0.rect.insetBy(dx: -3, dy: -3).contains(point) }?
             .action
+    }
+}
+
+// MARK: - Lid chip
+
+/// The lid chip on the quick-action bar: Settings → Lid Closed's "Keep
+/// working with the lid closed" switch, one click from the dashboard.
+///
+/// A view of `LidSettingsModel`, as the page is, so the chip and the page
+/// cannot disagree; a click is the page's own tap on the switch.
+public enum DashboardLidChip: Equatable, Sendable {
+    /// The switch is off and a closed lid sleeps the Mac: a plain glyph,
+    /// like any idle chip.
+    case off
+    /// On, and NotchHub is keeping the Mac awake with the lid closed
+    /// (`LidAwakeEngine.isKeepingAwake` — the page's `.awake`, or its
+    /// `.stillOff` with the switch on): the accent glyph of a running chip.
+    case awake
+    /// A plain glyph with a small accent dot: not what the switch alone
+    /// says. Mostly "on, waiting" — on but not keeping the Mac awake for now:
+    /// a guard holds (on battery, the apps closed…), it needs the password,
+    /// the helper isn't working, or a change is on its way. Also the switch
+    /// off while a closed lid still won't sleep the Mac — NotchHub's
+    /// SleepDisabled 1 that could not be put back (`.stillOff`, e.g. the
+    /// dialog cancelled) or one set outside NotchHub (`.outside`) — so the
+    /// chip never looks idle then; Settings has Restore normal sleep….
+    /// Not dimmed: a dim chip on this bar means a feature switched off in
+    /// Settings.
+    case waiting
+
+    public init(_ lid: LidSettingsModel) {
+        switch lid.status {
+        case .awake, .stillOff:
+            self = lid.switchOn ? .awake : .waiting
+        case .outside:
+            self = .waiting
+        case .notManaged, .normal, .switching, .held, .needsYou:
+            self = lid.switchOn ? .waiting : .off
+        }
+    }
+
+    /// What a click asks for: the Settings switch's own tap — whatever the
+    /// chip shows, the dot with the switch off included — or `nil` when the
+    /// switch could not take it either (a change in flight, a launch that
+    /// doesn't manage the Mac's sleep).
+    public static func click(_ lid: LidSettingsModel) -> LidIntent? {
+        let intent = LidIntent.setEnabled(!lid.switchOn)
+        return lid.isEnabled(intent) ? intent : nil
     }
 }

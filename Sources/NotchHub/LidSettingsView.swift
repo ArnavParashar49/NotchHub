@@ -498,8 +498,9 @@ private struct LidActionRow: View {
 
 /// The features page's door to the Lid page: a full-width card (like the
 /// weather's) with the switch's state in a few words and, while the Mac is
-/// being kept awake, one small glyph — the only sign of the feature outside
-/// its page. The island itself never changes for it.
+/// being kept awake, one small glyph. Outside its page the feature also has
+/// the lid chip on the dashboard's quick-action bar (`DashboardLidChip`);
+/// the compact island never changes for it.
 struct LidSettingsCard: View {
     let model: LidSettingsModel
     let action: () -> Void

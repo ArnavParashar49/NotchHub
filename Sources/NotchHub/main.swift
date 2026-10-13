@@ -344,6 +344,21 @@ func runSelfTest() -> Int32 {
     check(LidAwakeCommands.watchdogScript(pid: 42, uid: 501, processName: "NotchHub")
             .hasSuffix("exec /usr/bin/sudo -n /usr/bin/pmset -a disablesleep 0"),
           "lid: the dead-man's switch puts normal sleep back through the helper")
+    let dashboardFrame = selftestGeometry.frame(for: .interactive, content: .default)
+    let dashboardChips = DashboardLayout.actions(in: dashboardFrame, notchInset: 32, focus: .nothing)
+        .filter { DashboardLayout.quickActions.contains($0.action) }
+        .sorted { $0.rect.minX < $1.rect.minX }
+    check(dashboardChips.map(\.action) == [.lidAwake, .timer, .teleprompter, .camera, .tray]
+            && dashboardChips.prefix(4).allSatisfy { $0.rect.width == DashboardLayout.glyphChipWidth }
+            && NSImage(systemSymbolName: "laptopcomputer", accessibilityDescription: nil) != nil,
+          "lid: the dashboard's lid chip is the leftmost quick action, a glyph like the timer's (this macOS draws laptopcomputer)")
+    let lidOn = LidAwakeSettings(enabled: true)
+    check(DashboardLidChip(LidSettingsModel(status: .normal)) == .off
+            && DashboardLidChip(LidSettingsModel(settings: lidOn, status: .awake, helperInstalled: true)) == .awake
+            && DashboardLidChip(LidSettingsModel(settings: lidOn, status: .held(.onBattery), helperInstalled: true)) == .waiting
+            && DashboardLidChip(LidSettingsModel(status: .stillOff, helperInstalled: true)) == .waiting
+            && DashboardLidChip.click(LidSettingsModel(status: .normal)) == .setEnabled(true),
+          "lid: the dashboard chip is off, lit while keeping the Mac awake, dotted while paused or while sleep is still off — and a click is the Settings switch")
 
     print("")
     print(failures == 0 ? "SELF-TEST PASSED" : "SELF-TEST FAILED (\(failures) failures)")

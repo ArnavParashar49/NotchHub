@@ -7,7 +7,8 @@ import SwiftUI
 ///
 /// Every clickable area is placed by `DashboardLayout`, which the window
 /// hit-tests — the island never takes key focus, so nothing here is a SwiftUI
-/// `Button`. Keep the fixed row heights and chip widths in step with it.
+/// `Button`. Keep the fixed row heights in step with it; the quick actions
+/// are drawn from its `quickActions` and `chipWidth`, so they cannot drift.
 struct DashboardView: View {
     let notchInset: CGFloat
     let focus: DashboardFocus
@@ -21,7 +22,13 @@ struct DashboardView: View {
     let focusMode: String?
     let isMicActive: Bool
     let isCameraActive: Bool
-    let timerElapsed: TimeInterval?
+    /// Settings → Lid Closed, for the lid chip: its look is
+    /// `DashboardLidChip(lid)` (the app's own mapping), and its spoken value
+    /// the features card's few words.
+    let lid: LidSettingsModel
+    /// Whether the stopwatch is running (its time is on the compact island,
+    /// so the chip only lights up), and whether the feature is on.
+    let isTimerRunning: Bool
     let timerEnabled: Bool
     /// Whether the teleprompter is showing, and whether the feature is on.
     let isTeleprompting: Bool
@@ -182,11 +189,53 @@ struct DashboardView: View {
 
     private var utilityBar: some View {
         HStack(spacing: DashboardLayout.chipSpacing) {
-            battery
-            if let focusMode {
+            // Exactly what the chips leave (`minWidth: 0`: never more, so the
+            // chips stay on the rects the window hit-tests at any width).
+            status
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                .clipped()
+
+            ForEach(DashboardLayout.quickActions, id: \.self) { action in
+                quickAction(action)
+            }
+        }
+        .font(.system(size: 11, weight: .semibold, design: .rounded))
+        .foregroundStyle(DesignTokens.textSecondary)
+    }
+
+    /// The least of a focus mode's name worth showing ("Do…", "Work").
+    static let focusNameMinimum: CGFloat = 28
+
+    /// The battery, the focus mode and a live mic / camera. On a narrow
+    /// panel they give way in turn — the focus name shortens, then the
+    /// battery's percentage goes, then the battery (the menu bar has it too),
+    /// then the focus, keeping the battery's bar if that still fits — so the
+    /// live glyph is the last one standing. Without a focus mode: the
+    /// percentage, then the battery.
+    private var status: some View {
+        ViewThatFits(in: .horizontal) {
+            statusRow(showsFocus: true, showsPercent: true, showsBattery: true)
+            statusRow(showsFocus: true, showsPercent: false, showsBattery: true)
+            statusRow(showsFocus: true, showsPercent: false, showsBattery: false)
+            statusRow(showsFocus: false, showsPercent: false, showsBattery: true)
+            statusRow(showsFocus: false, showsPercent: false, showsBattery: false)
+        }
+    }
+
+    private func statusRow(showsFocus: Bool, showsPercent: Bool, showsBattery: Bool) -> some View {
+        HStack(spacing: DashboardLayout.chipSpacing) {
+            if showsBattery {
+                battery(showsPercent: showsPercent)
+                    .layoutPriority(1)
+            }
+            if showsFocus, let focusMode {
                 HStack(spacing: 4) {
                     Image(systemName: "moon.fill")
+                    // Counted as a few letters when the bar measures what
+                    // fits: the name takes what is left, shortened — and
+                    // the focus gives way rather than show a bare "…".
                     Text(focusMode)
+                        .frame(minWidth: 0, idealWidth: DashboardView.focusNameMinimum, alignment: .leading)
                 }
                 .lineLimit(1)
             }
@@ -194,32 +243,89 @@ struct DashboardView: View {
                 Image(systemName: isCameraActive ? "video.fill" : "mic.fill")
                     .foregroundStyle(DesignTokens.live)
             }
+        }
+    }
 
-            Spacer(minLength: 0)
+    /// One chip on the bar, `DashboardLayout.chipWidth(action)` wide, named
+    /// for VoiceOver — most chips are a bare glyph.
+    private func quickAction(_ action: DashboardAction) -> some View {
+        quickActionChip(action)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityLabel(action))
+            .accessibilityValue(accessibilityValue(action))
+    }
 
-            chip(width: DashboardLayout.timerChipWidth, active: timerElapsed != nil, enabled: timerEnabled) {
-                Image(systemName: "timer")
-                Text(timerElapsed.map { Activity.format($0) } ?? "Timer")
-                    .monospacedDigit()
+    private func accessibilityLabel(_ action: DashboardAction) -> String {
+        switch action {
+        case .lidAwake: return "Keep working with the lid closed"
+        case .timer: return "Timer"
+        case .teleprompter: return "Teleprompter"
+        case .camera: return "Camera"
+        case .tray: return "Tray"
+        case .settings, .join, .openPlayer: return ""
+        }
+    }
+
+    private func accessibilityValue(_ action: DashboardAction) -> String {
+        switch action {
+        case .lidAwake: return lid.shortLabel
+        case .timer: return isTimerRunning ? "Running" : "Stopped"
+        case .teleprompter: return isTeleprompting ? "Showing" : ""
+        case .camera: return isCameraPreviewing ? "Showing" : ""
+        case .tray: return trayCount == 1 ? "1 item" : "\(trayCount) items"
+        case .settings, .join, .openPlayer: return ""
+        }
+    }
+
+    @ViewBuilder
+    private func quickActionChip(_ action: DashboardAction) -> some View {
+        let width = DashboardLayout.chipWidth(action)
+        switch action {
+        case .lidAwake:
+            let lidChip = DashboardLidChip(lid)
+            chip(width: width, active: lidChip == .awake, enabled: true) {
+                Image(systemName: "laptopcomputer")
+                    .overlay(alignment: .topTrailing) {
+                        if lidChip == .waiting { waitingDot }
+                    }
             }
-            chip(width: DashboardLayout.glyphChipWidth, active: isTeleprompting, enabled: teleprompterEnabled) {
+        case .timer:
+            chip(width: width, active: isTimerRunning, enabled: timerEnabled) {
+                Image(systemName: "timer")
+            }
+        case .teleprompter:
+            chip(width: width, active: isTeleprompting, enabled: teleprompterEnabled) {
                 Image(systemName: "text.alignleft")
             }
-            chip(width: DashboardLayout.glyphChipWidth, active: isCameraPreviewing, enabled: cameraEnabled) {
+        case .camera:
+            chip(width: width, active: isCameraPreviewing, enabled: cameraEnabled) {
                 Image(systemName: "video.fill")
             }
-            chip(width: DashboardLayout.trayChipWidth, active: false, enabled: true) {
+        case .tray:
+            chip(width: width, active: false, enabled: true) {
                 Image(systemName: "tray.full.fill")
                 Text("\(trayCount)")
                     .monospacedDigit()
             }
+        case .settings, .join, .openPlayer:
+            EmptyView()
         }
-        .font(.system(size: 11, weight: .semibold, design: .rounded))
-        .foregroundStyle(DesignTokens.textSecondary)
+    }
+
+    /// The lid chip's dot ("on, waiting" — or sleep still off with the
+    /// switch off): a small accent dot at the glyph's top-right, ringed in
+    /// the island's black so it reads apart from it.
+    private var waitingDot: some View {
+        Circle()
+            .fill(DesignTokens.accent)
+            .frame(width: 5, height: 5)
+            .padding(1.5)
+            .background(Circle().fill(Color.black))
+            .offset(x: 4, y: -4)
     }
 
     @ViewBuilder
-    private var battery: some View {
+    private func battery(showsPercent: Bool) -> some View {
         if let batteryPercent {
             let level = CGFloat(max(0, min(100, batteryPercent))) / 100
             HStack(spacing: 6) {
@@ -234,8 +340,10 @@ struct DashboardView: View {
                     Image(systemName: "bolt.fill")
                         .font(.system(size: 9, weight: .bold))
                 }
-                Text("\(batteryPercent)%")
-                    .monospacedDigit()
+                if showsPercent {
+                    Text("\(batteryPercent)%")
+                        .monospacedDigit()
+                }
             }
         }
     }

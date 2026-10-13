@@ -173,8 +173,6 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     var musicTitle: String?
     /// The next calendar event, for the dashboard.
     var nextEvent: UpcomingEvent?
-    /// The running stopwatch's elapsed time, for the dashboard's timer chip.
-    var timerElapsed: TimeInterval?
 
     /// "Keep working with the lid closed" (Settings → Lid). Made and started
     /// only by a normal launch, so an inspection run never touches the
@@ -474,10 +472,6 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             )
         case let .calendarNext(event):
             nextEvent = event
-        case let .timerTick(elapsed):
-            timerElapsed = elapsed
-        case .timerFinished:
-            timerElapsed = nil
         case let .neo(fact):
             neoReceive(fact)
         case let .neoShell(status):

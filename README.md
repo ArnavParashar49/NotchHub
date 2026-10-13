@@ -505,9 +505,16 @@ The status reads "Your Mac will keep working with the lid closed", "Normal
 sleep", "Paused: on battery", "Paused: battery at 20 % or below", "Paused:
 none of your apps is open", "Paused: needs your password to resume" (with
 Resume…), or "Sleep is turned off outside NotchHub" (a `SleepDisabled 1`
-something else set — left alone, with Restore normal sleep…). The island
-never changes for any of it: the only sign outside the page is a small bolt
-on the features page's card while the Mac is being kept awake.
+something else set — left alone, with Restore normal sleep…). The compact
+island never changes for any of it. Outside the page there is a small bolt
+on the features page's card while the Mac is being kept awake, and a laptop
+chip on the dashboard's quick-action bar (leftmost) that is the same switch:
+a click turns it on or off exactly as the page's switch does (the first time,
+the same one dialog) and the dashboard stays open. The chip is plain while
+the switch is off, lit while the Mac is being kept awake, and plain with a
+small dot while it is on but paused — or while the switch is off but sleep
+is still turned off (a cancelled dialog, or `SleepDisabled 1` set outside
+NotchHub), so it never looks idle when a closed lid won't sleep the Mac.
 
 **The helper.** The guards must be able to put sleep back with nobody at the
 Mac — unplugged in a bag, the clock run out, the apps quit — and a password

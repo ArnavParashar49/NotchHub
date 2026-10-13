@@ -173,30 +173,60 @@ enum SurfaceSnapshots {
 
     /// The dashboard's quick-action bar, which gained the teleprompter and
     /// camera chips — the one place the new features had to fit into an
-    /// existing row without crowding it.
+    /// existing row without crowding it — and then the lid chip, with the
+    /// timer's chip down to its glyph. Its looks: the lid switch off, on and
+    /// keeping the Mac awake (lit), on but paused (the dot); the stopwatch
+    /// running (lit); and the status crowded — a focus mode and a live
+    /// camera or mic — at this screen's width, at a 1280-pt screen's panel
+    /// (the battery gives way, the focus stays) and at the narrowest (a
+    /// 1024-pt screen), where only the live glyph stays; the chips stay on
+    /// their targets throughout. Each lid look goes through
+    /// `DashboardLidChip`, as in the app.
     static func dashboardRows(geometry: NotchGeometry) -> [Row] {
         let frame = geometry.frame(for: .interactive, content: .default)
         let notchInset = geometry.notchFrame.height
         let event = UpcomingEvent(title: "Design review", startsAt: Date().addingTimeInterval(900),
                                   joinURL: URL(string: "https://meet.google.com/abc-defg-hij"))
         let focus = DashboardFocus.event(joinable: true)
-        return [Row(
-            name: "dashboard — quick actions",
-            state: .interactive,
-            frame: frame,
-            content: AnyView(DashboardView(
-                notchInset: notchInset, focus: focus, nextEvent: event,
-                nowPlayingTitle: nil, nowPlayingArtist: nil,
-                weatherSymbol: "cloud.sun.fill", weatherLabel: "18°",
-                batteryPercent: 76, isCharging: false, focusMode: nil,
-                isMicActive: false, isCameraActive: false,
-                timerElapsed: nil, timerEnabled: true,
-                isTeleprompting: false, teleprompterEnabled: true,
-                isCameraPreviewing: false, cameraEnabled: true,
-                trayCount: 12
-            )),
-            targets: DashboardLayout.actions(in: frame, notchInset: notchInset, focus: focus).map(\.rect)
-        )]
+        func panel(screenWidth: CGFloat) -> CGRect {
+            let width = (screenWidth * NotchGeometry.interactiveWidthFraction).rounded(.down)
+            return CGRect(x: frame.midX - width / 2, y: frame.minY, width: width, height: frame.height)
+        }
+        let lidOn = LidAwakeSettings(enabled: true)
+        let lidOff = LidSettingsModel(status: .normal, helperInstalled: true)
+        let lidAwake = LidSettingsModel(settings: lidOn, status: .awake, helperInstalled: true)
+        let lidPaused = LidSettingsModel(settings: lidOn, status: .held(.onBattery), helperInstalled: true)
+        func row(_ name: String, frame: CGRect = frame, lid: LidSettingsModel = lidOff, timerRunning: Bool = false,
+                 focusMode: String? = nil, mic: Bool = false, camera: Bool = false, charging: Bool = false) -> Row {
+            Row(
+                name: "dashboard — \(name)",
+                state: .interactive,
+                frame: frame,
+                content: AnyView(DashboardView(
+                    notchInset: notchInset, focus: focus, nextEvent: event,
+                    nowPlayingTitle: nil, nowPlayingArtist: nil,
+                    weatherSymbol: "cloud.sun.fill", weatherLabel: "18°",
+                    batteryPercent: 76, isCharging: charging, focusMode: focusMode,
+                    isMicActive: mic, isCameraActive: camera,
+                    lid: lid, isTimerRunning: timerRunning, timerEnabled: true,
+                    isTeleprompting: false, teleprompterEnabled: true,
+                    isCameraPreviewing: false, cameraEnabled: true,
+                    trayCount: 12
+                )),
+                targets: DashboardLayout.actions(in: frame, notchInset: notchInset, focus: focus).map(\.rect)
+            )
+        }
+        return [
+            row("quick actions, the lid switch off"),
+            row("the lid on, keeping the Mac awake", lid: lidAwake),
+            row("the lid on, paused", lid: lidPaused),
+            row("the timer running", timerRunning: true),
+            row("a focus mode and a live camera", lid: lidPaused, focusMode: "Do Not Disturb", camera: true),
+            row("a 1280-pt screen's panel, charging, a focus mode and a live mic", frame: panel(screenWidth: 1280),
+                lid: lidAwake, focusMode: "Personal", mic: true, charging: true),
+            row("the narrowest panel, a focus mode and a live mic", frame: panel(screenWidth: 1024), lid: lidAwake,
+                timerRunning: true, focusMode: "Do Not Disturb", mic: true),
+        ]
     }
 
     // MARK: - Settings

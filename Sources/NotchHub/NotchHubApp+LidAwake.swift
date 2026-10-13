@@ -7,10 +7,12 @@ import UniformTypeIdentifiers
 ///
 /// `LidAwakeController` (NotchHubSystem) does the system work and owns the
 /// truth about the Mac's sleep; this extension starts it on a normal launch,
-/// hands it the page's taps, builds the page's app lists from NSWorkspace,
-/// and redraws Settings when the controller says something changed. The
-/// island never changes for the feature — no width, no glyph: its one sign
-/// outside its own page is a small bolt on the features page's Lid card.
+/// hands it the page's taps (and the dashboard lid chip's, which is the same
+/// tap on the switch), builds the page's app lists from NSWorkspace, and
+/// redraws Settings or the open dashboard when the controller says something
+/// changed. The compact island never changes for the feature — no width, no
+/// glyph: outside its own page there is a small bolt on the features page's
+/// Lid card, and the lid chip on the dashboard's quick-action bar.
 ///
 /// While NotchHub holds SleepDisabled, SIGTERM (`kill`, `killall`) is turned
 /// into an ordinary quit, so `applicationWillTerminate` puts sleep back
@@ -36,13 +38,15 @@ extension NotchHubApp {
         lidAwake?.model ?? LidSettingsModel(settings: LidAwakeSettings.load(), status: .notManaged)
     }
 
-    /// The controller said something on the page changed.
+    /// The controller said something on the page changed: redraw whatever
+    /// shows it — Settings, or the dashboard's lid chip.
     func lidChanged() {
         syncLidTerminateSignal()
-        if panel == .settings { refreshPanel() }
+        if panel == .settings || currentIslandState() == .interactive { refreshPanel() }
     }
 
-    /// A tap in Settings → Lid.
+    /// A tap in Settings → Lid, or the dashboard's lid chip (which sends
+    /// the main switch's own `.setEnabled`).
     func lidIntent(_ intent: LidIntent) {
         guard lidSettings.isEnabled(intent) else { return }
         log("lid: settings → \(intent)")

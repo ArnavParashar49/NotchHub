@@ -31,7 +31,8 @@ extension NotchHubApp {
                 focusMode: focusMode,
                 isMicActive: isMicActive,
                 isCameraActive: isCameraActive,
-                timerElapsed: timerService.isStopwatchRunning ? timerElapsed : nil,
+                lid: lidSettings,
+                isTimerRunning: timerService.isStopwatchRunning,
                 timerEnabled: featureSettings.isEnabled(.timers),
                 isTeleprompting: panel == .teleprompter,
                 teleprompterEnabled: featureSettings.isEnabled(.teleprompter),
@@ -64,8 +65,20 @@ extension NotchHubApp {
         log("dashboard: \(action.rawValue)")
         switch action {
         case .timer:
-            // Stays open: the chip turns into the running readout.
+            // Stays open: the chip lights up while the stopwatch runs (its
+            // time is on the compact island once the dashboard closes).
             toggleTimer()
+            renderIsland()
+            return
+        case .lidAwake:
+            // Stays open: the Settings → Lid Closed switch's own tap, so the
+            // same guards, helper and first-time dialog. The chip follows the
+            // controller as it reports back (`lidChanged`).
+            if let intent = DashboardLidChip.click(lidSettings) {
+                lidIntent(intent)
+            } else {
+                log("dashboard: lid switch busy or not managed in this launch")
+            }
             renderIsland()
             return
         case .settings:
