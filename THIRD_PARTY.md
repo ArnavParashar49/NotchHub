@@ -1,13 +1,18 @@
 # Third-party notices
 
+NotchHub itself is MIT-licensed (see `LICENSE`). It includes the following
+third-party code, which is compiled into the app.
+
 ## thinking-orbs
 
 `Sources/NotchHubOrbs/OrbEngine.swift` is a hand port of the geometry engine in
-**thinking-orbs 0.3.2** by Jakub Antalik (https://github.com/Jakubantalik/Libraries.dev),
-the dotted thought-orb indicators NEO draws; `OrbView.swift` is its canvas painter.
-The nine animations, their presets and tuning are reproduced so the orb in the
-notch is the same orb NEO shows. The golden frames under
-`Tests/NotchHubOrbsTests/Goldens` were dumped from the library's own JS engine.
+**thinking-orbs 0.3.2** by Jakub Antalik (npm `thinking-orbs`,
+https://github.com/Jakubantalik/Libraries.dev, `packages/thinking-orbs`), the
+dotted thought-orb indicators NEO draws; `Sources/NotchHubOrbs/OrbView.swift`
+is its canvas painter. The nine animations, their presets and tuning are
+reproduced so NotchHub's orb is the same orb NEO shows. The golden frames under
+`Tests/NotchHubOrbsTests/Goldens` were dumped from the library's own JS engine
+(`scripts/orb_goldens.mjs`).
 
 ```
 MIT License
