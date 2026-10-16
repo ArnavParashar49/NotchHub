@@ -25,6 +25,17 @@ mkdir -p "$APP_DIR/Contents/Resources"
 
 cp "$BIN" "$APP_DIR/Contents/MacOS/$APP_NAME"
 
+# The licence and the third-party notices (the thinking-orbs port is compiled
+# into the binary) travel inside the bundle, so every copy of the app carries
+# them. Copied before signing: the signature seals Contents/Resources.
+for notice in LICENSE THIRD_PARTY.md; do
+  if [ ! -f "$ROOT/$notice" ]; then
+    echo "error: $notice not found at $ROOT/$notice" >&2
+    exit 1
+  fi
+  cp "$ROOT/$notice" "$APP_DIR/Contents/Resources/$notice"
+done
+
 cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -78,6 +89,9 @@ echo "==> signing $APP_DIR"
 codesign --force --deep --sign - \
   --requirements '=designated => identifier "com.notchhub.app"' \
   "$APP_DIR"
+
+echo "==> verifying the signature"
+codesign --verify --deep --strict "$APP_DIR"
 
 echo "==> done: $APP_DIR"
 echo "    run headless selftest:  $APP_DIR/Contents/MacOS/$APP_NAME --selftest"

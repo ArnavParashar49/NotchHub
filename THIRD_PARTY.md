@@ -1,7 +1,8 @@
 # Third-party notices
 
 NotchHub itself is MIT-licensed (see `LICENSE`). It includes the following
-third-party code, which is compiled into the app.
+third-party code, which is compiled into the app. `scripts/build_app.sh` copies
+this file and `LICENSE` into `NotchHub.app/Contents/Resources`.
 
 ## thinking-orbs
 
