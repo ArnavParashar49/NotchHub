@@ -9,7 +9,7 @@ struct CameraTests {
 
     private let built = CameraDevice(id: "built-in", name: "FaceTime HD Camera")
     private let external = CameraDevice(id: "usb-1", name: "Studio Display Camera")
-    private let iphone = CameraDevice(id: "iphone", name: "Arnav's iPhone")
+    private let iphone = CameraDevice(id: "iphone", name: "Alex's iPhone")
 
     private func live(_ devices: [CameraDevice], on id: String) -> CameraState {
         CameraState(phase: .live, devices: devices, deviceID: id)

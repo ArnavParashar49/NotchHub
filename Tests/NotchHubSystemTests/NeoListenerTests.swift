@@ -367,7 +367,28 @@ struct NeoListenerParsingTests {
 @Suite("NeoListener against a stub core", .serialized)
 struct NeoListenerStubTests {
 
-    static let python = URL(fileURLWithPath: "/Users/arnav/Documents/Neo 2.0/NEO/.venv/bin/python")
+    /// A python with `websockets`: `NOTCHHUB_NEO_PYTHON` when it is set, else
+    /// NEO's own virtualenv in a NEO checkout at `~/Documents/Neo 2.0/NEO`.
+    /// Without one the stub tests are skipped.
+    static let python = pythonURL(environment: ProcessInfo.processInfo.environment,
+                                  home: FileManager.default.homeDirectoryForCurrentUser)
+    static let pythonVariable = "NOTCHHUB_NEO_PYTHON"
+
+    static func pythonURL(environment: [String: String], home: URL) -> URL {
+        if let path = environment[pythonVariable], !path.isEmpty {
+            return URL(fileURLWithPath: path)
+        }
+        return home.appendingPathComponent("Documents/Neo 2.0/NEO/.venv/bin/python")
+    }
+
+    @Test("the stub's python: NOTCHHUB_NEO_PYTHON when set, else the virtualenv under the user's own home folder")
+    func pythonLocation() {
+        let home = URL(fileURLWithPath: "/Users/alex", isDirectory: true)
+        #expect(Self.pythonURL(environment: [:], home: home).path == "/Users/alex/Documents/Neo 2.0/NEO/.venv/bin/python")
+        #expect(Self.pythonURL(environment: [Self.pythonVariable: ""], home: home).path == "/Users/alex/Documents/Neo 2.0/NEO/.venv/bin/python")
+        #expect(Self.pythonURL(environment: [Self.pythonVariable: "/opt/neo/bin/python"], home: home).path == "/opt/neo/bin/python")
+    }
+
     static let stub = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/neo_stub.py")
 
     /// Whether the stub can run here at all (the venv with `websockets`).

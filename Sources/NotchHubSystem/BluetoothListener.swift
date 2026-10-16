@@ -74,7 +74,7 @@ public final class BluetoothListener: SystemListener {
         let previous = connectedDevices
         connectedDevices = current
 
-        // Name the devices that left (e.g. "Arnav's AirPods Pro") and the ones
+        // Name the devices that left (e.g. "Alex's AirPods Pro") and the ones
         // that arrived, so the island and the pet know WHAT changed — even while
         // another Bluetooth device stays connected.
         for (id, name) in previous.sorted(by: { $0.key < $1.key }) where current[id] == nil {

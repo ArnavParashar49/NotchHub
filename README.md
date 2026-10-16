@@ -154,6 +154,10 @@ Use `scripts/test.sh` rather than a bare `swift test`: with only the Command
 Line Tools installed, SwiftPM does not find swift-testing on its own, and the
 script passes the framework paths it needs.
 
+The NEO listener's stub-core tests need a Python with the `websockets` package
+(`NOTCHHUB_NEO_PYTHON=/path/to/python ./scripts/test.sh`). Without one they
+are skipped.
+
 ## The Tray
 
 Clipboard storage and nothing else. It keeps the last 60 things you copied **as

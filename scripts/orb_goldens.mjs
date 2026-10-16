@@ -4,6 +4,9 @@
 //
 //   node scripts/orb_goldens.mjs [path/to/thinking-orbs/dist/engine.es.js]
 //
+// Without a path it uses ./node_modules/thinking-orbs/dist/engine.es.js, from
+// the current folder (e.g. after `npm install --no-save thinking-orbs@0.3.2`).
+//
 // Writes Tests/NotchHubOrbsTests/Goldens/thinking-orbs.json. Re-run only when
 // the upstream engine changes; the Swift test compares every dot and line of
 // every frame here to the port's output within 1e-3.
@@ -13,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const enginePath = resolve(
-  process.argv[2] ?? "/Users/arnav/Documents/Neo 2.0/NEO/ui/node_modules/thinking-orbs/dist/engine.es.js"
+  process.argv[2] ?? "node_modules/thinking-orbs/dist/engine.es.js"
 );
 const pkg = JSON.parse(readFileSync(resolve(dirname(enginePath), "..", "package.json"), "utf8"));
 const { MODE_FRAMES, STATE_TO_MODE, resolvePreset } = await import(pathToFileURL(enginePath).href);

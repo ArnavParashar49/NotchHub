@@ -321,7 +321,7 @@ func runSelfTest() -> Int32 {
     // Keep working with the lid closed: the exact helper rule, pmset's
     // SleepDisabled read, a guard, and the crash reconcile. (Nothing here
     // runs pmset or sudo.)
-    check(LidAwakeHelperRule(user: "arnav")?.content == "arnav ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1\n"
+    check(LidAwakeHelperRule(user: "alex")?.content == "alex ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1\n"
             && LidAwakeHelperRule(user: "a b") == nil && LidAwakeHelperRule.path == "/private/etc/sudoers.d/notchhub-lid",
           "lid: the helper rule grants exactly pmset -a disablesleep 0 / 1, and a name needing escapes is refused")
     check(LidAwakeCommands.sleepDisabled(inPmsetOutput: "System-wide power settings:\n SleepDisabled\t\t1\nCurrently in use:\n") == true
@@ -338,7 +338,7 @@ func runSelfTest() -> Int32 {
     var lidFirst = LidAwakeEngine(settings: LidAwakeSettings(), record: LidAwakeRecord(), helperInstalled: false)
     _ = lidFirst.launch(observed: false, power: PowerSnapshot(onAC: true, batteryPercent: 80), running: [], helperInstalled: false, now: Date())
     check(lidFirst.setEnabled(true, now: Date()) == [.saveSettings, .installHelper]
-            && LidAwakeHelperRule(user: "arnav")?.installScript().contains("; /usr/bin/pmset") == false
+            && LidAwakeHelperRule(user: "alex")?.installScript().contains("; /usr/bin/pmset") == false
             && LidAwakeHelperRule(user: "ALL") == nil,
           "lid: sleep is never turned off through the password dialog — only through the helper, once installed")
     check(LidAwakeCommands.watchdogScript(pid: 42, uid: 501, processName: "NotchHub")

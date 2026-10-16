@@ -193,15 +193,15 @@ struct LidAwakeCommandTests {
 
     @Test("the helper rule, exactly, for a valid short name")
     func rule() throws {
-        let rule = try #require(LidAwakeHelperRule(user: "arnav"))
-        #expect(rule.content == "arnav ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1\n")
+        let rule = try #require(LidAwakeHelperRule(user: "alex"))
+        #expect(rule.content == "alex ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1\n")
         #expect(LidAwakeHelperRule.path == "/private/etc/sudoers.d/notchhub-lid")
         // sudo skips a name with a dot in it: the real file must have none.
         #expect(!LidAwakeHelperRule.fileName.contains("."))
         #expect(LidAwakeHelperRule(user: "j.doe-2")?.line.hasPrefix("j.doe-2 ALL=(root) NOPASSWD: ") == true)
         #expect(LidAwakeHelperRule(user: "_svc") != nil)
         // Capitals are fine in a name that isn't all capitals.
-        #expect(LidAwakeHelperRule(user: "Arnav") != nil && LidAwakeHelperRule(user: "Jo_B2") != nil)
+        #expect(LidAwakeHelperRule(user: "Alex") != nil && LidAwakeHelperRule(user: "Jo_B2") != nil)
     }
 
     @Test("names sudoers would not read as this user are refused: ALL (everyone) and all-capital aliases")
@@ -221,13 +221,13 @@ struct LidAwakeCommandTests {
 
     @Test("install: a dot-named temp beside the target, visudo -cf before it moves, root:wheel 0440, the whole policy re-checked — and no pmset")
     func installScript() throws {
-        let rule = try #require(LidAwakeHelperRule(user: "arnav"))
+        let rule = try #require(LidAwakeHelperRule(user: "alex"))
         let script = rule.installScript()
         let steps = script.components(separatedBy: "; ")
         func index(_ prefix: String) -> Int { steps.firstIndex { $0.hasPrefix(prefix) } ?? -1 }
         #expect(steps.first == "set -e")
         #expect(steps.contains("t=$(/usr/bin/mktemp /private/etc/sudoers.d/.notchhub-lid.XXXXXX)"))
-        #expect(steps.contains(#"/usr/bin/printf '%s\n' 'arnav ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1' > "$t""#))
+        #expect(steps.contains(#"/usr/bin/printf '%s\n' 'alex ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1' > "$t""#))
         let check = index("/usr/sbin/visudo -cf"), chown = index("/usr/sbin/chown root:wheel"),
             chmod = index("/bin/chmod 0440"), move = index("/bin/mv -f \"$t\" /private/etc/sudoers.d/notchhub-lid"),
             whole = index("/usr/sbin/visudo -c >/dev/null")
@@ -240,7 +240,7 @@ struct LidAwakeCommandTests {
 
     @Test("the install script is valid sh")
     func installScriptParses() async throws {
-        let rule = try #require(LidAwakeHelperRule(user: "arnav"))
+        let rule = try #require(LidAwakeHelperRule(user: "alex"))
         for script in [rule.installScript(), LidAwakeHelperRule.uninstallScript(thenSleepDisabled: false),
                        LidAwakeCommands.watchdogScript(pid: 123, uid: 501, processName: "NotchHub")] {
             // -n: parse only, run nothing.
@@ -308,7 +308,7 @@ struct LidAwakeCommandTests {
         #expect(AppleScriptSource.adminShellScript("/usr/bin/pmset -a disablesleep 0", prompt: #"NotchHub "lid""#)
                 == #"do shell script "/usr/bin/pmset -a disablesleep 0" with prompt "NotchHub \"lid\"" with administrator privileges"#)
         // The real install script survives the trip: its quotes and its \n.
-        let rule = try #require(LidAwakeHelperRule(user: "arnav"))
+        let rule = try #require(LidAwakeHelperRule(user: "alex"))
         let source = AppleScriptSource.adminShellScript(rule.installScript(), prompt: "p")
         #expect(source.contains(#"/usr/bin/printf '%s\\n'"#))
         #expect(source.contains(#"> \"$t\""#))
@@ -318,7 +318,7 @@ struct LidAwakeCommandTests {
 
     @Test("the admin script compiles (osacompile: compiled, never run)")
     func appleScriptCompiles() async throws {
-        let rule = try #require(LidAwakeHelperRule(user: "arnav"))
+        let rule = try #require(LidAwakeHelperRule(user: "alex"))
         let out = FileManager.default.temporaryDirectory.appendingPathComponent("lid-\(UUID().uuidString).scpt")
         defer { try? FileManager.default.removeItem(at: out) }
         for script in [rule.installScript(), LidAwakeCommands.pmsetLine(sleepDisabled: false)] {
@@ -329,7 +329,7 @@ struct LidAwakeCommandTests {
 
     @Test("an escaped string comes back out of AppleScript exactly as it went in")
     func appleScriptRoundTrip() async throws {
-        let rule = try #require(LidAwakeHelperRule(user: "arnav"))
+        let rule = try #require(LidAwakeHelperRule(user: "alex"))
         for text in [rule.installScript(), #"a "quoted" \ back\slash \n"#] {
             // `return` a literal: no shell, no privileges — just the string.
             let result = try await runTool("/usr/bin/osascript", ["-e", "return \(AppleScriptSource.quoted(text))"])

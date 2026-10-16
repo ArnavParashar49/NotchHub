@@ -189,7 +189,7 @@ private final class Rig {
         let background = self.background
         let controller = LidAwakeController(
             runner: FakeRunner(mac: mac), power: power, workspace: workspace, system: FakeLid(mac: mac),
-            defaults: defaults, userName: "arnav", clock: { [unowned self] in self.now },
+            defaults: defaults, userName: "alex", clock: { [unowned self] in self.now },
             schedule: { [unowned self] delay, block in self.scheduler.schedule(delay, block) },
             background: { background.run($0) },
             holdsActivity: false,
