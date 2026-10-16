@@ -8,6 +8,60 @@ happening it is essentially invisible — a black notch that blends into the men
 bar. When an event occurs, it smoothly springs open into a pill/island with
 useful information, then contracts back to the minimal notch state.
 
+## Download & install
+
+**[Download the latest release](https://github.com/ArnavParashar49/NotchHub/releases/latest)**
+— `NotchHub.dmg` on the Releases page.
+
+**Requirements**
+
+- **macOS 13 Ventura or later.**
+- **An Apple silicon Mac.** The release is built for Apple silicon, which every
+  MacBook with a notch is.
+- **Made for a MacBook with a camera notch** (14- and 16-inch MacBook Pro from
+  2021, MacBook Air from M2). Without a notch, as on an older Mac or with an
+  external display as the main one, NotchHub still runs. The island opens
+  from a notch-sized spot (200×32 pt) at the top centre of the menu bar. At
+  rest that spot shows nothing: there is no black notch to blend into and no
+  pet beside it, and a click there goes to the menu bar. NotchHub reads the
+  display when it launches, so relaunch it after you change the main display.
+
+**Install**
+
+1. Open `NotchHub.dmg`.
+2. Drag **NotchHub** onto **Applications**, then eject the disk image.
+3. Open NotchHub from Applications. It has no Dock icon and no menu-bar item.
+   Point at the notch to open it, or press ⌥⌘, for Settings, where you can
+   also quit it.
+
+**The first launch.** NotchHub is ad-hoc signed and not notarized by Apple, so
+macOS blocks it the first time you open it. On macOS 15 Sequoia and later the
+warning says Apple "could not verify" that NotchHub is free of malware. To open
+it anyway:
+
+1. Open NotchHub once and click **Done** in the warning (not Move to Trash).
+2. Open **System Settings → Privacy & Security**, scroll down to **Security**,
+   click **Open Anyway** beside the line about NotchHub, and enter your login
+   password. The button is there for about an hour after you tried to open the
+   app.
+3. Open NotchHub again. If macOS asks once more, choose **Open Anyway**.
+
+macOS 15 removed the old shortcut of right-click → Open. On macOS 13 and 14
+that shortcut still works (Control-click NotchHub in Applications → **Open** →
+**Open**), and so does **Open Anyway** in Privacy & Security.
+
+Or clear the download's quarantine flag in Terminal. Do this only for a copy
+you downloaded from the Releases page. It also helps if macOS says NotchHub
+"is damaged and can't be opened":
+
+```sh
+xattr -dr com.apple.quarantine /Applications/NotchHub.app
+```
+
+You only need to do this once. After that, macOS asks for each permission the
+first time a feature needs it (see [Permissions](#permissions)). To build the
+app yourself instead, see [Build & test](#build--test).
+
 ## Design language
 
 Apple Dynamic Island philosophy: minimal, black, extremely smooth, high
@@ -134,10 +188,18 @@ Every other surface follows the setting.
 
 ## NEO in the notch
 
-[NEO](../Neo%202.0/NEO), the voice assistant, lives in the notch — as the
-pet. The pixel fox beside the notch **is NEO**: its name is Neo, it is on
-screen whenever NEO's core is connected (whatever Show Pet says), and while
-NEO is busy its pose is what NEO is doing. With NEO ready the fox lives its
+**NEO is optional.** NEO is a separate voice assistant that is not public yet,
+and every NEO feature below stays dormant without it. With no NEO on the Mac,
+NotchHub only checks for NEO's token file (`~/.neo/ws-token`) every 1.5 s. It
+opens no connection until that file is there, and it has no NEO panel unless
+NEO's page is installed. The island, the pet and every other feature work as
+they do without NEO (see the end of this section). The **NEO** tile in Settings
+turns all of it off.
+
+With NEO running, NEO lives in the notch — as the pet. The pixel fox beside
+the notch **is NEO**: its name is Neo, it is on screen whenever NEO's core is
+connected (whatever Show Pet says), and while NEO is busy its pose is what NEO
+is doing. With NEO ready the fox lives its
 own life — the idle island is exactly the pre-NEO one, mischief and all —
 and with NEO active the fox simply animates, in whatever shape the island is
 in (idle, the hover wings, the compact bar, the expanded island). When NEO is
@@ -655,3 +717,10 @@ Known limits: recent macOS releases may withhold MediaRemote now-playing data
 from third-party apps, so music detection leans on Music/Spotify notifications
 and browser tabs; a paused browser tab still reads as playing; Webex in a
 browser is not detected as a call.
+
+## License
+
+NotchHub is released under the [MIT License](LICENSE). It includes a port of
+[thinking-orbs](https://github.com/Jakubantalik/Libraries.dev) (MIT, Jakub
+Antalik). The third-party notices are in [THIRD_PARTY.md](THIRD_PARTY.md). Both
+files ship inside the app, in `NotchHub.app/Contents/Resources`.
