@@ -20,7 +20,7 @@ struct NeoListenerParsingTests {
             == [.transcript(role: .user, text: "hi", final: false)])
         #expect(NeoListener.facts(in: #"{"type":"note","data":{"text":"n"},"ts":1}"#) == [.note("n")])
         #expect(NeoListener.facts(in: #"{"type":"error","data":{"message":"m"},"ts":1}"#) == [.error("m")])
-        for other in ["browser_state", "tool_start", "tool_end", "turn", "confirm", "problems", "erased", "ui_host", "shell", "shell_status", "shell_result", "host_attached", "settings", "set_result"] {
+        for other in ["browser_state", "tool_start", "tool_end", "turn", "confirm", "problems", "erased", "ui_host", "shell", "shell_status", "shell_result", "host_attached", "settings", "set_result", "brains", "setup_needed"] {
             #expect(NeoListener.facts(in: #"{"type":"\#(other)","data":{"state":"speaking"},"ts":1}"#).isEmpty, "\(other)")
         }
     }
@@ -82,6 +82,56 @@ struct NeoListenerParsingTests {
             #expect(NeoListener.coreSettings(in: #"{"type":"\#(other)","data":{"wake_word":false,"name":"wake_word","ok":true},"ts":1}"#) == nil, "\(other)")
         }
         #expect(NeoListener.coreSettings(in: "not json") == nil)
+    }
+
+    /// NEO's `brains` summary, as neo2/core/brains.py sends it to every client.
+    static let readyBrains = #"{"ready":true,"brain":{"ref":"claude@claude-opus-5-5","provider":"anthropic","label":"Claude Opus 5.5","ok":true},"quick":{"ref":"claude@claude-haiku-5-5","provider":"anthropic","label":"Claude Haiku 5.5","ok":true},"eyes":null,"voice":"live","providers":{"gemini":true,"anthropic":true,"openai":false},"restart_needed":false}"#
+    static let readyStatus = NeoBrainStatus(ready: true, brain: "Claude Opus 5.5", quick: "Claude Haiku 5.5", brainOK: true, voice: "live")
+
+    @Test("NEO's brains are read from the hello and from a brains event, and from nothing else")
+    func brainStatus() {
+        let hello = #"{"type":"hello","data":{"state":"idle","recent":[],"problems":[],"brains":\#(Self.readyBrains)},"ts":1}"#
+        #expect(NeoListener.brainStatus(in: hello) == .some(Self.readyStatus))
+        #expect(NeoListener.brainStatus(in: #"{"type":"brains","data":\#(Self.readyBrains),"ts":1}"#) == .some(Self.readyStatus))
+        // No model yet: what the Brain row's "Set up…" is for.
+        let none = #"{"ready":false,"brain":{"ref":"gemini","provider":"gemini","label":"Gemini 3.8 Flash","ok":false},"quick":{"label":"Gemini 3.8 Flash","ok":false},"eyes":null,"voice":"local","providers":{},"restart_needed":false}"#
+        #expect(NeoListener.brainStatus(in: #"{"type":"brains","data":\#(none),"ts":1}"#)
+            == .some(NeoBrainStatus(ready: false, brain: "Gemini 3.8 Flash", quick: "Gemini 3.8 Flash", brainOK: false, voice: "local")))
+    }
+
+    @Test("a hello from a NEO too old to report brains says “unknown”, so nothing from an earlier connection lingers")
+    func brainStatusUnknown() {
+        let unknown: NeoBrainStatus?? = .some(nil)
+        #expect(NeoListener.brainStatus(in: #"{"type":"hello","data":{"state":"idle","recent":[]},"ts":1}"#) == unknown)
+        // …and so does one whose brains are not NEO's.
+        for odd in ["null", "[]", #""ready""#, #"{"brain":"Claude Opus 5.5"}"#, #"{"ready":"true"}"#, #"{"ready":1}"#] {
+            #expect(NeoListener.brainStatus(in: #"{"type":"hello","data":{"state":"idle","brains":\#(odd)},"ts":1}"#) == unknown, "\(odd)")
+            // A brains event that is not NEO's says nothing at all: what was known stays.
+            #expect(NeoListener.brainStatus(in: #"{"type":"brains","data":\#(odd),"ts":1}"#) == nil, "\(odd)")
+        }
+        // Every other message, the Brains & Keys window's own among them (the
+        // core sends those to that window alone): not NEO's brains.
+        for other in ["state", "settings", "shell_status", "problems", "brains_detail", "keys_refused", "brains_reload_result", "key_test_result", "setup_needed"] {
+            #expect(NeoListener.brainStatus(in: #"{"type":"\#(other)","data":\#(Self.readyBrains),"ts":1}"#) == nil, "\(other)")
+        }
+        #expect(NeoListener.brainStatus(in: "not json") == nil)
+        #expect(NeoListener.brainStatus(in: "[1,2]") == nil)
+    }
+
+    @Test("the brains are nothing else: a hello with them yields the same facts, shell and settings as one without — what a NotchHub from before Brains & Keys reads")
+    func brainsChangeNothingElse() {
+        let shell = #"{"running":true,"app":true,"accessibility":true,"screen_recording":true,"open_at_login":true,"version":"2.1.0","hotkey":"⌥⌘"}"#
+        let without = #"{"type":"hello","data":{"state":"listening","recent":[],"confirm":null,"problems":[],"wake_word":true,"shell":\#(shell),"timers":[]},"ts":1}"#
+        let with = #"{"type":"hello","data":{"state":"listening","recent":[],"confirm":null,"problems":[],"wake_word":true,"shell":\#(shell),"timers":[],"brains":\#(Self.readyBrains)},"ts":1}"#
+        #expect(NeoListener.facts(in: with) == NeoListener.facts(in: without))
+        #expect(NeoListener.facts(in: with) == [.state(.listening), .neoTimers([])])
+        #expect(NeoListener.shellStatus(in: with) == NeoListener.shellStatus(in: without))
+        #expect(NeoListener.coreSettings(in: with) == NeoListener.coreSettings(in: without))
+        // The brains event itself is no fact, no shell status and no setting.
+        let event = #"{"type":"brains","data":\#(Self.readyBrains),"ts":1}"#
+        #expect(NeoListener.facts(in: event).isEmpty)
+        #expect(NeoListener.shellStatus(in: event) == nil)
+        #expect(NeoListener.coreSettings(in: event) == nil)
     }
 
     @Test("a confirmation staged, pending in the hello, or over is a fact for the island's Allow / Cancel")
@@ -420,6 +470,7 @@ struct NeoListenerStubTests {
         private var facts: [NeoFact] = []
         private var statuses: [NeoShellStatus] = []
         private var settings: [NeoCoreSettings] = []
+        private var brainReports: [NeoBrainStatus?] = []
         func record(_ event: SystemEvent) {
             lock.lock()
             defer { lock.unlock() }
@@ -427,8 +478,15 @@ struct NeoListenerStubTests {
             case let .neo(fact): facts.append(fact)
             case let .neoShell(status): statuses.append(status)
             case let .neoSettings(core): settings.append(core)
+            case let .neoBrains(status): brainReports.append(status)
             default: break
             }
+        }
+        /// What the core said about its brains, in order (`nil`: a hello that had none).
+        var brains: [NeoBrainStatus?] {
+            lock.lock()
+            defer { lock.unlock() }
+            return brainReports
         }
         /// What the core said about its own settings, in order.
         var cores: [NeoCoreSettings] {
@@ -550,6 +608,8 @@ struct NeoListenerStubTests {
         #expect(recorder.shells == [missing, ready])
         // …and where the core's own setting stands: from the hello.
         #expect(recorder.cores == [NeoCoreSettings(wakeWord: true)])
+        // A core from before Brains & Keys: its hello says nothing of brains — "unknown", once.
+        #expect(recorder.brains == [nil])
     }
 
     @Test("“Listen for Neo” goes out as the core's set command — only while the core is there — and the switch follows what the core then says", .enabled(if: NeoListenerStubTests.available))
@@ -597,6 +657,41 @@ struct NeoListenerStubTests {
         listener.send(NeoSetting.wakeWord(false))
         try await Task.sleep(nanoseconds: 300_000_000)
         #expect(stub.lines.filter { $0.contains(#""cmd":"set""#) }.count == 2)
+    }
+
+    @Test("NEO's brains arrive over the socket: the hello's, then each change — status only, and nothing is sent back for them", .enabled(if: NeoListenerStubTests.available))
+    func brains() async throws {
+        let stub = try Stub(drop: false, mode: "brains")
+        defer { stub.stop() }
+        #expect(await waitFor { stub.lines.contains("READY") })
+
+        let recorder = Recorder()
+        let listener = NeoListener(url: URL(string: "ws://127.0.0.1:\(stub.port)/")!, tokenFile: stub.tokenFile, reconnectDelay: 0.2) { recorder.record($0) }
+        listener.start()
+        defer { listener.stop() }
+
+        // The script ends idle; by then every brains message has been read.
+        #expect(await waitFor { recorder.snapshot.filter { $0 == .state(.idle) }.count == 2 })
+        let none = NeoBrainStatus(ready: false, brain: "Gemini 3.8 Flash", quick: "Gemini 3.8 Flash", brainOK: false, voice: "local")
+        let claude = NeoBrainStatus(ready: true, brain: "Claude Opus 5.5", quick: "Claude Haiku 5.5", brainOK: true, voice: "local")
+        // The hello's, then the key saved in NEO's window. The event that was
+        // not NEO's, and the window's own detail, said nothing.
+        #expect(recorder.brains == [none, claude])
+
+        // The section's model, as the app builds it from what the listener relayed.
+        func model() -> NeoSettingsModel {
+            let shell = NeoShellStatus(app: true, accessibility: true, screenRecording: true, openAtLogin: true)
+            return NeoSettingsModel(featureOn: true, connected: true, shell: shell, brain: recorder.brains.last ?? nil)
+        }
+        #expect(model().brainLabel == "Claude Opus 5.5" && model().brainIsGood && !model().offersBrainSetup)
+
+        // Nothing went back for them: the listener's closed list gains nothing.
+        #expect(stub.lines.filter { $0.hasPrefix("CMD ") } == [
+            "CMD " + NeoListener.cameraOffCommand,
+            "CMD " + NeoListener.songHelloCommand,
+        ])
+        // …and the island heard no brains: they are the Settings section's alone.
+        #expect(recorder.snapshot == [.connected(true), .state(.idle), .state(.idle)])
     }
 
     @Test("NEO.app's menu actions go out as shell commands — only while the core is there", .enabled(if: NeoListenerStubTests.available))

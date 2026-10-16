@@ -4,13 +4,14 @@ import Foundation
 ///
 /// While the notch hosts NEO, NEO.app has no menu-bar item: what that menu
 /// showed (whether NEO runs, its permissions, Open at Login) and what it did
-/// (API keys, logs, restart, erase, quit) live in the NEO section of
+/// (Brains & Keys, logs, restart, erase, quit) live in the NEO section of
 /// Settings instead. Everything here is plain values: what NEO's core
 /// reported (`NeoShellStatus`), what the section shows for it
 /// (`NeoSettingsModel`), what a tap asks for (`NeoSettingsIntent`), and the
 /// one command a host may send for it (`NeoShellAction`). Beside the menu,
 /// one setting of the core's own: whether NEO listens for "Neo"
-/// (`NeoCoreSettings`, and `NeoSetting` to switch it).
+/// (`NeoCoreSettings`, and `NeoSetting` to switch it) — and what the core
+/// says about its brains (`NeoBrainStatus`): status only, never a key.
 
 /// What NEO.app's own shell reported through the core — the `shell` object of
 /// the core's `hello`, and its `shell_status` event. `nil` fields are things
@@ -113,9 +114,93 @@ public struct NeoCoreSettings: Equatable, Sendable {
     }
 
     /// A JSON boolean, and nothing that merely bridges to one (a number).
-    private static func bool(_ value: Any?) -> Bool? {
+    fileprivate static func bool(_ value: Any?) -> Bool? {
         guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
         return number.boolValue
+    }
+}
+
+/// What NEO's core said about its brains — the `brains` of its `hello`, and
+/// its `brains` event whenever they change (a key saved in NEO's Brains &
+/// Keys window, a role switched, a model on this Mac starting or stopping):
+/// whether NEO has a model it can ask at all, and which one answers each of
+/// its roles, by the name the user reads ("Claude Opus 5.5").
+///
+/// Status only. The core sends every client this much and no more — never a
+/// key, never its last four characters (those go to its own Brains & Keys
+/// window alone) — and NotchHub never asks for more: setting a brain up is
+/// done in NEO.app's window (`NeoSettingsIntent.apiKeys`). Whatever else the
+/// object carries (which providers have a key, each role's reference) is not
+/// read here.
+public struct NeoBrainStatus: Equatable, Sendable {
+    /// The longest label kept, as the core caps its own.
+    public static let labelLimit = 60
+    /// The longest voice word kept ("live", "local", "off").
+    static let voiceLimit = 16
+
+    /// NEO has a model it can ask: without one it does only the simple
+    /// commands (volume, apps, timers) that need none.
+    public var ready: Bool
+    /// The model of the Brain role (the one that does tasks), the Quick
+    /// replies role and the Eyes role, by name — `nil` for one the core
+    /// named none for (Eyes is often unset: the Brain sees for itself).
+    public var brain: String?
+    public var quick: String?
+    public var eyes: String?
+    /// Whether the Brain role's own model can answer now: `false` when it is
+    /// chosen but cannot (no key, a refused key, nothing running on this
+    /// Mac), `nil` when the core did not say.
+    public var brainOK: Bool?
+    /// NEO's voice: "live" (Gemini Live), "local" (on this Mac) or "off".
+    public var voice: String?
+    /// A change (a new Gemini key, another voice) waits for NEO to restart.
+    public var restartNeeded: Bool
+
+    public init(
+        ready: Bool, brain: String? = nil, quick: String? = nil, eyes: String? = nil,
+        brainOK: Bool? = nil, voice: String? = nil, restartNeeded: Bool = false
+    ) {
+        self.ready = ready
+        self.brain = brain
+        self.quick = quick
+        self.eyes = eyes
+        self.brainOK = brainOK
+        self.voice = voice
+        self.restartNeeded = restartNeeded
+    }
+
+    /// From the core's JSON object. `nil` when it is not one of NEO's — one
+    /// that does not say, with a real boolean, whether NEO is ready. A role
+    /// is the core's `{"label": …, "ok": …}` object or plain text; its label
+    /// is kept to one short line.
+    public init?(payload: [String: Any]) {
+        guard let ready = NeoCoreSettings.bool(payload["ready"]) else { return nil }
+        self.ready = ready
+        brain = Self.label(payload["brain"])
+        quick = Self.label(payload["quick"])
+        eyes = Self.label(payload["eyes"])
+        brainOK = (payload["brain"] as? [String: Any]).flatMap { NeoCoreSettings.bool($0["ok"]) }
+        voice = Self.line(payload["voice"] as? String, limit: Self.voiceLimit)
+        restartNeeded = NeoCoreSettings.bool(payload["restart_needed"]) ?? false
+    }
+
+    /// A role's label: from the core's object, or the text itself.
+    private static func label(_ value: Any?) -> String? {
+        if let text = value as? String { return line(text, limit: labelLimit) }
+        guard let role = value as? [String: Any] else { return nil }
+        return line(role["label"] as? String, limit: labelLimit)
+    }
+
+    /// One line of at most `limit` characters: control characters (a line
+    /// break) become spaces, the ends are trimmed, and nothing left is `nil`.
+    private static func line(_ text: String?, limit: Int) -> String? {
+        guard let text else { return nil }
+        let flat = String(String.UnicodeScalarView(text.unicodeScalars.map {
+            CharacterSet.controlCharacters.contains($0) ? " " : $0
+        }))
+        let trimmed = flat.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        return String(trimmed.prefix(limit)).trimmingCharacters(in: .whitespaces)
     }
 }
 
@@ -175,6 +260,8 @@ public enum NeoPermission: String, Equatable, Sendable, CaseIterable {
 public enum NeoSettingsIntent: Equatable, Sendable {
     /// Open NEO's chat in the notch.
     case openChat
+    /// Open NEO.app's Brains & Keys window, where its providers and keys are
+    /// set up (the shell's `settings` action). NotchHub never sees a key.
     case apiKeys
     case openLogs
     case restart
@@ -217,10 +304,11 @@ public enum NeoSettingsIntent: Equatable, Sendable {
     }
 }
 
-/// What the NEO section of Settings shows, from four facts: whether the NEO
+/// What the NEO section of Settings shows, from five facts: whether the NEO
 /// feature is on, whether NEO's core is connected, what NEO.app's shell last
-/// reported, and what the core said about its own settings — and one
-/// preference of NotchHub's own, whether the island shows NEO's timers.
+/// reported, what the core said about its own settings and about its brains
+/// — and one preference of NotchHub's own, whether the island shows NEO's
+/// timers.
 public struct NeoSettingsModel: Equatable, Sendable {
 
     /// How much of NEO is there to talk to.
@@ -272,14 +360,23 @@ public struct NeoSettingsModel: Equatable, Sendable {
     /// "Show NEO's timers": NotchHub's own switch, so it is known whether or
     /// not NEO runs.
     public let showsTimers: Bool
+    /// NEO's brains as its core reported them, or `nil` while nobody said
+    /// (NEO is not running, or its core is too old to have Brains & Keys).
+    public let brain: NeoBrainStatus?
 
-    public init(featureOn: Bool, connected: Bool, shell: NeoShellStatus?, core: NeoCoreSettings? = nil, showsTimers: Bool = true) {
+    public init(
+        featureOn: Bool, connected: Bool, shell: NeoShellStatus?, core: NeoCoreSettings? = nil,
+        brain: NeoBrainStatus? = nil, showsTimers: Bool = true
+    ) {
         self.featureOn = featureOn
         self.showsTimers = showsTimers
         let live = featureOn && connected
         // Like the shell's word: a setting from before NEO quit says nothing now.
         wakeWord = live ? core?.wakeWord : nil
         wellbeingCheckins = live ? core?.wellbeingCheckins : nil
+        // …and nor do brains: a key added since may have changed them. A core
+        // run by hand reports them too (its chat needs a model as much).
+        self.brain = live ? brain : nil
         if !featureOn {
             availability = .off
         } else if !connected {
@@ -318,6 +415,30 @@ public struct NeoSettingsModel: Equatable, Sendable {
         case .coreOnly, .ready: return "Running"
         }
     }
+
+    /// Whether the section has a Brain row. It stays while NEO is off or not
+    /// running — dimmed, like the permissions, so the section does not jump
+    /// as NEO comes and goes; only a running core too old to report its
+    /// brains has none.
+    public var showsBrain: Bool { brain != nil || !isRunning }
+
+    /// The Brain row's value: the model that does NEO's tasks, "Not set up"
+    /// while NEO has no model to ask, "—" while nobody said.
+    public var brainLabel: String {
+        guard let brain else { return "—" }
+        guard brain.ready else { return "Not set up" }
+        return brain.brain ?? "Ready"
+    }
+
+    /// Whether the Brain row reads as good: NEO has a model to ask, and the
+    /// Brain role's own is not one that cannot answer (a missing or refused
+    /// key — NEO's chat says which).
+    public var brainIsGood: Bool { brain?.ready == true && brain?.brainOK != false }
+
+    /// Whether the Brain row offers "Set up…": NEO has no model yet, and
+    /// NEO.app is there to open its Brains & Keys window. (A core run by hand
+    /// has no window to open: NEO's chat tells the user what to run instead.)
+    public var offersBrainSetup: Bool { brain?.ready == false && isEnabled(.apiKeys) }
 
     /// The line under the section's title.
     public var subtitle: String {

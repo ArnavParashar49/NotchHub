@@ -128,6 +128,10 @@ public struct SystemEvent: Equatable {
         /// What NEO's core said about its own settings ("Listen for 'Neo'"):
         /// at every hello, and whenever one is switched.
         case neoSettings(NeoCoreSettings)
+        /// What NEO's core said about its brains (whether it has a model to
+        /// ask, and which answers each role): at every hello — `nil` from a
+        /// core too old to say — and whenever they change. Never a key.
+        case neoBrains(NeoBrainStatus?)
     }
 
     public let source: Source

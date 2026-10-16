@@ -16,7 +16,10 @@ import NotchHubCore
 /// stages (`confirm`, or the one pending in the `hello`) and its end
 /// (`confirm_done`) are facts too: the island's Allow / Cancel. What the core
 /// says about its own settings (the hello's `wake_word` and
-/// `wellbeing_checkins`, and `settings`) is a `NeoCoreSettings`. NEO's timers
+/// `wellbeing_checkins`, and `settings`) is a `NeoCoreSettings`; what it says
+/// about its brains (the hello's `brains`, and `brains`) a `NeoBrainStatus` —
+/// whether NEO has a model, and each role's by name: never a key, which the
+/// core sends no host and this listener never asks for. NEO's timers
 /// are facts for the island's countdown (`NeoTimers`): the ones counting down
 /// when NotchHub connects (the hello's `timers`), then each one starting or
 /// ending (`activity` events of kind `timer`; any other kind is not ours).
@@ -332,6 +335,9 @@ public final class NeoListener: NSObject, SystemListener {
                         if let settings = Self.coreSettings(in: text) {
                             self.emit(SystemEvent(source: .neo, payload: .neoSettings(settings)))
                         }
+                        if let brains = Self.brainStatus(in: text) {
+                            self.emit(SystemEvent(source: .neo, payload: .neoBrains(brains)))
+                        }
                         for fact in Self.facts(in: text) {
                             self.emit(SystemEvent(source: .neo, payload: .neo(fact)))
                         }
@@ -388,6 +394,27 @@ public final class NeoListener: NSObject, SystemListener {
             let settings = NeoCoreSettings(payload: payload)
             return settings.wakeWord == nil && settings.wellbeingCheckins == nil ? nil : settings
         default: return nil
+        }
+    }
+
+    /// What the core said about its brains, when a message carries it: every
+    /// `hello` — `.some(nil)` from a core too old to have Brains & Keys (or
+    /// one whose `brains` is not NEO's), so nothing from an earlier
+    /// connection lingers — and a `brains` event that is NEO's. `nil` (the
+    /// outer one) for every other message, a `brains` event that is not
+    /// NEO's among them: it says nothing, so what was known stays.
+    public static func brainStatus(in text: String) -> NeoBrainStatus?? {
+        guard let data = text.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String else { return nil }
+        let payload = object["data"] as? [String: Any] ?? [:]
+        switch type {
+        case "hello":
+            return .some((payload["brains"] as? [String: Any]).flatMap(NeoBrainStatus.init(payload:)))
+        case "brains":
+            return NeoBrainStatus(payload: payload).map { .some($0) }
+        default:
+            return nil
         }
     }
 

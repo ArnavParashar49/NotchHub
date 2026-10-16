@@ -233,6 +233,141 @@ struct NeoShellTests {
         }
     }
 
+    // MARK: - Brains & Keys
+
+    /// NEO's `brains` summary as its core sends it (neo2/core/brains.py): each
+    /// role an object, which providers have a key, and nothing else.
+    static let readyBrains: [String: Any] = [
+        "ready": true,
+        "brain": ["ref": "claude@claude-opus-5-5", "provider": "anthropic", "label": "Claude Opus 5.5", "ok": true],
+        "quick": ["ref": "claude@claude-haiku-5-5", "provider": "anthropic", "label": "Claude Haiku 5.5", "ok": true],
+        "eyes": NSNull(),
+        "voice": "live",
+        "providers": ["gemini": true, "anthropic": true, "openai": false, "custom:lab": false],
+        "restart_needed": false,
+    ]
+
+    @Test("NEO's brains are read from the core's object: whether NEO has a model, and each role by name — nothing else is kept")
+    func brainPayload() throws {
+        let status = try #require(NeoBrainStatus(payload: Self.readyBrains))
+        #expect(status == NeoBrainStatus(
+            ready: true, brain: "Claude Opus 5.5", quick: "Claude Haiku 5.5", eyes: nil, brainOK: true, voice: "live", restartNeeded: false
+        ))
+        // Which providers have a key, each role's reference: not read, not kept.
+        let kept = Set(Mirror(reflecting: status).children.compactMap(\.label))
+        #expect(kept == ["ready", "brain", "quick", "eyes", "brainOK", "voice", "restartNeeded"])
+
+        // Nothing set up yet, a restart waiting, and an Eyes brain of its own.
+        let waiting: [String: Any] = [
+            "ready": false,
+            "brain": ["label": "Gemini 3.8 Flash", "ok": false],
+            "quick": ["label": "Gemini 3.8 Flash", "ok": false],
+            "eyes": ["label": "GPT-6 Luna", "ok": false],
+            "voice": "local", "restart_needed": true, "added_later": ["x": 1],
+        ]
+        #expect(NeoBrainStatus(payload: waiting) == NeoBrainStatus(
+            ready: false, brain: "Gemini 3.8 Flash", quick: "Gemini 3.8 Flash", eyes: "GPT-6 Luna", brainOK: false, voice: "local", restartNeeded: true
+        ))
+        // A role may be plain text: then nobody said whether it answers.
+        #expect(NeoBrainStatus(payload: ["ready": true, "brain": "Claude Opus 5.5"]) == NeoBrainStatus(ready: true, brain: "Claude Opus 5.5"))
+        // The least NEO's object says: whether NEO is ready.
+        #expect(NeoBrainStatus(payload: ["ready": false]) == NeoBrainStatus(ready: false))
+    }
+
+    @Test("a brains object that does not say, with a real boolean, whether NEO is ready is not NEO's")
+    func brainPayloadNotNeos() {
+        #expect(NeoBrainStatus(payload: [:]) == nil)
+        #expect(NeoBrainStatus(payload: ["brain": ["label": "Claude Opus 5.5", "ok": true]]) == nil)
+        for odd in ["true", 1, 0, NSNull(), ["ok": true]] as [Any] {
+            #expect(NeoBrainStatus(payload: ["ready": odd, "brain": "Claude Opus 5.5"]) == nil, "\(odd)")
+        }
+        // Inside one of NEO's, a wrong type is no answer.
+        let odd: [String: Any] = [
+            "ready": true, "brain": ["label": 42, "ok": "yes"], "quick": 7, "eyes": ["ok": true],
+            "voice": false, "restart_needed": "true",
+        ]
+        #expect(NeoBrainStatus(payload: odd) == NeoBrainStatus(ready: true))
+        #expect(NeoBrainStatus(payload: ["ready": true, "restart_needed": 1])?.restartNeeded == false)
+    }
+
+    @Test("a brain's name is kept to one short line")
+    func brainLabels() {
+        let long = String(repeating: "m", count: 99)
+        let parsed = NeoBrainStatus(payload: [
+            "ready": true, "brain": ["label": long], "quick": long, "eyes": ["label": "  \n "],
+            "voice": String(repeating: "v", count: 40),
+        ])
+        #expect(parsed?.brain?.count == NeoBrainStatus.labelLimit && parsed?.quick?.count == NeoBrainStatus.labelLimit)
+        #expect(parsed?.eyes == nil) // nothing but blanks is no name
+        #expect(parsed?.voice?.count == 16)
+        // A line break (or any control character) is a space; the ends are trimmed.
+        let broken = NeoBrainStatus(payload: ["ready": true, "brain": ["label": " Claude\nOpus\t5.5\u{7} "]])
+        #expect(broken?.brain == "Claude Opus 5.5")
+        // Cut at the limit, never leaving a trailing space.
+        let spaced = String(repeating: "a", count: NeoBrainStatus.labelLimit - 1) + " tail"
+        #expect(NeoBrainStatus(payload: ["ready": true, "brain": spaced])?.brain == String(repeating: "a", count: NeoBrainStatus.labelLimit - 1))
+        // Names the core sends are kept whole: a middle dot, an accent.
+        let endpoint = "DeepSeek · deepseek-v4-pro"
+        #expect(NeoBrainStatus(payload: ["ready": true, "brain": ["label": endpoint]])?.brain == endpoint)
+    }
+
+    @Test("the Brain row: the model that does NEO's tasks, lit while NEO has one — and no “Set up…”")
+    func brainRowReady() throws {
+        let status = try #require(NeoBrainStatus(payload: Self.readyBrains))
+        let model = NeoSettingsModel(featureOn: true, connected: true, shell: ready, brain: status)
+        #expect(model.brain == status && model.showsBrain)
+        #expect(model.brainLabel == "Claude Opus 5.5" && model.brainIsGood && !model.offersBrainSetup)
+        // A NEO that is ready but named no brain still says so.
+        let unnamed = NeoSettingsModel(featureOn: true, connected: true, shell: ready, brain: NeoBrainStatus(ready: true))
+        #expect(unnamed.brainLabel == "Ready" && unnamed.brainIsGood)
+        // Ready (a backup answers), but the chosen brain cannot (its key was
+        // refused): its name, not lit — NEO's chat says what is wrong.
+        let refused = NeoBrainStatus(ready: true, brain: "Claude Opus 5.5", brainOK: false)
+        let dim = NeoSettingsModel(featureOn: true, connected: true, shell: ready, brain: refused)
+        #expect(dim.brainLabel == "Claude Opus 5.5" && !dim.brainIsGood && !dim.offersBrainSetup)
+        // The rest of the section is as it was.
+        #expect(model.availability == .ready && model.isEnabled(.apiKeys))
+        #expect(model == NeoSettingsModel(featureOn: true, connected: true, shell: ready, brain: status, showsTimers: true))
+    }
+
+    @Test("no brain yet: “Not set up”, and “Set up…” opens NEO.app's Brains & Keys window — the same intent as the Actions row")
+    func brainRowNotSetUp() {
+        let none = NeoBrainStatus(ready: false, brain: "Gemini 3.8 Flash", brainOK: false, voice: "local")
+        let model = NeoSettingsModel(featureOn: true, connected: true, shell: ready, brain: none)
+        #expect(model.showsBrain && model.brainLabel == "Not set up" && !model.brainIsGood)
+        #expect(model.offersBrainSetup && model.isEnabled(.apiKeys))
+        // It asks NEO.app's shell for its settings action: no new command.
+        #expect(NeoSettingsIntent.apiKeys.shellAction == .settings)
+        #expect(NeoSettingsIntent.apiKeys.shellAction?.command == #"{"cmd":"shell","action":"settings"}"#)
+        // A core run by hand has no NEO.app, so no window to open: no button.
+        let byHand = NeoSettingsModel(featureOn: true, connected: true, shell: NeoShellStatus(), brain: none)
+        #expect(byHand.availability == .coreOnly && byHand.brainLabel == "Not set up")
+        #expect(!byHand.offersBrainSetup && !byHand.isEnabled(.apiKeys))
+    }
+
+    @Test("NEO away or off: the Brain row stays, dimmed, and says nothing stale; a core too old to report brains has none")
+    func brainRowUnknown() {
+        let stale = NeoBrainStatus(ready: true, brain: "Claude Opus 5.5", brainOK: true)
+        for model in [
+            NeoSettingsModel(featureOn: true, connected: false, shell: ready, brain: stale),
+            NeoSettingsModel(featureOn: false, connected: true, shell: ready, brain: stale),
+            NeoSettingsModel(featureOn: false, connected: false, shell: nil),
+        ] {
+            #expect(model.brain == nil && model.showsBrain, "\(model.availability)")
+            #expect(model.brainLabel == "—" && !model.brainIsGood && !model.offersBrainSetup, "\(model.availability)")
+        }
+        // Connected to a NEO that sends no brains (from before Brains & Keys):
+        // no Brain row at all — every call made before it existed included.
+        for model in [
+            NeoSettingsModel(featureOn: true, connected: true, shell: ready),
+            NeoSettingsModel(featureOn: true, connected: true, shell: ready, core: NeoCoreSettings(wakeWord: true), showsTimers: false),
+            NeoSettingsModel(featureOn: true, connected: true, shell: nil),
+        ] {
+            #expect(model.brain == nil && !model.showsBrain, "\(model.availability)")
+            #expect(!model.offersBrainSetup, "\(model.availability)")
+        }
+    }
+
     @Test("the foot of the section says why the rows are dim")
     func footnotes() {
         #expect(NeoSettingsModel(featureOn: false, connected: false, shell: nil).footnote == "Turn NEO on to use these")

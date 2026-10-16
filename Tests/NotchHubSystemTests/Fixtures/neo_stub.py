@@ -12,7 +12,7 @@ command a client sends is echoed to stdout as `CMD <json>`, each connection
 as `OPEN <n>`, the Origin it came with as `ORIGIN <origin>` and its role as
 `ROLE <role>` (`-` for none), so the test can check what a client said.
 
-    neo_stub.py PORT TOKEN [drop | confirm | settings | timers]
+    neo_stub.py PORT TOKEN [drop | confirm | settings | timers | brains]
 
 With `drop`, the first connection is closed by the server after the script,
 so the client's reconnect can be watched; later connections stay open.
@@ -41,6 +41,16 @@ timers counting down now (`timers`, soonest first), then `activity` events
 start one (`op: present`), say one went off (`op: end`, `done: true`) and
 cancel one (`op: end`, `done: false`), with an activity of a later kind in
 between that is not the island's. Nothing a client sends is answered.
+
+With `brains`, the stub plays a core with Brains & Keys, as
+neo2/core/brains.py and ws.py report it to every client: the `hello` carries
+`brains` (no model yet: NEO does only simple commands), then a key is saved
+in NEO.app's window and everyone hears a `brains` event (Claude doing NEO's
+tasks), then a `brains` event that is not NEO's (no `ready`), which says
+nothing, and a `brains_detail` — the window's own, which a real core never
+sends a host — that must not count either. No key, no last 4, ever: only
+which providers have one. Nothing a client sends is answered. (No other
+mode's hello has `brains`: an older core, from before Brains & Keys.)
 """
 import asyncio
 import json
@@ -55,6 +65,7 @@ DROP = len(sys.argv) > 3 and sys.argv[3] == "drop"
 CONFIRM = len(sys.argv) > 3 and sys.argv[3] == "confirm"
 SETTINGS = len(sys.argv) > 3 and sys.argv[3] == "settings"
 TIMERS = len(sys.argv) > 3 and sys.argv[3] == "timers"
+BRAINS = len(sys.argv) > 3 and sys.argv[3] == "brains"
 CARD_A = {"action_id": "trash:4d15b0099e5a9d0a", "tool": "trash", "summary": "move report.pdf to the Trash",
           "detail": "/Users/me/Documents/report.pdf", "scopes": [], "app": ""}
 CARD_B = {"action_id": "shell:b7f034d65f0f4e1a", "tool": "shell", "summary": "run a command",
@@ -159,6 +170,26 @@ async def handle(ws):
         await send("activity", activity("end", "timer:0123456789ab", "Eggs", 1760270400.0, False))
         await send("state", {"state": "idle", "job": ""})
 
+    async def brains_script():
+        def role(ref, provider, label, ok):
+            return {"ref": ref, "provider": provider, "label": label, "ok": ok}
+
+        await send("hello", {"state": "idle", "recent": [], "confirm": None, "problems": [
+            "NEO has no AI model yet, so it can only do simple commands. Open Brains & Keys to connect one."],
+            "host_attached": True, "wake_word": True,
+            "brains": {"ready": False, "brain": role("gemini", "gemini", "Gemini 3.8 Flash", False),
+                       "quick": role("gemini", "gemini", "Gemini 3.8 Flash", False), "eyes": None, "voice": "local",
+                       "providers": {"gemini": False, "anthropic": False, "openai": False}, "restart_needed": False}})
+        await asyncio.sleep(0.05)
+        await send("brains", {"ready": True, "brain": role("claude@claude-opus-5-5", "anthropic", "Claude Opus 5.5", True),
+                              "quick": role("claude@claude-haiku-5-5", "anthropic", "Claude Haiku 5.5", True),
+                              "eyes": None, "voice": "local",
+                              "providers": {"gemini": False, "anthropic": True, "openai": False}, "restart_needed": False})
+        await send("problems", {"problems": []})
+        await send("brains", {"brain": "not NEO's"})
+        await send("brains_detail", {"ready": False, "brain": "a window's"})
+        await send("state", {"state": "idle", "job": ""})
+
     async def set_(cmd):
         """`set`, as the core answers it."""
         name, value = str(cmd.get("name") or ""), cmd.get("value")
@@ -178,7 +209,8 @@ async def handle(ws):
 
     clients.add(ws)
     sender = asyncio.create_task(
-        confirm_script() if CONFIRM else settings_script() if SETTINGS else timers_script() if TIMERS else script())
+        confirm_script() if CONFIRM else settings_script() if SETTINGS else timers_script() if TIMERS
+        else brains_script() if BRAINS else script())
     try:
         if DROP and n == 1:
             await sender
