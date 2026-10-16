@@ -4,10 +4,11 @@ import SwiftUI
 /// The NEO section of Settings: the feature's own switch, and NEO.app's menu.
 ///
 /// While the notch hosts NEO, NEO.app keeps no menu-bar item; what that menu
-/// showed and did is here instead — whether NEO runs, the two permissions
-/// macOS grants it, its chat, its keys, its logs, restart, erase, Open at
-/// Login, quit — and one switch of the core's own: "Listen for “Neo”", the
-/// microphone always on for the wake word, or closed until NEO is summoned —
+/// showed and did is here instead — whether NEO runs, which brain does its
+/// tasks, the two permissions macOS grants it, its chat, its Brains & Keys
+/// window, its logs, restart, erase, Open at Login, quit — and one switch of
+/// the core's own: "Listen for “Neo”", the microphone always on for the wake
+/// word, or closed until NEO is summoned —
 /// and one of NotchHub's: "Show NEO's timers", the countdown on the island. A view of `NeoSettingsModel` and nothing more: every tap is a
 /// `NeoSettingsIntent` handed to the app, which alone decides what it means.
 /// Rows whose control has nobody to act on it (NEO is off, or not running)
@@ -33,6 +34,10 @@ struct NeoSettingsSection: View {
                     symbol: "bolt.fill", title: "NEO", value: model.runningLabel, good: model.isRunning,
                     button: model.canStart ? ("Start NEO", .start) : nil
                 )
+                if model.showsBrain {
+                    separator
+                    brainRow
+                }
                 separator
                 permissionRow(.accessibility, symbol: "figure.wave")
                 separator
@@ -46,7 +51,7 @@ struct NeoSettingsSection: View {
             group("Actions") {
                 actionRow("Open NEO chat", symbol: "bubble.left.fill", intent: .openChat, hint: model.hotkey)
                 separator
-                actionRow("API Keys…", symbol: "key.fill", intent: .apiKeys)
+                actionRow("Brains & Keys…", symbol: "key.fill", intent: .apiKeys)
                 separator
                 actionRow("Open Logs", symbol: "doc.text.fill", intent: .openLogs)
                 separator
@@ -156,6 +161,16 @@ struct NeoSettingsSection: View {
 
     // MARK: - Status
 
+    /// "Brain": the model that does NEO's tasks, as NEO's core names it — or
+    /// "Not set up", with a way to NEO.app's Brains & Keys window, while NEO
+    /// has no model to ask. The keys themselves never come here.
+    private var brainRow: some View {
+        statusRow(
+            symbol: "brain", title: "Brain", value: model.brainLabel, good: model.brainIsGood,
+            button: model.offersBrainSetup ? ("Set up…", .apiKeys) : nil
+        )
+    }
+
     private func permissionRow(_ permission: NeoPermission, symbol: String) -> some View {
         let state = model.permission(permission)
         return statusRow(
@@ -173,6 +188,8 @@ struct NeoSettingsSection: View {
                 .font(NeoSettingsMetrics.titleFont)
                 .foregroundStyle(DesignTokens.textPrimary)
                 .lineLimit(1)
+                // A long value (a brain's name) gives way, never the title.
+                .fixedSize(horizontal: true, vertical: false)
             Spacer(minLength: 8)
             Text(value)
                 .font(NeoSettingsMetrics.valueFont)

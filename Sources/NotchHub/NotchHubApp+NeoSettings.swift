@@ -22,6 +22,11 @@ import NotchHubSystem
 ///
 /// And one row is NotchHub's own: "Show NEO's timers", whether the island
 /// counts NEO's timers down (`NeoTimerPreference`). NEO never hears of it.
+///
+/// The Brain row shows what the core says about NEO's brains (`neoBrains`
+/// events): whether NEO has a model to ask, and which one does its tasks.
+/// Setting one up is NEO.app's: "Set up…" and "Brains & Keys…" ask its shell
+/// to open its Brains & Keys window (`.apiKeys`). NotchHub never sees a key.
 extension NotchHubApp {
 
     /// What the NEO section shows right now.
@@ -32,6 +37,7 @@ extension NotchHubApp {
             connected: neoPresence.isConnected,
             shell: neoShellStatus,
             core: neoCoreSettings,
+            brain: neoBrainStatus,
             showsTimers: neoShowsTimers
         )
     }
@@ -42,6 +48,16 @@ extension NotchHubApp {
         guard settings != neoCoreSettings else { return }
         neoCoreSettings = settings
         log("neo settings received (wake word: \(settings.wakeWord.map { $0 ? "on" : "off" } ?? "unknown"), check-ins: \(settings.wellbeingCheckins.map { $0 ? "on" : "off" } ?? "unknown"))")
+        if panel == .settings { refreshPanel() }
+    }
+
+    /// NEO's core said where its brains stand (on connecting — `nil` from a
+    /// core too old to say — and whenever they change: a key saved in NEO's
+    /// Brains & Keys window, a model on this Mac starting).
+    func neoBrainsReceived(_ status: NeoBrainStatus?) {
+        guard status != neoBrainStatus else { return }
+        neoBrainStatus = status
+        log("neo brains received (\(status.map { $0.ready ? "ready" : "not set up" } ?? "unknown"))")
         if panel == .settings { refreshPanel() }
     }
 
@@ -64,7 +80,14 @@ extension NotchHubApp {
             startNeoApp()
         case let .openPermission(permission):
             if let url = URL(string: permission.settingsURL) { NSWorkspace.shared.open(url) }
-        case .apiKeys, .openLogs, .restart, .eraseMemory, .openAtLogin, .quit:
+        case .apiKeys:
+            // NEO.app's Brains & Keys window is a normal window, and this
+            // panel floats above every one: it goes first, so the window is
+            // not opened underneath it — and NEO.app may take the keyboard.
+            closeSettings()
+            yieldToNeoApp()
+            if let action = intent.shellAction { monitor?.neoShell(action) }
+        case .openLogs, .restart, .eraseMemory, .openAtLogin, .quit:
             // NEO.app's own menu action: asked for through its core. Erasing
             // is still NEO's question to ask — it shows its own dialog first.
             if let action = intent.shellAction { monitor?.neoShell(action) }
@@ -95,6 +118,17 @@ extension NotchHubApp {
         applyNeoPanel()
         neoEngageKeyboard()
         scheduleNeoWake(neoNextWake(at: now))
+    }
+
+    /// Lets NEO.app activate itself for the window it is about to show. Since
+    /// macOS 14 an app comes forward with the keyboard only when the active
+    /// one — NotchHub, just clicked — yields to it; without this, NEO's window
+    /// could open with the user's typing still going nowhere.
+    private func yieldToNeoApp() {
+        guard #available(macOS 14.0, *) else { return }
+        let path = URL(fileURLWithPath: NeoSettingsModel.appPath).standardizedFileURL.path
+        guard let neo = NSWorkspace.shared.runningApplications.first(where: { $0.bundleURL?.standardizedFileURL.path == path }) else { return }
+        NSApp.yieldActivation(to: neo)
     }
 
     /// Launches NEO.app, quietly: it is a menu-bar app, and Settings stays in

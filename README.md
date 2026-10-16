@@ -440,6 +440,16 @@ the frame; the page lays itself out for whatever it is given.
   command, like the menu's); the switch moves when the core announces the
   change (`settings`, or the `hello`'s `wake_word`), so it always shows what
   the microphone is doing. It is dim while NEO is not running.
+- **Settings → NEO → Brain** shows the model that does NEO's tasks, by the
+  name NEO's core gives it (“Claude Opus 5.5”), from the `hello`'s `brains`
+  and the `brains` event. It is status only: the core sends no host a key
+  (nor its last four characters), and NotchHub never asks for one. While NEO
+  has no model it reads “Not set up” with **Set up…**, which — like
+  **Brains & Keys…** under Actions — asks NEO.app (the shell's `settings`
+  action) to open its Brains & Keys window, where providers and keys are set
+  up. NotchHub closes its Settings panel first, so that window is not
+  opened underneath it. A NEO from before Brains & Keys sends no `brains`,
+  and the row is not there.
 
 `NeoPresenceModel` (NEO's held state and whether its core is there) and
 `NeoPanelModel` (whether the panel is open) are both pure and clock-driven;

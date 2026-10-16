@@ -123,6 +123,10 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     /// What NEO's core last said about its own settings ("Listen for 'Neo'"):
     /// the switch in the NEO section of Settings shows it. See `+NeoSettings`.
     var neoCoreSettings: NeoCoreSettings?
+    /// What NEO's core last said about its brains (whether it has a model,
+    /// and which answers each role — never a key): the Brain row of the NEO
+    /// section of Settings shows it. See `+NeoSettings`.
+    var neoBrainStatus: NeoBrainStatus?
     /// The page size NEO's page last asked for (a browser card wants more
     /// than the chat); `nil` is the chat's own size.
     var neoPanelRequest: CGSize?
@@ -478,6 +482,8 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             neoShellReceived(status)
         case let .neoSettings(settings):
             neoCoreSettingsReceived(settings)
+        case let .neoBrains(status):
+            neoBrainsReceived(status)
         default:
             break
         }

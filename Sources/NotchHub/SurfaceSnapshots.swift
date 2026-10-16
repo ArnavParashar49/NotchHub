@@ -235,8 +235,9 @@ enum SurfaceSnapshots {
     /// the notch hosts NEO — in each state NEO can be in: running with
     /// everything allowed, missing a permission, a core with no NEO.app, not
     /// running, and switched off — and with "Listen for “Neo”" off (the
-    /// microphone only while summoned) and with "Show NEO's timers" off. Plus
-    /// the features page, for the NEO tile that opens the section. (No scroll
+    /// microphone only while summoned) and with "Show NEO's timers" off, and
+    /// with NEO's Brain row: a brain set up, none yet, one that can't answer.
+    /// Plus the features page, for the NEO tile that opens the section. (No scroll
     /// view: an image renderer cannot draw one.)
     static func settingsRows(geometry: NotchGeometry) -> [Row] {
         let frame = geometry.frame(for: .settings, content: .default)
@@ -285,7 +286,22 @@ enum SurfaceSnapshots {
         // NotchHub's own "Show NEO's timers" switched off — after the pet's
         // page, so every row before keeps its place.
         let timersOff = NeoSettingsModel(featureOn: true, connected: true, shell: ready, core: listens, showsTimers: false)
-        return cases.map { neoRow($0.0, $0.1, $0.2) } + petRows + [neoRow("NEO — its timers off the island", .neo, timersOff)]
+        // NEO's brains, as its core reports them (Brains & Keys) — last, so
+        // every row before keeps its place: a brain set up; none yet ("Set
+        // up…" opens NEO.app's window); and a chosen brain that cannot answer
+        // (its key refused) under the longest name the core sends.
+        let brainReady = NeoBrainStatus(ready: true, brain: "Claude Opus 5.5", quick: "Claude Haiku 5.5", brainOK: true, voice: "live")
+        let noBrain = NeoBrainStatus(ready: false, brain: "Gemini 3.8 Flash", quick: "Gemini 3.8 Flash", brainOK: false, voice: "local")
+        let longName = "Research Lab · " + String(repeating: "m", count: 40) + "-preview-0917"
+        let brainRefused = NeoBrainStatus(ready: true, brain: String(longName.prefix(NeoBrainStatus.labelLimit)), brainOK: false)
+        let brainRows = [
+            ("NEO — a brain set up", brainReady),
+            ("NEO — no brain yet", noBrain),
+            ("NEO — its brain can't answer, a long name", brainRefused),
+        ].map { name, status in
+            neoRow(name, .neo, NeoSettingsModel(featureOn: true, connected: true, shell: ready, core: listens, brain: status))
+        }
+        return cases.map { neoRow($0.0, $0.1, $0.2) } + petRows + [neoRow("NEO — its timers off the island", .neo, timersOff)] + brainRows
     }
 
     // MARK: - Lid
