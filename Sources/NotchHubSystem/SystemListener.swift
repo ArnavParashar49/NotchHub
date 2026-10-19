@@ -118,9 +118,10 @@ public final class SystemMonitor {
         add(.codingAgent, "codingAgent") { CodingAgentListener(emit: $0) }
         if enabled(.neo) {
             // With NEO's page installed NotchHub hosts NEO's whole UI, and
-            // says so to the core; without it, the lane alone.
-            let hostsUI = NeoUIBundle.installedFolder() != nil
-            specs.append(ListenerSpec(id: hostsUI ? "neo+ui" : "neo") { NeoListener(hostsUI: hostsUI, emit: $0) })
+            // says so to the core; without it, the lane alone. Looked up on
+            // every connection, so a NEO installed after NotchHub started
+            // still moves into the notch.
+            specs.append(ListenerSpec(id: "neo") { NeoListener(hostsUI: NeoUIBundle.installedFolder() != nil, emit: $0) })
         }
         if enabled(.appDetails) {
             // Its configuration is part of its identity: toggling Coding Agent

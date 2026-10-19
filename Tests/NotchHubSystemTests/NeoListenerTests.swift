@@ -405,6 +405,16 @@ struct NeoListenerStubTests {
     }()
 
     /// Collects facts from whatever thread the listener emits on.
+    /// A Bool read on the listener's queue and set by the test.
+    private final class Flag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored = false
+        var value: Bool {
+            get { lock.lock(); defer { lock.unlock() }; return stored }
+            set { lock.lock(); stored = newValue; lock.unlock() }
+        }
+    }
+
     private final class Recorder: @unchecked Sendable {
         private let lock = NSLock()
         private var facts: [NeoFact] = []
@@ -719,6 +729,27 @@ struct NeoListenerStubTests {
         #expect(Date().timeIntervalSince(began) < 1)
         #expect(await waitFor { stub.lines.contains("CMD " + NeoListener.hostWindowCommand) })
         #expect(recorder.snapshot.last == .connected(false))
+    }
+
+    @Test("NEO's page installed after NotchHub started: the next connection takes NEO's UI", .enabled(if: NeoListenerStubTests.available))
+    func hostsUILater() async throws {
+        let stub = try Stub(drop: false)
+        defer { stub.stop() }
+        #expect(await waitFor { stub.lines.contains("READY") })
+
+        let installed = Flag()
+        let listener = NeoListener(url: URL(string: "ws://127.0.0.1:\(stub.port)/")!, tokenFile: stub.tokenFile, reconnectDelay: 0.2, hostsUI: installed.value) { _ in }
+        listener.start()
+        #expect(await waitFor { stub.lines.filter { $0.hasPrefix("CMD ") }.count == 2 })
+        listener.stop() // it never took the UI, so it hands nothing back
+        #expect(!stub.lines.contains("CMD " + NeoListener.hostNotchCommand))
+        #expect(!stub.lines.contains("CMD " + NeoListener.hostWindowCommand))
+
+        installed.value = true // NEO's install put its page in place
+        listener.start()
+        #expect(await waitFor { stub.lines.contains("CMD " + NeoListener.hostNotchCommand) })
+        listener.stop()
+        #expect(await waitFor { stub.lines.contains("CMD " + NeoListener.hostWindowCommand) })
     }
 
     /// NEO's page, served by `NeoSchemeHandler` from a temp folder into a

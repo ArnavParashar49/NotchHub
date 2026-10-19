@@ -80,7 +80,14 @@ public final class NeoListener: NSObject, SystemListener {
     private let url: URL
     private let tokenFile: URL
     private let reconnectDelay: TimeInterval
-    private let hostsUI: Bool
+    /// Asked on every connection, not once: NEO's page may be installed
+    /// after NotchHub started (NEO set up on a Mac where NotchHub already
+    /// ran), and the next connection — NEO's install restarts its core —
+    /// then takes NEO's UI into the notch without NotchHub restarting.
+    private let hostsUI: () -> Bool
+    /// Whether this connection took NEO's UI (`hostsUI` when it connected):
+    /// only then is the UI handed back as the listener stops.
+    private var hosting = false
     private let emit: (SystemEvent) -> Void
 
     /// Every piece of state below is touched only on this queue. The session
@@ -103,12 +110,13 @@ public final class NeoListener: NSObject, SystemListener {
     private var lastCameraFrameAt: TimeInterval = 0
 
     /// - Parameter hostsUI: whether NotchHub has NEO's UI to show in its
-    ///   panel (`NeoUIBundle`), and so takes NEO's UI into the notch.
+    ///   panel (`NeoUIBundle`), and so takes NEO's UI into the notch —
+    ///   evaluated again on every connection.
     public init(
         url: URL = NeoListener.defaultURL,
         tokenFile: URL = NeoListener.defaultTokenFile,
         reconnectDelay: TimeInterval = NeoListener.defaultReconnectDelay,
-        hostsUI: Bool = false,
+        hostsUI: @autoclosure @escaping () -> Bool = false,
         emit: @escaping (SystemEvent) -> Void
     ) {
         self.url = url
@@ -141,7 +149,7 @@ public final class NeoListener: NSObject, SystemListener {
             reconnect = nil
             let socket = task
             task = nil
-            if let socket, isConnected, hostsUI {
+            if let socket, isConnected, hosting {
                 socket.send(.string(Self.hostWindowCommand)) { _ in
                     socket.cancel(with: .goingAway, reason: nil)
                     handedBack.signal()
@@ -273,7 +281,8 @@ public final class NeoListener: NSObject, SystemListener {
         // Queued behind the handshake: no camera frames until NotchHub's
         // camera panel is actually on screen (`setCameraVisible(true)`).
         task.send(.string(Self.cameraOffCommand)) { _ in }
-        if hostsUI {
+        hosting = hostsUI()
+        if hosting {
             // NEO's UI is in the notch from here on: NEO.app hides its window.
             task.send(.string(Self.hostNotchCommand)) { _ in }
         }
