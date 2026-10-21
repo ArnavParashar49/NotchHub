@@ -7,10 +7,9 @@ struct NeoQuietKeysTests {
 
     let t0 = Date(timeIntervalSinceReferenceDate: 800_000_000)
 
-    @Test("the fold holds them, and they go back once the retract is home — once, never sooner")
+    @Test("a fold gives them back as it starts — once")
     func goBackWhenHome() {
-        #expect(NeoQuietKeys.returnDelay == DesignTokens.retractFadeDelay)
-        #expect(NeoQuietKeys.returnDelay >= 0.4, "the retract's visible travel and the content's exit are over")
+        #expect(NeoQuietKeys.returnDelay == 0, "the keys go back as the fold starts: no key typed after Esc is lost")
         var keys = NeoQuietKeys()
         #expect(keys.phase == .none && !keys.isTaken)
         keys.take()

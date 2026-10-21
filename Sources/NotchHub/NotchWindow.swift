@@ -458,15 +458,19 @@ final class NotchWindow: NSPanel {
         makeFirstResponder(responder)
     }
 
-    /// The panel folds: keys taken quietly go back — once the fold is home.
+    /// The panel folds: keys taken quietly go back.
     ///
     /// Nothing typed reaches the page from now on (the container takes first
     /// responder), and the keyboard goes back `NeoQuietKeys.returnDelay`
-    /// later, with the island at rest behind the notch — or at once if a key
-    /// is pressed meanwhile (`sendEvent`). Never while the island moves.
+    /// later — at once today: the re-order is invisible with no ordering
+    /// animation — or at once if a key is pressed meanwhile (`sendEvent`).
     func releaseQuietKeys() {
         guard let due = quietKeys.fold(isKey: isKeyWindow, at: Date()) else { return }
         makeFirstResponder(container)
+        if due.timeIntervalSinceNow <= 0 {
+            if quietKeys.due(due) { handBackQuietKeys() }
+            return
+        }
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(max(0, due.timeIntervalSinceNow) * 1_000_000_000))
             guard let self, self.quietKeys.due(due) else { return }

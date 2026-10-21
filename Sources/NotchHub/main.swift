@@ -349,9 +349,9 @@ func runSelfTest() -> Int32 {
     let foldStart = Date(timeIntervalSinceReferenceDate: 0)
     let keysBack = foldKeys.fold(isKey: true, at: foldStart)
     var typedKeys = foldKeys
-    check(keysBack == foldStart.addingTimeInterval(DesignTokens.retractFadeDelay) && foldKeys.isReturning && !foldKeys.isTaken
+    check(keysBack == foldStart.addingTimeInterval(NeoQuietKeys.returnDelay) && foldKeys.isReturning && !foldKeys.isTaken
             && foldKeys.due(keysBack!) && foldKeys.phase == .none && typedKeys.typed(),
-          "lens card: on a fold the page lets go of the keys at once; they go back once the retract is home (or on the next key pressed)")
+          "lens card: on a fold the page lets go of the keys and they go back at once (no key typed after Esc is lost)")
 
     // --- The first click ---
     // A surface that comes up under a still cursor takes the very next

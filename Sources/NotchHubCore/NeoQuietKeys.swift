@@ -5,21 +5,19 @@ import Foundation
 ///
 /// Keys taken quietly go back by ordering the island's window out and
 /// straight back in — what ends a non-activating panel's key status (the
-/// window server hands the keyboard to the active app, the user's). That
-/// never happens while the island moves: the panel folds with its keys
-/// still held, the page no longer first responder (nothing typed reaches
-/// the card), and they go back once the retract is home (`returnDelay`) —
-/// or at once when a key is pressed before then: the user typing into their
-/// own app again outranks the wait.
+/// window server hands the keyboard to the active app, the user's). With
+/// the window's ordering animation off (`animationBehavior = .none`) that
+/// re-order is invisible — the window server never shows the island leave
+/// and the fold's frames are the chat's (measured) — so the keys go back
+/// the moment the fold starts (`returnDelay` 0): the user's next key lands
+/// in their own app, never swallowed by a wait.
 ///
 /// Pure: the window asks it what to do, and does it.
 public struct NeoQuietKeys: Equatable, Sendable {
-    /// How long after the fold starts the keys go back: once the retract is
-    /// home — the moment the island itself counts it done and starts fading
-    /// the surface (`DesignTokens.retractFadeDelay`), hidden behind the
-    /// physical notch. Every visible step of the fold (the content's exit, the
-    /// spring's travel) is over by then.
-    public static let returnDelay: TimeInterval = DesignTokens.retractFadeDelay
+    /// How long after the fold starts the keys go back: at once. Waiting for
+    /// the retract to be home (0.44 s) cost the user's first key typed after
+    /// Esc, and with no ordering animation the re-order shows nothing.
+    public static let returnDelay: TimeInterval = 0
 
     public enum Phase: Equatable, Sendable {
         /// The island holds no keys of the card's.
