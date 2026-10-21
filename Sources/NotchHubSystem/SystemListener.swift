@@ -238,6 +238,18 @@ public final class SystemMonitor {
         entries.compactMap { $0.listener as? NeoListener }.forEach { $0.stopCamera(sid: sid) }
     }
 
+    /// Search Screen's card: NotchHub's panel will open for it (through the
+    /// NEO listener, only while it hosts NEO's UI).
+    public func neoLensCardShown(cid: String) {
+        entries.compactMap { $0.listener as? NeoListener }.forEach { $0.lensCardShown(cid: cid) }
+    }
+
+    /// Search Screen's card closed from here (the panel folded, or can't
+    /// show it): `why` is fold, away, unshown or esc.
+    public func neoLensCardClose(cid: String, why: String) {
+        entries.compactMap { $0.listener as? NeoListener }.forEach { $0.lensCardClose(cid: cid, why: why) }
+    }
+
     /// Asks the meeting listener to read the call's state again soon.
     public func refreshMeeting() {
         entries.compactMap { $0.listener as? MeetingListener }.forEach { $0.pollSoon() }

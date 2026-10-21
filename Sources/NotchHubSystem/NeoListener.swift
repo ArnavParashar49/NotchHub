@@ -46,7 +46,16 @@ import NotchHubCore
 ///   'Neo'" or "Gentle check-ins" there — the core takes it from a host;
 /// - `confirm` (`send(_:)` with an answer), when the user presses Allow or
 ///   Cancel under the notch — the very command NEO's own page sends from its
-///   card, naming the card's action id.
+///   card, naming the card's action id;
+/// - when NotchHub hosts NEO's UI, Search Screen's card: `lens_card_hello` on
+///   every connection, right after `ui_host notch` (with the display the
+///   island is on, when known), so the core may hand an area's results to the
+///   notch; `lens_card_shown`, naming the card, when the panel will open for
+///   it (`lensCardShown(cid:)`); and `lens_card_close` with why — fold, away,
+///   unshown, esc — when the panel folds without it or can't show it
+///   (`lensCardClose(cid:why:)`). Of a card the core tells this connection
+///   only its id, whether it is open and why it closed (`lens_card`, a fact):
+///   what it shows goes to NEO's page alone.
 ///
 /// It connects as a HOST: `role=host` in the query beside the token. The
 /// core gives the menu's actions to a host alone, and only a native client
@@ -77,6 +86,8 @@ public final class NeoListener: NSObject, SystemListener {
     public static let songHelloCommand = #"{"cmd":"song_hello"}"#
     /// NEO's UI lives in the notch: NEO.app keeps its window hidden.
     public static let hostNotchCommand = #"{"cmd":"ui_host","host":"notch"}"#
+    /// What a Search Screen card's close may say from here.
+    public static let lensCardCloseWhys: Set<String> = ["fold", "away", "unshown", "esc"]
     /// …and it is NEO.app's again.
     public static let hostWindowCommand = #"{"cmd":"ui_host","host":"window"}"#
 
@@ -88,6 +99,9 @@ public final class NeoListener: NSObject, SystemListener {
     /// ran), and the next connection — NEO's install restarts its core —
     /// then takes NEO's UI into the notch without NotchHub restarting.
     private let hostsUI: () -> Bool
+    /// The display the island is on (its `NSScreenNumber`), for the core's
+    /// Search Screen to fly an area to the right notch; `nil` when unknown.
+    private let islandDisplay: () -> UInt32?
     /// Whether this connection took NEO's UI (`hostsUI` when it connected):
     /// only then is the UI handed back as the listener stops.
     private var hosting = false
@@ -120,12 +134,14 @@ public final class NeoListener: NSObject, SystemListener {
         tokenFile: URL = NeoListener.defaultTokenFile,
         reconnectDelay: TimeInterval = NeoListener.defaultReconnectDelay,
         hostsUI: @autoclosure @escaping () -> Bool = false,
+        islandDisplay: @escaping () -> UInt32? = { NeoIslandDisplay.current },
         emit: @escaping (SystemEvent) -> Void
     ) {
         self.url = url
         self.tokenFile = tokenFile
         self.reconnectDelay = reconnectDelay
         self.hostsUI = hostsUI
+        self.islandDisplay = islandDisplay
         self.emit = emit
     }
 
@@ -260,6 +276,48 @@ public final class NeoListener: NSObject, SystemListener {
         }
     }
 
+    // MARK: - Search Screen's card
+
+    /// The panel will open for this card (it was offered, and nothing holds
+    /// the island). Only while hosting NEO's UI, and only to the core there.
+    public func lensCardShown(cid: String) {
+        queue.async { [self] in
+            guard isRunning, isConnected, hosting, let task, let command = Self.lensCardShownCommand(cid: cid) else { return }
+            task.send(.string(command)) { _ in }
+        }
+    }
+
+    /// The card is closed from here: the panel folded without it (`fold`,
+    /// `away`, `esc`), or it can't be shown (`unshown`).
+    public func lensCardClose(cid: String, why: String) {
+        queue.async { [self] in
+            guard isRunning, isConnected, hosting, let task, let command = Self.lensCardCloseCommand(cid: cid, why: why) else { return }
+            task.send(.string(command)) { _ in }
+        }
+    }
+
+    /// `lens_card_hello`, with the island's display when it is known.
+    static func lensCardHelloCommand(display: UInt32?) -> String {
+        guard let display else { return #"{"cmd":"lens_card_hello"}"# }
+        return #"{"cmd":"lens_card_hello","display":\#(display)}"#
+    }
+
+    /// A card's id as the core makes it: 32 lowercase hex — nothing else is
+    /// ever sent back.
+    static func validCardID(_ cid: String) -> Bool {
+        cid.utf8.count == 32 && cid.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+    }
+
+    static func lensCardShownCommand(cid: String) -> String? {
+        guard validCardID(cid) else { return nil }
+        return #"{"cmd":"lens_card_shown","cid":"\#(cid)"}"#
+    }
+
+    static func lensCardCloseCommand(cid: String, why: String) -> String? {
+        guard validCardID(cid), lensCardCloseWhys.contains(why) else { return nil }
+        return #"{"cmd":"lens_card_close","cid":"\#(cid)","why":"\#(why)"}"#
+    }
+
     /// `camera_stop`, naming the session when it is known.
     static func cameraStopCommand(sid: String?) -> String {
         guard let sid, !sid.isEmpty,
@@ -288,6 +346,8 @@ public final class NeoListener: NSObject, SystemListener {
         if hosting {
             // NEO's UI is in the notch from here on: NEO.app hides its window.
             task.send(.string(Self.hostNotchCommand)) { _ in }
+            // …and Search Screen may hand an area's results to the notch.
+            task.send(.string(Self.lensCardHelloCommand(display: islandDisplay()))) { _ in }
         }
         // Recover an in-flight song card if NotchHub connects after it opened.
         task.send(.string(Self.songHelloCommand)) { _ in }
@@ -502,9 +562,23 @@ public final class NeoListener: NSObject, SystemListener {
             return [.confirmDone(id)]
         case "activity":
             return timerActivity(payload).map { [$0] } ?? []
+        case "lens_card":
+            return lensCard(payload).map { [$0] } ?? []
         default:
             return []
         }
+    }
+
+    /// Search Screen's card (`lens_card`): its id, whether it is open, and
+    /// why it closed — exactly what the core tells a host. Anything with a
+    /// malformed id, or without a real boolean `open`, is nothing; an odd
+    /// `why` is "done".
+    private static func lensCard(_ payload: [String: Any]) -> NeoFact? {
+        guard let cid = payload["cid"] as? String, validCardID(cid),
+              let number = payload["open"] as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
+        let raw = payload["why"] as? String ?? ""
+        let why = raw.utf8.count <= 16 && raw.utf8.allSatisfy({ (97...122).contains($0) || $0 == 95 }) ? raw : "done"
+        return .lensCard(cid: cid, open: number.boolValue, why: number.boolValue ? why : (why.isEmpty ? "done" : why))
     }
 
     /// One of NEO's timers starting (`op: present`) or over (`op: end`,

@@ -174,6 +174,37 @@ struct NeoListenerParsingTests {
         #expect(NeoListener.facts(in: #"{"type":"song_close","data":{"sid":"m"},"ts":1}"#) == [.card(.song, open: false)])
     }
 
+    @Test("Search Screen's card is its id, whether it is open and why — a bad id or no real open is nothing, an odd why is \"done\"")
+    func lensCard() {
+        let cid = String(repeating: "ab12", count: 8)
+        #expect(NeoListener.facts(in: #"{"type":"lens_card","data":{"cid":"\#(cid)","open":true},"ts":1}"#) == [.lensCard(cid: cid, open: true, why: "")])
+        #expect(NeoListener.facts(in: #"{"type":"lens_card","data":{"cid":"\#(cid)","open":false,"why":"continue"},"ts":1}"#) == [.lensCard(cid: cid, open: false, why: "continue")])
+        #expect(NeoListener.facts(in: #"{"type":"lens_card","data":{"cid":"\#(cid)","open":false},"ts":1}"#) == [.lensCard(cid: cid, open: false, why: "done")])
+        #expect(NeoListener.facts(in: #"{"type":"lens_card","data":{"cid":"\#(cid)","open":false,"why":"<b>evil</b>"},"ts":1}"#) == [.lensCard(cid: cid, open: false, why: "done")])
+        #expect(NeoListener.facts(in: #"{"type":"lens_card","data":{"cid":"\#(cid)","open":false,"why":"a_very_long_reason_word"},"ts":1}"#) == [.lensCard(cid: cid, open: false, why: "done")])
+        for bad in [#"{"cid":"\#(cid.uppercased())","open":true}"#, #"{"cid":"short","open":true}"#, #"{"cid":"\#(cid)"}"#,
+                    #"{"cid":"\#(cid)","open":1}"#, #"{"open":true}"#] {
+            #expect(NeoListener.facts(in: #"{"type":"lens_card","data":\#(bad),"ts":1}"#) == [], "\(bad)")
+        }
+        // The results themselves are NEO's page's: a host is never told them, and reads nothing of them.
+        #expect(NeoListener.facts(in: #"{"type":"lens_answer","data":{"cid":"\#(cid)","sel":1,"state":"done","title":"x"},"ts":1}"#) == [])
+    }
+
+    @Test("Search Screen's three commands: the hello with the island's display (or none), shown and close naming the card")
+    func lensCardCommands() {
+        let cid = String(repeating: "ab12", count: 8)
+        #expect(NeoListener.lensCardHelloCommand(display: 69_734_208) == #"{"cmd":"lens_card_hello","display":69734208}"#)
+        #expect(NeoListener.lensCardHelloCommand(display: nil) == #"{"cmd":"lens_card_hello"}"#)
+        #expect(NeoListener.lensCardShownCommand(cid: cid) == #"{"cmd":"lens_card_shown","cid":"\#(cid)"}"#)
+        #expect(NeoListener.lensCardCloseCommand(cid: cid, why: "away") == #"{"cmd":"lens_card_close","cid":"\#(cid)","why":"away"}"#)
+        for why in ["fold", "away", "unshown", "esc"] { #expect(NeoListener.lensCardCloseCommand(cid: cid, why: why) != nil) }
+        #expect(NeoListener.lensCardCloseCommand(cid: cid, why: "x") == nil) // (the page's own words, not a host's)
+        #expect(NeoListener.lensCardShownCommand(cid: "\"}") == nil && NeoListener.lensCardCloseCommand(cid: "x", why: "fold") == nil)
+        for command in [NeoListener.lensCardHelloCommand(display: 7), NeoListener.lensCardShownCommand(cid: cid)!, NeoListener.lensCardCloseCommand(cid: cid, why: "fold")!] {
+            #expect((try? JSONSerialization.jsonObject(with: Data(command.utf8))) as? [String: Any] != nil, "\(command)")
+        }
+    }
+
     @Test("a camera already on when NotchHub connects comes back from the hello: its state, then its opening")
     func helloCameraLive() {
         let live = #"{"sid":"cam-9","status":"analysing","labels":["mug"],"boxes":[{"id":1,"x":0.1,"y":0.1,"w":0.2,"h":0.2,"label":"mug","score":0.8}],"popout":false,"reason":"look"}"#
@@ -803,19 +834,22 @@ struct NeoListenerStubTests {
         #expect(stub.lines.filter { $0.hasPrefix("CMD ") } == ["CMD " + NeoListener.cameraOffCommand, "CMD " + NeoListener.songHelloCommand])
     }
 
-    @Test("hosting NEO's UI it says so on connecting, and hands the UI back as it stops", .enabled(if: NeoListenerStubTests.available))
+    @Test("hosting NEO's UI it says so on connecting — and that it shows Search Screen's cards — and hands the UI back as it stops", .enabled(if: NeoListenerStubTests.available))
     func hostsUI() async throws {
         let stub = try Stub(drop: false)
         defer { stub.stop() }
         #expect(await waitFor { stub.lines.contains("READY") })
 
         let recorder = Recorder()
-        let listener = NeoListener(url: URL(string: "ws://127.0.0.1:\(stub.port)/")!, tokenFile: stub.tokenFile, reconnectDelay: 0.2, hostsUI: true) { recorder.record($0) }
+        let listener = NeoListener(url: URL(string: "ws://127.0.0.1:\(stub.port)/")!, tokenFile: stub.tokenFile, reconnectDelay: 0.2, hostsUI: true,
+                                   islandDisplay: { 7 }) { recorder.record($0) }
         listener.start()
-        #expect(await waitFor { stub.lines.filter { $0.hasPrefix("CMD ") }.count == 3 })
+        #expect(await waitFor { stub.lines.filter { $0.hasPrefix("CMD ") }.count == 4 })
+        // …and, hosting, that Search Screen may hand an area's results to this notch (on display 7).
         #expect(stub.lines.filter { $0.hasPrefix("CMD ") } == [
             "CMD " + NeoListener.cameraOffCommand,
             "CMD " + NeoListener.hostNotchCommand,
+            "CMD " + NeoListener.lensCardHelloCommand(display: 7),
             "CMD " + NeoListener.songHelloCommand,
         ])
 
