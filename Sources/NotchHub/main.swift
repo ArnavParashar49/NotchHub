@@ -315,6 +315,28 @@ func runSelfTest() -> Int32 {
         )
     }
     check(quiet.editing, "lens card: with the keys taken quietly, ⌘C ⌘V ⌘X ⌘A ⌘Z ⇧⌘Z reach the page; other shortcuts are left alone")
+    let route: (pageFirst: Bool, leftAlone: Bool, notQuiet: Bool) = MainActor.assumeIsolated {
+        let copyKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: 0, context: nil,
+                                       characters: "c", charactersIgnoringModifiers: "c", isARepeat: false, keyCode: 8)!
+        var order: [String] = []
+        let taken = NotchWindow.routeKeyEquivalent(copyKey, quiet: true, page: { order.append("page"); return true },
+                                                   send: { order.append(NSStringFromSelector($0)); return true })
+        let pageFirst = taken && order == ["page"]
+        order = []
+        let sent = NotchWindow.routeKeyEquivalent(copyKey, quiet: true, page: { order.append("page"); return false },
+                                                  send: { order.append(NSStringFromSelector($0)); return true })
+        let leftAlone = sent && order == ["page", "copy:"]
+        order = []
+        let loud = NotchWindow.routeKeyEquivalent(copyKey, quiet: false, page: { order.append("page"); return false },
+                                                  send: { order.append(NSStringFromSelector($0)); return true })
+        return (pageFirst, leftAlone, !loud && order == ["page"])
+    }
+    check(route.pageFirst && route.leftAlone && route.notQuiet,
+          "lens card: ⌘C reaches the page first (its own copy of the area's text); only a key it left alone is sent as Copy")
+    check(!NeoLensCardModel.canShow(neoOn: true, hasPage: true, panelFree: true, confirmWaiting: true)
+            && !NeoLensCardModel.canShow(neoOn: true, hasPage: true, panelFree: false, confirmWaiting: false)
+            && NeoLensCardModel.canShow(neoOn: true, hasPage: true, panelFree: true, confirmWaiting: false),
+          "lens card: refused while a question waits for an OK or another panel (teleprompter, camera, Settings…) has the island")
     check(quiet.noKeys, "lens card: the island's window takes no keys until a panel needs them (or takes them quietly)")
 
     // --- The first click ---

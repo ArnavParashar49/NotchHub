@@ -9,9 +9,11 @@ import Foundation
 ///
 /// What the app does about it, pure:
 /// - offered (`lens_card` open): NotchHub says it shows it, unless it can't
-///   (`canShow`: the NEO feature off, no NEO page, NEO's camera holding the
-///   island, Allow / Cancel showing) — then it refuses, and NEO shows its
-///   results beside the selection instead;
+///   (`canShow`: the NEO feature off, no NEO page, another of NotchHub's
+///   panels open — NEO's camera, the teleprompter, the camera mirror, a file
+///   drop, Settings, the Tray, the pet's — or a question of NEO's waiting for
+///   an OK, whether its Allow / Cancel or the chat shows it) — then it
+///   refuses, and NEO shows its results beside the selection instead;
 /// - `openDelay` later the panel opens for it (as the area arrives in the
 ///   notch), and takes the keys without taking them from the user's app;
 /// - closed by the core: the panel folds — except for Continue in NEO and a
@@ -42,6 +44,15 @@ public struct NeoLensCardModel: Equatable, Sendable {
     }
 
     public init() {}
+
+    /// Whether a card may take the island now: the NEO feature on with its
+    /// page loaded, nothing on the island but NEO's own chat panel (or no
+    /// panel at all) — a card never closes a panel of NotchHub's own, never
+    /// pauses a teleprompter or drops a file drop — and no question of NEO's
+    /// waiting for an OK (the card would hide it).
+    public static func canShow(neoOn: Bool, hasPage: Bool, panelFree: Bool, confirmWaiting: Bool) -> Bool {
+        neoOn && hasPage && panelFree && !confirmWaiting
+    }
 
     /// A `lens_card` from the core.
     public mutating func receive(cid: String, open: Bool, why: String, canShow: Bool) -> Step {

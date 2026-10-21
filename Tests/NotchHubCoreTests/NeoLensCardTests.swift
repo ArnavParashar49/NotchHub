@@ -34,6 +34,20 @@ struct NeoLensCardTests {
         #expect(model.receive(cid: cid, open: false, why: "unshown", canShow: true) == .none)
     }
 
+    @Test("it shows only with NEO's page, no other panel on the island, and no question waiting for an OK")
+    func canShow() {
+        #expect(NeoLensCardModel.canShow(neoOn: true, hasPage: true, panelFree: true, confirmWaiting: false))
+        // A question of NEO's waiting — under Allow / Cancel, or on the open chat: the card would hide it.
+        #expect(!NeoLensCardModel.canShow(neoOn: true, hasPage: true, panelFree: true, confirmWaiting: true))
+        // The teleprompter, the camera mirror, a file drop, Settings, the Tray, the pet's or NEO's camera panel.
+        #expect(!NeoLensCardModel.canShow(neoOn: true, hasPage: true, panelFree: false, confirmWaiting: false))
+        #expect(!NeoLensCardModel.canShow(neoOn: false, hasPage: true, panelFree: true, confirmWaiting: false))
+        #expect(!NeoLensCardModel.canShow(neoOn: true, hasPage: false, panelFree: true, confirmWaiting: false))
+        var model = NeoLensCardModel()
+        let can = NeoLensCardModel.canShow(neoOn: true, hasPage: true, panelFree: true, confirmWaiting: true)
+        #expect(model.receive(cid: cid, open: true, why: "", canShow: can) == .refuse(cid))
+    }
+
     @Test("the core closes it: the panel folds — but stays, as the chat, for Continue in NEO and a chat turn")
     func closeFoldOrKeep() {
         #expect(NeoLensCardModel.keepsPanel == ["continue", "chat"])

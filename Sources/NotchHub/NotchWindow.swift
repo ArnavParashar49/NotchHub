@@ -448,10 +448,21 @@ final class NotchWindow: NSPanel {
     }
 
     /// Gives back keys taken quietly (the panel folded): nothing is told.
+    ///
+    /// `resignKey()` is only AppKit's notice that key status went — called
+    /// directly it moves nothing, and the island would stay the key window
+    /// (the user's typing landing here). Ordering the window out is what ends
+    /// a non-activating panel's key status: the window server hands the
+    /// keyboard back to the active app — the user's, as NotchHub was never
+    /// activated for these keys — and the island comes straight back, never
+    /// key (`orderFrontRegardless`).
     func releaseQuietKeys() {
         guard quietKey else { return }
         quietKey = false
-        if isKeyWindow { resignKey() }
+        guard isKeyWindow else { return }
+        makeFirstResponder(container) // (no key in between reaches the page)
+        orderOut(nil)
+        orderFrontRegardless()
     }
 
     override func resignKey() {
@@ -462,13 +473,29 @@ final class NotchWindow: NSPanel {
     }
 
     /// With the keys taken quietly there is no menu of NotchHub's to route
-    /// the editing keys through (an accessory app's): they go to the first
-    /// responder — the question box in NEO's page — directly.
+    /// the editing keys through (an accessory app's). The page sees every key
+    /// first — WebKit takes a ⌘-key through the view hierarchy's
+    /// `performKeyEquivalent` (that is how NEO's card hears ⌘C) and sends back
+    /// the ones its page left alone — and only one nobody took goes to the
+    /// first responder (the question box) as the edit action.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if quietKey, let action = Self.editingAction(for: event) {
-            return NSApp.sendAction(action, to: nil, from: self)
-        }
-        return super.performKeyEquivalent(with: event)
+        Self.routeKeyEquivalent(
+            event,
+            quiet: quietKey,
+            page: { super.performKeyEquivalent(with: event) },
+            send: { NSApp.sendAction($0, to: nil, from: self) }
+        )
+    }
+
+    /// The order of `performKeyEquivalent`: the window's views (the page)
+    /// first; then, with the keys taken quietly, an editing key nobody took
+    /// as its edit action. Returns whether the key was taken.
+    static func routeKeyEquivalent(
+        _ event: NSEvent, quiet: Bool, page: () -> Bool, send: (Selector) -> Bool
+    ) -> Bool {
+        if page() { return true }
+        guard quiet, event.type == .keyDown, let action = editingAction(for: event) else { return false }
+        return send(action)
     }
 
     /// ⌘C, ⌘X, ⌘V, ⌘A, ⌘Z and ⇧⌘Z, as the actions an Edit menu would send.

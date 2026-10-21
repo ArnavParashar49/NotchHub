@@ -90,10 +90,18 @@ extension NotchHubApp {
     // MARK: - Search Screen's card
 
     /// Whether the panel can show a Search Screen card now: NEO's page there,
-    /// and nothing holding the island that a card must not take (NEO's
-    /// camera, its Allow / Cancel).
+    /// no panel on the island but NEO's own chat (a card never takes the
+    /// island from NEO's camera, the teleprompter, the camera mirror, a file
+    /// drop, Settings, the Tray or the pet's panel), and no question of NEO's
+    /// waiting for an OK — shown by Allow / Cancel or by the chat, a card
+    /// would hide it (`NeoLensCardModel.canShow`).
     var neoLensCardCanShow: Bool {
-        featureSettings.isEnabled(.neo) && hasNeoUI && panel != .neoCamera && !neoConfirmShowing
+        NeoLensCardModel.canShow(
+            neoOn: featureSettings.isEnabled(.neo),
+            hasPage: hasNeoUI,
+            panelFree: panel == .none || panel == .neo,
+            confirmWaiting: neoConfirm.card != nil
+        )
     }
 
     /// `lens_card` from the core: offered (say it is shown, and open the panel
@@ -129,6 +137,7 @@ extension NotchHubApp {
     /// the keys without taking them from the user's app.
     func neoLensCardDue(cid: String) {
         let now = Date()
+        guard neoLensCard.cid == cid, !neoLensCard.isOpen else { return } // (closed or replaced meanwhile)
         guard neoLensCardCanShow else {
             // Something took the island in those 240 ms: the core closes the card.
             neoLensCard.dropped(cid: cid)

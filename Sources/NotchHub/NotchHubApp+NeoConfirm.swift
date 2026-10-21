@@ -109,6 +109,11 @@ extension NotchHubApp {
     /// cancels; both are the surface's while it shows (a guarded or repeated
     /// Return is swallowed, never passed to a panel underneath).
     func neoConfirmKey(_ code: UInt16, isRepeat: Bool) -> Bool {
+        // Only keys the island was given (a click on it, or a panel of
+        // NotchHub's that had the keyboard): never ones it still holds from
+        // Search Screen's card, which took them without the user's click — a
+        // Return meant for the user's app must never become an Allow.
+        guard window.needsInteraction else { return false }
         guard currentIslandState() == .neoConfirm, NeoConfirmKey.handles(keyCode: code) else { return false }
         if let choice = NeoConfirmKey.choice(forKeyCode: code, isRepeat: isRepeat) {
             neoConfirmChoose(choice, by: "key")
