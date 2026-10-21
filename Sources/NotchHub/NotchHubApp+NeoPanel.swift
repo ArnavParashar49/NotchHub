@@ -42,9 +42,14 @@ extension NotchHubApp {
             neoPanel.close(at: Date())
             log("neo: the chat stays folded — NEO's camera has the island")
         } else if shouldOpen, panel != .neo {
-            guard neoWebHost() != nil else { return }
+            guard let host = neoWebHost() else { return }
             takePanel(.neo)
             renderIsland()
+            // The page hears its panel opened, whichever way (NEO summoned,
+            // the page's own show, a card, a click): a Search Screen card it
+            // was still folding away — opened again before the page went off
+            // screen — gives way to the chat now, as the content comes in.
+            host.emit("neo://opened")
             log("neo: panel open")
         } else if !shouldOpen, panel == .neo {
             log("neo: closing — open=\(neoPanel.isOpen) waiting=\(neoPanel.isWaitingForCore) feature=\(featureSettings.isEnabled(.neo)) ui=\(hasNeoUI)")
