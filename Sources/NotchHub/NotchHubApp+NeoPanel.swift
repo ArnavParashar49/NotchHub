@@ -172,7 +172,9 @@ extension NotchHubApp {
     /// The panel is folding, or another surface takes the island from it: the
     /// card it showed (Search Screen's) closes too — the core hears why ("away"
     /// for a click elsewhere, "fold" for everything else: Esc, the page's
-    /// collapse, another panel, NEO's camera) — and keys taken quietly go back.
+    /// collapse, another panel, NEO's camera) — and keys taken quietly go back
+    /// once the fold is home: the page lets go of them now, the window keeps
+    /// still while the island moves (`NotchWindow.releaseQuietKeys`).
     func neoLensCardFolded() {
         if let cid = neoLensCard.panelFolded() {
             let why = neoLensFoldWhy ?? "fold"

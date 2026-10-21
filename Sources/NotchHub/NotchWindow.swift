@@ -336,6 +336,13 @@ final class NotchWindow: NSPanel {
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
         isReleasedWhenClosed = false
+        // ...nor animate it: every motion of the island is SwiftUI's, inside
+        // a window that never changes size for exactly that reason. With
+        // AppKit's default, ordering the window out (how keys taken quietly
+        // go back) faded and shrank the WHOLE island for a quarter of a
+        // second in the window server — the black, the panel, the pet —
+        // pulling it off the notch, until it popped back in.
+        animationBehavior = .none
 
         contentView = container
 
@@ -433,7 +440,11 @@ final class NotchWindow: NSPanel {
     /// notch: Esc, a click elsewhere (another window becoming key) or an action
     /// that opens something folds it. Every other panel keeps
     /// `needsInteraction`, which activates NotchHub on a click.
-    private(set) var quietKey = false
+    var quietKey: Bool { quietKeys.isTaken }
+
+    /// Where the keys taken quietly are: the card's, going back after a fold,
+    /// or none (`NeoQuietKeys`).
+    private(set) var quietKeys = NeoQuietKeys()
 
     /// The window lost the keys it took quietly (a click elsewhere made
     /// another window key).
@@ -442,12 +453,28 @@ final class NotchWindow: NSPanel {
     /// Takes the keyboard for `responder` quietly: no app activation, no
     /// change of level.
     func takeKeysQuietly(_ responder: NSResponder) {
-        quietKey = true
+        quietKeys.take()
         makeKey()
         makeFirstResponder(responder)
     }
 
-    /// Gives back keys taken quietly (the panel folded): nothing is told.
+    /// The panel folds: keys taken quietly go back — once the fold is home.
+    ///
+    /// Nothing typed reaches the page from now on (the container takes first
+    /// responder), and the keyboard goes back `NeoQuietKeys.returnDelay`
+    /// later, with the island at rest behind the notch — or at once if a key
+    /// is pressed meanwhile (`sendEvent`). Never while the island moves.
+    func releaseQuietKeys() {
+        guard let due = quietKeys.fold(isKey: isKeyWindow, at: Date()) else { return }
+        makeFirstResponder(container)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, due.timeIntervalSinceNow) * 1_000_000_000))
+            guard let self, self.quietKeys.due(due) else { return }
+            self.handBackQuietKeys()
+        }
+    }
+
+    /// Gives the keyboard back to the user's app: nothing is told.
     ///
     /// `resignKey()` is only AppKit's notice that key status went — called
     /// directly it moves nothing, and the island would stay the key window
@@ -455,20 +482,19 @@ final class NotchWindow: NSPanel {
     /// a non-activating panel's key status: the window server hands the
     /// keyboard back to the active app — the user's, as NotchHub was never
     /// activated for these keys — and the island comes straight back, never
-    /// key (`orderFrontRegardless`).
-    func releaseQuietKeys() {
-        guard quietKey else { return }
-        quietKey = false
-        guard isKeyWindow else { return }
-        makeFirstResponder(container) // (no key in between reaches the page)
+    /// key (`orderFrontRegardless`). With no ordering animation
+    /// (`animationBehavior = .none`) the window server never shows the
+    /// window leave.
+    private func handBackQuietKeys() {
+        guard isKeyWindow, !needsInteraction else { return }
         orderOut(nil)
         orderFrontRegardless()
+        log("quiet keys: given back")
     }
 
     override func resignKey() {
         super.resignKey()
-        guard quietKey else { return }
-        quietKey = false
+        guard quietKeys.resigned() else { return }
         onQuietKeyLost?()
     }
 
@@ -533,6 +559,14 @@ final class NotchWindow: NSPanel {
             needsInteraction = true
             onInteractiveClick?()
         }
+        // A key pressed while keys taken quietly are still going back (the
+        // card's panel folding): the user is typing into their own app again
+        // — it has the keyboard from the next key on. This one is nobody's
+        // here (the page has let go of the keys): swallowed, not beeped at.
+        if event.type == .keyDown, quietKeys.typed() {
+            handBackQuietKeys()
+            return
+        }
         // NEO's Allow / Cancel take Return and Esc while they have the
         // keyboard (the window is key): before any panel underneath does.
         if event.type == .keyDown, onKeyDown?(event.keyCode, event.isARepeat) == true {
@@ -562,6 +596,9 @@ final class NotchWindow: NSPanel {
             guard needsInteraction != oldValue else { return }
             container.needsInteraction = needsInteraction
             if needsInteraction {
+                // A panel takes the keys for real: keys a folding card was
+                // still to give back are its now.
+                quietKeys.interaction()
                 ignoresMouseEvents = false
                 // An accessory (LSUIElement) app's window only becomes key once
                 // the app itself is active, so activate before ordering front.

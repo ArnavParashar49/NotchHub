@@ -338,6 +338,20 @@ func runSelfTest() -> Int32 {
             && NeoLensCardModel.canShow(neoOn: true, hasPage: true, panelFree: true, confirmWaiting: false),
           "lens card: refused while a question waits for an OK or another panel (teleprompter, camera, Settings…) has the island")
     check(quiet.noKeys, "lens card: the island's window takes no keys until a panel needs them (or takes them quietly)")
+    let still: Bool = MainActor.assumeIsolated {
+        let window = NotchWindow(geometry: selftestGeometry)
+        window.releaseQuietKeys() // (no keys of a card's: nothing to give back, nothing ordered)
+        return window.animationBehavior == .none && window.quietKeys.phase == .none && !window.isVisible
+    }
+    check(still, "lens card: the island's window has no AppKit ordering animation — giving the keys back never fades or shrinks the island")
+    var foldKeys = NeoQuietKeys()
+    foldKeys.take()
+    let foldStart = Date(timeIntervalSinceReferenceDate: 0)
+    let keysBack = foldKeys.fold(isKey: true, at: foldStart)
+    var typedKeys = foldKeys
+    check(keysBack == foldStart.addingTimeInterval(DesignTokens.retractFadeDelay) && foldKeys.isReturning && !foldKeys.isTaken
+            && foldKeys.due(keysBack!) && foldKeys.phase == .none && typedKeys.typed(),
+          "lens card: on a fold the page lets go of the keys at once; they go back once the retract is home (or on the next key pressed)")
 
     // --- The first click ---
     // A surface that comes up under a still cursor takes the very next
