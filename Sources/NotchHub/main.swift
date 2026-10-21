@@ -292,6 +292,31 @@ func runSelfTest() -> Int32 {
             && NeoConfirmLayout.choice(at: CGPoint(x: confirmFrame.midX, y: confirmButtons[0].rect.midY), in: confirmFrame, notchInset: 32) == nil,
           "confirm: a click lands on the button under it, and on neither between them")
 
+    // --- Search Screen's card in NEO's panel ---
+    let macbook = CGSize(width: 1512, height: 982)
+    check(NeoPanelLayout.pageSize(requested: CGSize(width: 372, height: 200), screen: macbook, minimum: NeoPanelLayout.lensMinimum) == CGSize(width: 372, height: 200)
+            && NeoPanelLayout.pageSize(requested: CGSize(width: 372, height: 200), screen: macbook) == CGSize(width: 372, height: 300),
+          "lens card: 372×200 stays 372×200 while Search Screen's card is open; the chat's minimum stays 300 tall")
+    var lensCard = NeoLensCardModel()
+    let lensCID = String(repeating: "0f", count: 16)
+    check(lensCard.receive(cid: lensCID, open: true, why: "", canShow: true) == .offer(lensCID) && lensCard.due(cid: lensCID) == .open(lensCID)
+            && lensCard.receive(cid: lensCID, open: false, why: "continue", canShow: true) == .close(fold: false)
+            && { var busy = NeoLensCardModel(); return busy.receive(cid: lensCID, open: true, why: "", canShow: false) == .refuse(lensCID) }(),
+          "lens card: offered → shown and opened 240 ms later; Continue in NEO keeps the panel; a busy island refuses it")
+    let quiet: (editing: Bool, noKeys: Bool) = MainActor.assumeIsolated {
+        let editing: (String, NSEvent.ModifierFlags) -> Selector? = { key, flags in
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+                             characters: key, charactersIgnoringModifiers: key, isARepeat: false, keyCode: 0).flatMap(NotchWindow.editingAction(for:))
+        }
+        return (
+            editing("c", .command) == #selector(NSText.copy(_:)) && editing("v", .command) == #selector(NSText.paste(_:))
+                && editing("z", [.command, .shift]) == Selector(("redo:")) && editing("c", .control) == nil && editing("q", .command) == nil,
+            !NotchWindow(geometry: selftestGeometry).canBecomeKey
+        )
+    }
+    check(quiet.editing, "lens card: with the keys taken quietly, ⌘C ⌘V ⌘X ⌘A ⌘Z ⇧⌘Z reach the page; other shortcuts are left alone")
+    check(quiet.noKeys, "lens card: the island's window takes no keys until a panel needs them (or takes them quietly)")
+
     // --- The first click ---
     // A surface that comes up under a still cursor takes the very next
     // click: the hit region is its final frame at once, the window stops

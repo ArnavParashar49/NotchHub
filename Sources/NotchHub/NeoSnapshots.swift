@@ -32,6 +32,10 @@ enum NeoSnapshots {
         /// The idle dock, where it is not the pet's home on the right.
         var dock: PetDock? = nil
         var drawsHardwareNotch: Bool = true
+        /// NEO's panel: the page size it gives, and whether Search Screen's
+        /// card is on it (its smaller minimum).
+        var neoPage: CGSize? = nil
+        var lensCard = false
     }
 
     /// One row's island, as the app would lay it out and draw it right now.
@@ -122,6 +126,10 @@ enum NeoSnapshots {
             content.wingLead = sides.lead
         case .compact:
             content = row.activity.map { IslandMetrics.compact($0, petSlot: PetLayout.barSlot) } ?? .default
+        case .neoPanel:
+            content = .default
+            content.neoPanel = row.neoPage
+            content.neoPanelMinimum = row.lensCard ? NeoPanelLayout.lensMinimum : nil
         default:
             content = .default
         }
@@ -163,12 +171,16 @@ enum NeoSnapshots {
         }()
         let panelHeight = geometry.frame(for: .neoPanel, content: .default).height
         let rowHeight = regionSize?.height ?? (row.state == .neoPanel ? panelHeight + 8 : max(44, NotchGeometry.expandedHeight + 8))
-        let placeholder: AnyView? = row.state == .neoPanel
+        let placeholder: AnyView? = row.state != .neoPanel ? nil : row.lensCard
             ? AnyView(VStack(spacing: 8) {
+                Text("Search Screen's card on NEO's page (neo://app/)").font(.system(size: 12, weight: .semibold))
+                Text("the area · its answer · chips · links · text · follow-ups").font(.system(size: 11))
+                Text("Continue in NEO · where the area went").font(.system(size: 11))
+            }.foregroundStyle(.white.opacity(0.7)).frame(maxWidth: .infinity, maxHeight: .infinity))
+            : AnyView(VStack(spacing: 8) {
                 Text("NEO's chat page (a WKWebView, served from neo://app/)").font(.system(size: 12, weight: .semibold))
                 Text("transcript · confirm buttons · browser, camera and song cards").font(.system(size: 11))
             }.foregroundStyle(.white.opacity(0.7)).frame(maxWidth: .infinity, maxHeight: .infinity))
-            : nil
         let view = IslandView(
             current: row.activity, stackCount: 0, state: row.state, localFrame: local, cornerRadius: 10,
             notchInset: notchHeight, isIdle: row.state == .idle, wingStatus: row.wings ?? WingStatus(),
@@ -217,6 +229,8 @@ enum NeoSnapshots {
             Row(name: "compact (volume), speaking", state: .compact, neo: .speaking, activity: .volume(0.62)),
             Row(name: "expanded (music), thinking", state: .expanded, neo: .thinking, activity: song),
             Row(name: "NEO panel (the chat, \(Int(NeoPanelLayout.standard.width))×\(Int(NeoPanelLayout.standard.height)) under the notch), speaking — no pet", state: .neoPanel, neo: .speaking),
+            Row(name: "NEO panel with Search Screen's card (372×300 under the notch) — no pet", state: .neoPanel, neo: .idle,
+                neoPage: CGSize(width: 372, height: 300), lensCard: true),
         ]
         rows += neoTimerRows()
 

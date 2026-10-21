@@ -130,6 +130,12 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
     /// The page size NEO's page last asked for (a browser card wants more
     /// than the chat); `nil` is the chat's own size.
     var neoPanelRequest: CGSize?
+    /// Search Screen's card: the area NEO's overlay handed to the notch, which
+    /// NEO's page shows in the panel (`NeoLensCardModel`). See `+NeoPanel`.
+    var neoLensCard = NeoLensCardModel()
+    /// Why the panel is folding, for the card it showed: "away" when a click
+    /// elsewhere took the keys; "fold" otherwise.
+    var neoLensFoldWhy: String?
     /// NEO's camera frames are short-lived UI data, held only while the native
     /// camera surface is visible. They are never written to disk.
     let neoCameraStream = NeoCameraStream()
@@ -275,6 +281,9 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
         window.onMediaCommand = { [weak self] command in self?.mediaCommand(command) }
         window.onCancel = { [weak self] in self?.dismissInteractivePanel() }
         window.onInteractiveClick = { [weak self] in self?.neoEngageKeyboard() }
+        window.onQuietKeyLost = { [weak self] in self?.neoQuietKeysLost() }
+        // The island's display, for NEO's Search Screen (an area flies to this notch).
+        NeoIslandDisplay.set((NSScreen.main?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value)
         window.onKeyDown = { [weak self] code, isRepeat in self?.neoConfirmKey(code, isRepeat: isRepeat) ?? false }
         window.onFileDraggedIn = { [weak self] in self?.fileDraggedIn() }
         window.onFileDraggedOut = { [weak self] in self?.fileDraggedOut() }
@@ -675,6 +684,7 @@ final class NotchHubApp: NSObject, NSApplicationDelegate {
             // changes for NEO — the pet is NEO, and a pose is not a size.
             var size = IslandContentSize.default
             size.neoPanel = neoPageSize
+            size.neoPanelMinimum = neoPageMinimum
             return size
         case .neoConfirm:
             // The buttons' surface is a fixed size; the pet keeps its spot

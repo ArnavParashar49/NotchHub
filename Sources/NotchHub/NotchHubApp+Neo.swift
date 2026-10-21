@@ -73,8 +73,10 @@ extension NotchHubApp {
             case .song:
                 if open { updateNeoSongActivity(at: now) } else { finishNeoSongActivity(at: now) }
             case .lens:
-                break // (Search Screen's card comes as `.lensCard`)
+                break // (Search Screen's card comes as `.lensCard`: see `neoLensCardReceive`)
             }
+        case let .lensCard(cid, open, why):
+            neoLensCardReceive(cid: cid, open: open, why: why, at: now)
         case let .cameraCard(state):
             // News for the panel that shows it — never an opening: NEO's
             // `off` just before its close would reopen a camera the user
@@ -101,6 +103,7 @@ extension NotchHubApp {
             neoConfirm.userOpenedChat()
             neoPanel.show(at: now) // summoned by hand: the explicit show
         case .connected(false):
+            neoLensCard.disconnected() // (the core dropped the card with the connection)
             neoPanel.disconnected(at: now)
             if panel == .neoCamera { closePanel() }
             // Not the user's close: the hello after a reconnect may bring a

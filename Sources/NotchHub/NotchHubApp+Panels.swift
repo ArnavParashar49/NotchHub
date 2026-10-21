@@ -148,7 +148,9 @@ extension NotchHubApp {
         releaseCurrentPanel(except: panel)
         if self.panel == .neo, panel != .neo {
             // Another surface takes the island from NEO's panel: the panel's
-            // model must know it is closed, or it would take the island back.
+            // model must know it is closed, or it would take the island back
+            // (and Search Screen's card on it closes).
+            neoLensCardFolded()
             neoPanel.close(at: Date())
         }
         self.panel = panel

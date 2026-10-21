@@ -48,6 +48,7 @@ extension NotchHubApp {
             log("neo: panel open")
         } else if !shouldOpen, panel == .neo {
             log("neo: closing — open=\(neoPanel.isOpen) waiting=\(neoPanel.isWaitingForCore) feature=\(featureSettings.isEnabled(.neo)) ui=\(hasNeoUI)")
+            neoLensCardFolded()
             closePanel()
             // Straight back to the island's resting shape, as if the panel had
             // been an activity that ended — not a bare compact bar waiting for
@@ -77,7 +78,108 @@ extension NotchHubApp {
 
     /// The page size the panel gives right now.
     var neoPageSize: CGSize {
-        NeoPanelLayout.pageSize(requested: neoPanelRequest, screen: window.screenSize)
+        NeoPanelLayout.pageSize(requested: neoPanelRequest, screen: window.screenSize, minimum: neoPageMinimum)
+    }
+
+    /// The least the page is given: the chat's size — or less while Search
+    /// Screen's card is open (it asks for just its content).
+    var neoPageMinimum: CGSize {
+        neoPanel.cards.contains(.lens) ? NeoPanelLayout.lensMinimum : NeoPanelLayout.standard
+    }
+
+    // MARK: - Search Screen's card
+
+    /// Whether the panel can show a Search Screen card now: NEO's page there,
+    /// and nothing holding the island that a card must not take (NEO's
+    /// camera, its Allow / Cancel).
+    var neoLensCardCanShow: Bool {
+        featureSettings.isEnabled(.neo) && hasNeoUI && panel != .neoCamera && !neoConfirmShowing
+    }
+
+    /// `lens_card` from the core: offered (say it is shown, and open the panel
+    /// as the area arrives in the notch), refused, or closed (fold, or stay as
+    /// the chat after Continue in NEO or a chat turn).
+    func neoLensCardReceive(cid: String, open: Bool, why: String, at now: Date) {
+        let wasShowing = neoPanel.cards.contains(.lens)
+        switch neoLensCard.receive(cid: cid, open: open, why: why, canShow: neoLensCardCanShow) {
+        case let .offer(cid):
+            monitor?.neoLensCardShown(cid: cid)
+            log("neo: Search Screen's card offered — the panel opens in \(Int(NeoLensCardModel.openDelay * 1000)) ms")
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(NeoLensCardModel.openDelay * 1_000_000_000))
+                self?.neoLensCardDue(cid: cid)
+            }
+        case let .refuse(cid):
+            monitor?.neoLensCardClose(cid: cid, why: "unshown")
+            log("neo: Search Screen's card refused — the island is taken")
+        case let .close(fold):
+            neoPanel.card(.lens, open: false, at: now)
+            if fold {
+                neoPanel.close(at: now)
+            } else if wasShowing {
+                neoPanel.show(at: now) // (Continue in NEO, a chat turn: the panel stays, as the chat)
+            }
+            log("neo: Search Screen's card closed (\(why))\(fold ? " — the panel folds" : "")")
+        case .open, .none:
+            break
+        }
+    }
+
+    /// `openDelay` after the offer: the panel opens for the card, and takes
+    /// the keys without taking them from the user's app.
+    func neoLensCardDue(cid: String) {
+        let now = Date()
+        guard neoLensCardCanShow else {
+            // Something took the island in those 240 ms: the core closes the card.
+            neoLensCard.dropped(cid: cid)
+            monitor?.neoLensCardClose(cid: cid, why: "unshown")
+            log("neo: Search Screen's card could not open — the island was taken")
+            return
+        }
+        guard case .open = neoLensCard.due(cid: cid) else { return }
+        neoPanel.show(at: now)
+        neoPanel.card(.lens, open: true, at: now)
+        applyNeoPanel()
+        if panel == .neo {
+            neoEngageKeyboardQuietly()
+            log("neo: Search Screen's card is in the panel")
+        } else {
+            neoLensCard.dropped(cid: cid)
+            neoPanel.card(.lens, open: false, at: now)
+            monitor?.neoLensCardClose(cid: cid, why: "unshown")
+            log("neo: Search Screen's card could not open — no panel")
+        }
+        scheduleNeoWake(neoNextWake(at: now))
+    }
+
+    /// Gives the page the keyboard without activating NotchHub: the user's app
+    /// stays in front, and the card's question box takes the keys.
+    func neoEngageKeyboardQuietly() {
+        guard panel == .neo, let host = neoWeb else { return }
+        window.takeKeysQuietly(host.webView)
+        host.emit("neo://show")
+    }
+
+    /// The panel is folding, or another surface takes the island from it: the
+    /// card it showed (Search Screen's) closes too — the core hears why ("away"
+    /// for a click elsewhere, "fold" for everything else: Esc, the page's
+    /// collapse, another panel, NEO's camera) — and keys taken quietly go back.
+    func neoLensCardFolded() {
+        if let cid = neoLensCard.panelFolded() {
+            let why = neoLensFoldWhy ?? "fold"
+            monitor?.neoLensCardClose(cid: cid, why: why)
+            log("neo: Search Screen's card folded (\(why))")
+        }
+        neoLensFoldWhy = nil
+        neoPanel.card(.lens, open: false, at: Date())
+        window.releaseQuietKeys()
+    }
+
+    /// A click elsewhere took the keys from the card: the panel folds.
+    func neoQuietKeysLost() {
+        guard panel == .neo, neoLensCard.isOpen else { return }
+        neoLensFoldWhy = "away"
+        closeNeoPanel()
     }
 
     // MARK: - From the page

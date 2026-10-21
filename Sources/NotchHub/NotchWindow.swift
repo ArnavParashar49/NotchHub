@@ -421,8 +421,70 @@ final class NotchWindow: NSPanel {
         }
     }
 
-    override var canBecomeKey: Bool { needsInteraction }
-    override var canBecomeMain: Bool { needsInteraction }
+    override var canBecomeKey: Bool { needsInteraction || quietKey }
+    override var canBecomeMain: Bool { needsInteraction || quietKey }
+
+    // MARK: - Quiet keys (Search Screen's card in NEO's panel)
+
+    /// The panel has the keyboard WITHOUT NotchHub having been activated: the
+    /// user's app stays the active one (its menu bar, its full-screen Space),
+    /// and the window — a non-activating panel — takes the keys only. Used for
+    /// Search Screen's card, which opens on its own as an area flies into the
+    /// notch: Esc, a click elsewhere (another window becoming key) or an action
+    /// that opens something folds it. Every other panel keeps
+    /// `needsInteraction`, which activates NotchHub on a click.
+    private(set) var quietKey = false
+
+    /// The window lost the keys it took quietly (a click elsewhere made
+    /// another window key).
+    var onQuietKeyLost: (() -> Void)?
+
+    /// Takes the keyboard for `responder` quietly: no app activation, no
+    /// change of level.
+    func takeKeysQuietly(_ responder: NSResponder) {
+        quietKey = true
+        makeKey()
+        makeFirstResponder(responder)
+    }
+
+    /// Gives back keys taken quietly (the panel folded): nothing is told.
+    func releaseQuietKeys() {
+        guard quietKey else { return }
+        quietKey = false
+        if isKeyWindow { resignKey() }
+    }
+
+    override func resignKey() {
+        super.resignKey()
+        guard quietKey else { return }
+        quietKey = false
+        onQuietKeyLost?()
+    }
+
+    /// With the keys taken quietly there is no menu of NotchHub's to route
+    /// the editing keys through (an accessory app's): they go to the first
+    /// responder — the question box in NEO's page — directly.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if quietKey, let action = Self.editingAction(for: event) {
+            return NSApp.sendAction(action, to: nil, from: self)
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    /// ⌘C, ⌘X, ⌘V, ⌘A, ⌘Z and ⇧⌘Z, as the actions an Edit menu would send.
+    static func editingAction(for event: NSEvent) -> Selector? {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command), !flags.contains(.control), !flags.contains(.option) else { return nil }
+        let shift = flags.contains(.shift)
+        switch event.charactersIgnoringModifiers?.lowercased() {
+        case "c" where !shift: return #selector(NSText.copy(_:))
+        case "x" where !shift: return #selector(NSText.cut(_:))
+        case "v" where !shift: return #selector(NSText.paste(_:))
+        case "a" where !shift: return #selector(NSText.selectAll(_:))
+        case "z": return shift ? Selector(("redo:")) : Selector(("undo:"))
+        default: return nil
+        }
+    }
 
     /// Fired as the window takes key status for a click inside
     /// `interactiveFrame`, before the click is delivered.
@@ -437,7 +499,9 @@ final class NotchWindow: NSPanel {
     /// activates and the panel can take typing — then the click lands on
     /// whatever was clicked, so the first click is never swallowed.
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .leftMouseDown, !needsInteraction,
+        // (With the keys taken quietly the window is key already: a click on
+        // the panel must not activate NotchHub.)
+        if event.type == .leftMouseDown, !needsInteraction, !quietKey,
            let interactive = container.interactiveFrame, interactive.contains(event.locationInWindow) {
             needsInteraction = true
             onInteractiveClick?()
