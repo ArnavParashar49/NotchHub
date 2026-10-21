@@ -72,6 +72,8 @@ extension NotchHubApp {
                 }
             case .song:
                 if open { updateNeoSongActivity(at: now) } else { finishNeoSongActivity(at: now) }
+            case .lens:
+                break // (Search Screen's card comes as `.lensCard`)
             }
         case let .cameraCard(state):
             // News for the panel that shows it — never an opening: NEO's

@@ -152,7 +152,7 @@ public struct NeoConfirmModel: Equatable, Sendable {
         case .connected(false):
             clear() // nobody is there to take an answer
         case .connected(true), .state, .transcript, .note, .error, .card, .songCard, .cameraCard, .cameraFrame, .woke,
-             .neoTimers, .neoTimer, .neoTimerEnd:
+             .neoTimers, .neoTimer, .neoTimerEnd, .lensCard:
             break
         }
         return before.0 != card || before.1 != isShowing

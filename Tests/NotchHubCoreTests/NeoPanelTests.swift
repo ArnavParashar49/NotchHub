@@ -57,6 +57,28 @@ struct NeoPanelTests {
         #expect(panel.nextWake(at: at(9)) == nil)
     }
 
+    @Test("Search Screen's card holds the panel open with no quiet fold, and close() lets it go")
+    func lensCardHolds() {
+        var panel = NeoPanelModel()
+        panel.show(at: t0)
+        panel.card(.lens, open: true, at: t0)
+        #expect(panel.isOpen && panel.isHeld && panel.cards == [.lens])
+        panel.receive(state: .idle, at: at(1))
+        #expect(panel.nextWake(at: at(1)) == nil)
+        let ticked = panel.tick(at: at(600))
+        #expect(!ticked && panel.isOpen) // never folds by itself while the card is up
+        panel.card(.lens, open: false, at: at(601))
+        panel.close(at: at(601))
+        #expect(!panel.isOpen && panel.cards.isEmpty)
+        // A Continue in NEO keeps the panel, as the chat, until NEO is quiet again.
+        var kept = NeoPanelModel()
+        kept.show(at: t0)
+        kept.card(.lens, open: true, at: t0)
+        kept.card(.lens, open: false, at: at(1))
+        kept.show(at: at(1))
+        #expect(kept.isOpen && kept.cards.isEmpty)
+    }
+
     @Test("a card opens it, and NEO speaking about it never folds it mid-reply")
     func cardOpens() {
         var panel = NeoPanelModel()
@@ -229,6 +251,22 @@ struct NeoPanelLayoutTests {
         let max = NeoPanelLayout.maxPageSize(screen: screen)
         #expect(max.width == 1000 && abs(max.height - 1117 * 0.7) < 0.001)
         #expect(NeoPanelLayout.pageSize(requested: CGSize(width: 5000, height: 5000), screen: screen) == max)
+    }
+
+    @Test("Search Screen's card may be shorter than the chat, only while it is open; the chat's minimum is unchanged")
+    func lensMinimum() {
+        let macbook = CGSize(width: 1512, height: 982)
+        #expect(NeoPanelLayout.lensMinimum == CGSize(width: 340, height: 160))
+        #expect(NeoPanelLayout.pageSize(requested: CGSize(width: 372, height: 200), screen: macbook, minimum: NeoPanelLayout.lensMinimum) == CGSize(width: 372, height: 200))
+        #expect(NeoPanelLayout.pageSize(requested: CGSize(width: 372, height: 120), screen: macbook, minimum: NeoPanelLayout.lensMinimum) == CGSize(width: 372, height: 160))
+        #expect(NeoPanelLayout.pageSize(requested: CGSize(width: 372, height: 200), screen: macbook) == CGSize(width: 372, height: 300))
+        #expect(NeoPanelLayout.pageSize(requested: CGSize(width: 372, height: 900), screen: macbook, minimum: NeoPanelLayout.lensMinimum).height < 700)
+        let geometry = NotchGeometry.make(screenFrame: CGRect(origin: .zero, size: macbook), safeAreaInsets: NSEdgeInsets(top: 32, left: 0, bottom: 0, right: 0))
+        var content = IslandContentSize.default
+        content.neoPanel = CGSize(width: 372, height: 200)
+        #expect(geometry.frame(for: .neoPanel, content: content).size == CGSize(width: 372, height: 332))
+        content.neoPanelMinimum = NeoPanelLayout.lensMinimum
+        #expect(geometry.frame(for: .neoPanel, content: content).size == CGSize(width: 372, height: 232))
     }
 
     @Test("on the 1512×982 MacBook screen the browser card has 60%×70%; a huge screen is capped")

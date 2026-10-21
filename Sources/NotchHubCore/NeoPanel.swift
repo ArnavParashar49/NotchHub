@@ -2,11 +2,14 @@ import CoreGraphics
 import Foundation
 
 /// A card NEO can open: browser cards use the embedded page; camera and song
-/// cards are rendered by NotchHub's native surfaces.
+/// cards are rendered by NotchHub's native surfaces. `lens` is Search
+/// Screen's card: an area of the screen and its results, on NEO's page
+/// (`NeoLensCardModel` says when the panel opens and folds for it).
 public enum NeoCardKind: String, CaseIterable, Equatable, Sendable {
     case browser
     case camera
     case song
+    case lens
 }
 
 /// A live song-identification update from NEO. The cover is already fetched
@@ -292,6 +295,10 @@ public enum NeoPanelLayout {
     public static let maxWidth: CGFloat = 1000
     public static let maxHeightFraction: CGFloat = 0.7
     public static let maxHeight: CGFloat = 800
+    /// The least a Search Screen card is given (NEO's page asks 372 wide,
+    /// 160–560 tall, for its results): it may be shorter than the chat, and
+    /// only while one is open.
+    public static let lensMinimum = CGSize(width: 340, height: 160)
 
     /// The most the page may have on a screen of `screen`.
     public static func maxPageSize(screen: CGSize) -> CGSize {
@@ -301,14 +308,15 @@ public enum NeoPanelLayout {
         )
     }
 
-    /// The page size the panel gives for a request, never smaller than the
-    /// chat and never more than the screen allows.
-    public static func pageSize(requested: CGSize?, screen: CGSize) -> CGSize {
+    /// The page size the panel gives for a request, never smaller than
+    /// `minimum` (the chat's own size, or `lensMinimum` while a Search Screen
+    /// card is open) and never more than the screen allows.
+    public static func pageSize(requested: CGSize?, screen: CGSize, minimum: CGSize = standard) -> CGSize {
         let limit = maxPageSize(screen: screen)
         let request = requested ?? standard
         return CGSize(
-            width: min(limit.width, max(standard.width, request.width.rounded())),
-            height: min(limit.height, max(standard.height, request.height.rounded()))
+            width: min(limit.width, max(minimum.width, request.width.rounded())),
+            height: min(limit.height, max(minimum.height, request.height.rounded()))
         )
     }
 }

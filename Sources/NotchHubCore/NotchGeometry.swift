@@ -251,7 +251,7 @@ public struct NotchGeometry: Equatable {
         case .teleprompterCompose: return teleprompterComposeFrame
         case .camera: return cameraFrame(expanded: false)
         case .cameraExpanded: return cameraFrame(expanded: true)
-        case .neoPanel: return neoPanelFrame(page: content.neoPanel)
+        case .neoPanel: return neoPanelFrame(page: content.neoPanel, minimum: content.neoPanelMinimum ?? NeoPanelLayout.standard)
         case .neoConfirm: return neoConfirmFrame
         }
     }
@@ -267,8 +267,8 @@ public struct NotchGeometry: Equatable {
     /// NEO's panel: its chat page under the notch strip, centred on the
     /// notch like every other panel, sized to what the page asked for within
     /// `NeoPanelLayout`'s limits for this screen.
-    public func neoPanelFrame(page: CGSize?) -> CGRect {
-        let size = NeoPanelLayout.pageSize(requested: page, screen: CGSize(width: screenWidth, height: screenHeight))
+    public func neoPanelFrame(page: CGSize?, minimum: CGSize = NeoPanelLayout.standard) -> CGRect {
+        let size = NeoPanelLayout.pageSize(requested: page, screen: CGSize(width: screenWidth, height: screenHeight), minimum: minimum)
         return panel(width: size.width, height: (notchFrame.height + size.height).rounded())
     }
 

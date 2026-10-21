@@ -397,8 +397,9 @@ struct NeoListeningLayoutTests {
     @Test("the content size has no room for listening: only the pet's dock, the measured widths, and NEO's panel")
     func noListeningRoom() {
         let labels = Mirror(reflecting: IslandContentSize.default).children.compactMap(\.label)
-        // `expandedSize` is the song popup's own measured size, not listening's.
-        #expect(labels == ["compactLead", "compactTrail", "wingSide", "wingLead", "panelHeight", "expandedSize", "petDock", "neoPanel"])
+        // `expandedSize` is the song popup's own measured size, not listening's; `neoPanelMinimum` the
+        // least NEO's page is given (smaller while Search Screen's card is open).
+        #expect(labels == ["compactLead", "compactTrail", "wingSide", "wingLead", "panelHeight", "expandedSize", "petDock", "neoPanel", "neoPanelMinimum"])
     }
 
     @Test("Ghost Mode hides the glow with the island: it adds no shape of its own")

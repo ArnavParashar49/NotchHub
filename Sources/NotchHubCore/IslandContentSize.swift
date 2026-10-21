@@ -37,6 +37,9 @@ public struct IslandContentSize: Equatable, Sendable {
     /// the panel is that plus the notch strip above it. `nil` is the chat's
     /// standard size.
     public var neoPanel: CGSize? = nil
+    /// The least NEO's page is given: the chat's standard size, or
+    /// `NeoPanelLayout.lensMinimum` while Search Screen's card is open.
+    public var neoPanelMinimum: CGSize? = nil
 
     public init(compactLead: CGFloat, compactTrail: CGFloat, wingSide: CGFloat) {
         self.compactLead = max(0, compactLead)

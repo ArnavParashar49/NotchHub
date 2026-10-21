@@ -54,7 +54,7 @@ public struct NeoPresenceModel: Equatable, Sendable {
             hold.receive(next, at: now)
             noteIdle(wasIdle: wasIdle, at: now)
         case .transcript, .note, .error, .card, .songCard, .cameraCard, .cameraFrame, .woke, .confirm, .confirmDone,
-             .neoTimers, .neoTimer, .neoTimerEnd:
+             .neoTimers, .neoTimer, .neoTimerEnd, .lensCard:
             // NEO's timers count down on their own surface (`NeoTimers`): a
             // timer running is not NEO being busy, and never poses the pet.
             break

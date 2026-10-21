@@ -91,6 +91,10 @@ public enum NeoFact: Equatable, Sendable {
     /// (`done`), or it was cancelled. `title` is the core's, for a timer the
     /// island had not heard of.
     case neoTimerEnd(id: String, title: String, done: Bool)
+    /// Search Screen's card (`lens_card`): an area of the screen the user
+    /// selected, offered to the notch (`open`) or closed (and `why`). Only its
+    /// id: what it shows is NEO's page's alone (`NeoLensCardModel`).
+    case lensCard(cid: String, open: Bool, why: String)
 }
 
 /// Keeps each NEO state on screen for at least `minDwell`, as NEO's own
